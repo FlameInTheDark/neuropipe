@@ -6,7 +6,7 @@ Everything is designed to stay on your machine by default. Pipelines, reports, e
 
 ## Install on Windows
 
-The normal way to install Neuropipe is the [latest Windows installer](https://github.com/FlameInTheDark/neuropipe/releases/latest/download/Neuropipe-latest-windows-amd64-installer.exe). It installs the desktop app without requiring Go, Bun, or Wails.
+The normal way to install Neuropipe is to download the installer from the [latest Neuropipe release](https://github.com/FlameInTheDark/neuropipe/releases/latest). It installs the desktop app without requiring Go, Bun, or Wails.
 
 You can also [browse every release](https://github.com/FlameInTheDark/neuropipe/releases) to download a specific version or the standalone executable.
 
@@ -60,6 +60,6 @@ go test -race ./...
 
 ## Releases
 
-Pull requests and pushes to `main` run the frontend type/build checks plus Go vet and race tests. Conventional commits on `main` create a semantic GitHub release. A second workflow builds the tagged Windows executable and NSIS installer, then attaches both versioned files and stable latest-download aliases to that release.
+Pull requests and pushes to `main` run the frontend type/build checks plus Go vet and race tests. Conventional commits on `main` create a semantic GitHub release. A second workflow builds the tagged Windows executable and NSIS installer, then attaches both to that release.
 
 Use `feat:` for a minor release, `fix:` for a patch release, and add a breaking-change footer for a major release.

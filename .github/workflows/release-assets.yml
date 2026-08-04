@@ -115,19 +115,4 @@ jobs:
           gh release upload "${{ steps.release.outputs.tag }}" `
             "${{ steps.artifacts.outputs.binary }}#Neuropipe-${{ steps.release.outputs.tag }}-windows-amd64.exe" `
             "${{ steps.artifacts.outputs.installer }}#Neuropipe-${{ steps.release.outputs.tag }}-windows-amd64-installer.exe" `
-            "${{ steps.artifacts.outputs.binary }}#Neuropipe-latest-windows-amd64.exe" `
-            "${{ steps.artifacts.outputs.installer }}#Neuropipe-latest-windows-amd64-installer.exe" `
             --clobber
-
-      - name: Publish release after assets are attached
-        if: steps.release.outputs.has_release == 'true'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $release = gh api "repos/${env:GITHUB_REPOSITORY}/releases/tags/${{ steps.release.outputs.tag }}" | ConvertFrom-Json
-          if (-not $release.draft) {
-            throw 'Expected semantic-release to create a draft release before artifact upload.'
-          }
-
-          gh api --method PATCH "repos/${env:GITHUB_REPOSITORY}/releases/$($release.id)" -f draft=false | Out-Null
