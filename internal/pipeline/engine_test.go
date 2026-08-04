@@ -45,6 +45,37 @@ func TestHTTPNodeSendsConfiguredHeadersAndCustomUserAgent(t *testing.T) {
 	}
 }
 
+func TestHTTPResultCanFeedBreakObject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/plain")
+		_, _ = writer.Write([]byte("Blueprint ready"))
+	}))
+	defer server.Close()
+
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("request", "action:http", map[string]any{"url": server.URL, "method": "GET"}),
+		v2Node("break", "data:break_object", map[string]any{"outputs": []any{
+			map[string]any{"id": "body", "label": "Body", "path": "body", "dataType": "text"},
+			map[string]any{"id": "headers", "label": "Headers", "path": "headers", "dataType": "object"},
+		}}),
+		v2Node("notice", "action:notification", map[string]any{"title": "HTTP"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-request", "start", "out", "request", "in"),
+		execEdge("request-notice", "request", "out", "notice", "in"),
+		dataEdge("request-break", "request", "result", "break", "source"),
+		dataEdge("break-notice", "break", "body", "notice", "message"),
+	}}
+
+	sender := &recordingNotificationSender{}
+	if _, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got, want := sender.calls, []notificationCall{{title: "HTTP", message: "Blueprint ready"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notifications = %#v, want %#v", got, want)
+	}
+}
+
 type notificationCall struct {
 	title   string
 	message string
@@ -161,6 +192,12 @@ func TestGetFieldReadsNestedValueFromPacket(t *testing.T) {
 			path:  "result.value",
 			want:  true,
 		},
+		{
+			name:  "HTTP header map and list",
+			value: http.Header{"Content-Type": []string{"application/json"}},
+			path:  "Content-Type.0",
+			want:  "application/json",
+		},
 	}
 
 	for _, test := range tests {
@@ -250,6 +287,23 @@ func TestBuildAndBreakObjectUseConfiguredTypedPins(t *testing.T) {
 func TestBreakObjectReadsListKeyPaths(t *testing.T) {
 	if got, want := valueAtAny(map[string]any{"items": []any{map[string]any{"name": "First"}}}, "items.0.name"), "First"; got != want {
 		t.Fatalf("valueAtAny list path = %#v, want %#v", got, want)
+	}
+}
+
+func TestBlueprintObjectTypeAcceptsNamedMapsAndStructs(t *testing.T) {
+	type pluginResult struct {
+		Message string `json:"message"`
+	}
+	for _, value := range []any{
+		http.Header{"Content-Type": []string{"application/json"}},
+		&pluginResult{Message: "Ready"},
+	} {
+		if !matchesDataType(value, domain.DataObject) {
+			t.Fatalf("matchesDataType(%T, object) = false, want true", value)
+		}
+	}
+	if got, want := valueAtAny(&pluginResult{Message: "Ready"}, "message"), "Ready"; got != want {
+		t.Fatalf("valueAtAny struct field = %#v, want %#v", got, want)
 	}
 }
 

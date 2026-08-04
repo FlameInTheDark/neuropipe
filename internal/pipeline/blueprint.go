@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -912,8 +913,7 @@ func matchesDataType(value any, dataType domain.DataType) bool {
 		_, ok := asNumber(value)
 		return ok
 	case domain.DataObject:
-		_, ok := value.(map[string]any)
-		return ok
+		return isObjectValue(value)
 	case domain.DataList:
 		_, ok := value.([]any)
 		return ok
@@ -931,22 +931,94 @@ func valueAtAny(value any, path string) any {
 	}
 	current := value
 	for _, part := range strings.Split(path, ".") {
-		switch typed := current.(type) {
-		case map[string]any:
-			current = typed[part]
-		case Packet:
-			current = typed[part]
-		case []any:
-			index, err := strconv.Atoi(part)
-			if err != nil || index < 0 || index >= len(typed) {
-				return nil
-			}
-			current = typed[index]
-		default:
+		if next, found := objectValueAt(current, part); found {
+			current = next
+			continue
+		}
+		next, found := listValueAt(current, part)
+		if !found {
 			return nil
 		}
+		current = next
 	}
 	return current
+}
+
+// isObjectValue intentionally accepts JSON-like named maps (including
+// http.Header), structs, and pointers to either. Plugins and Go's standard
+// library regularly return named object types rather than map[string]any.
+func isObjectValue(value any) bool {
+	resolved := dereferenceValue(reflect.ValueOf(value))
+	if !resolved.IsValid() {
+		return false
+	}
+	return resolved.Kind() == reflect.Struct ||
+		(resolved.Kind() == reflect.Map && resolved.Type().Key().Kind() == reflect.String)
+}
+
+func objectValueAt(value any, key string) (any, bool) {
+	resolved := dereferenceValue(reflect.ValueOf(value))
+	if !resolved.IsValid() {
+		return nil, false
+	}
+	switch resolved.Kind() {
+	case reflect.Map:
+		if resolved.Type().Key().Kind() != reflect.String {
+			return nil, false
+		}
+		mapKey := reflect.New(resolved.Type().Key()).Elem()
+		mapKey.SetString(key)
+		item := resolved.MapIndex(mapKey)
+		if !item.IsValid() || !item.CanInterface() {
+			return nil, false
+		}
+		return item.Interface(), true
+	case reflect.Struct:
+		for index := 0; index < resolved.NumField(); index++ {
+			field := resolved.Type().Field(index)
+			if field.PkgPath != "" || field.Name == "" {
+				continue
+			}
+			jsonName := strings.Split(field.Tag.Get("json"), ",")[0]
+			matchesName := key == field.Name || key == strings.ToLower(field.Name) ||
+				(jsonName != "" && jsonName != "-" && key == jsonName)
+			if !matchesName {
+				continue
+			}
+			item := resolved.Field(index)
+			if !item.CanInterface() {
+				return nil, false
+			}
+			return item.Interface(), true
+		}
+	}
+	return nil, false
+}
+
+func listValueAt(value any, key string) (any, bool) {
+	index, err := strconv.Atoi(key)
+	if err != nil || index < 0 {
+		return nil, false
+	}
+	resolved := dereferenceValue(reflect.ValueOf(value))
+	if !resolved.IsValid() || (resolved.Kind() != reflect.Slice && resolved.Kind() != reflect.Array) || index >= resolved.Len() {
+		return nil, false
+	}
+	item := resolved.Index(index)
+	if !item.CanInterface() {
+		return nil, false
+	}
+	return item.Interface(), true
+}
+
+func dereferenceValue(value reflect.Value) reflect.Value {
+	for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer) {
+		if value.IsNil() {
+			return reflect.Value{}
+		}
+		value = value.Elem()
+	}
+	return value
 }
 
 func setObjectPath(object map[string]any, path string, value any) error {
