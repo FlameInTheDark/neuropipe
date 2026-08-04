@@ -1,0 +1,224 @@
+package persistence
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/google/uuid"
+)
+
+const blueprintCatalogMigrationKey = "migration.blueprint-catalog-v3"
+
+// migrateBlueprintCatalog converts only unambiguous packet-era draft nodes to
+// their Blueprint-v2 equivalents. Immutable revisions and execution history
+// remain untouched. Every affected pipeline is paused for user review.
+func (s *Store) migrateBlueprintCatalog(ctx context.Context) error {
+	var completed string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, blueprintCatalogMigrationKey).Scan(&completed)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("read Blueprint catalog migration marker: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx, `SELECT id, draft_definition FROM pipelines WHERE draft_definition LIKE '%logic:%'`)
+	if err != nil {
+		return fmt.Errorf("scan packet-era drafts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	type candidate struct {
+		id         string
+		definition domain.FlowDefinition
+	}
+	candidates := make([]candidate, 0)
+	for rows.Next() {
+		var item candidate
+		var raw string
+		if err := rows.Scan(&item.id, &raw); err != nil {
+			return fmt.Errorf("read packet-era draft: %w", err)
+		}
+		if err := decode(raw, &item.definition); err != nil {
+			return fmt.Errorf("decode packet-era draft %q: %w", item.id, err)
+		}
+		candidates = append(candidates, item)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("scan packet-era drafts: %w", err)
+	}
+	if len(candidates) == 0 {
+		_, err := s.db.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)`, blueprintCatalogMigrationKey, stamp(time.Now().UTC()))
+		return err
+	}
+	if err := s.backupDatabase(ctx, "pre-blueprint-catalog-v3"); err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("start Blueprint catalog migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	for _, candidate := range candidates {
+		definition, issues, changed := migrateBlueprintDefinition(candidate.definition)
+		if !changed {
+			continue
+		}
+		encoded, err := encode(definition)
+		if err != nil {
+			return fmt.Errorf("encode migrated draft %q: %w", candidate.id, err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE pipelines SET draft_definition = ?, status = ?, updated_at = ? WHERE id = ?`, encoded, domain.PipelineDraft, stamp(now), candidate.id); err != nil {
+			return fmt.Errorf("save migrated draft %q: %w", candidate.id, err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE trigger_bindings SET enabled = 0, trusted = 0, updated_at = ? WHERE pipeline_id = ?`, stamp(now), candidate.id); err != nil {
+			return fmt.Errorf("pause migrated triggers %q: %w", candidate.id, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM permissions WHERE pipeline_id = ?`, candidate.id); err != nil {
+			return fmt.Errorf("revoke migrated trust %q: %w", candidate.id, err)
+		}
+		for _, issue := range issues {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO blueprint_migration_issues (id, pipeline_id, issue, detected_at) VALUES (?, ?, ?, ?)`, uuid.NewString(), candidate.id, issue, stamp(now)); err != nil {
+				return fmt.Errorf("record migration issue for %q: %w", candidate.id, err)
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)`, blueprintCatalogMigrationKey, stamp(now)); err != nil {
+		return fmt.Errorf("save Blueprint catalog migration marker: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit Blueprint catalog migration: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) backupDatabase(ctx context.Context, label string) error {
+	backup := filepath.Join(s.root, "neuropipe-"+label+"-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".db")
+	escaped := strings.ReplaceAll(backup, "'", "''")
+	if _, err := s.db.ExecContext(ctx, "VACUUM INTO '"+escaped+"'"); err != nil {
+		return fmt.Errorf("back up database before %s: %w", label, err)
+	}
+	return nil
+}
+
+// migrateBlueprintDefinition returns a revised draft and repair messages. It
+// intentionally refuses to guess packet field/path semantics: users must make
+// those transformations explicit with typed nodes.
+func migrateBlueprintDefinition(definition domain.FlowDefinition) (domain.FlowDefinition, []string, bool) {
+	issues := make([]string, 0)
+	changed := false
+	existingIDs := make(map[string]struct{}, len(definition.Nodes))
+	for _, node := range definition.Nodes {
+		existingIDs[node.ID] = struct{}{}
+	}
+	newNodes := make([]domain.FlowNode, 0)
+	for index := range definition.Nodes {
+		node := &definition.Nodes[index]
+		switch node.Type {
+		case "logic:return":
+			node.Type = "flow:return"
+			changed = true
+		case "logic:reroute":
+			kind, ok := legacyRerouteKind(*node, definition.Edges)
+			if !ok {
+				issues = append(issues, fmt.Sprintf("%s uses a mixed reroute; replace it with separate Flow Reroute or Data Reroute nodes.", node.ID))
+				changed = true
+				continue
+			}
+			if kind == domain.PinData {
+				node.Type = "data:reroute"
+			} else {
+				node.Type = "flow:reroute"
+			}
+			changed = true
+		case "logic:store_value":
+			node.Type = "flow:set_variable"
+			config := flowNodeConfig(node)
+			if value, exists := config["value"]; exists && !hasDataInput(definition.Edges, node.ID, "value") {
+				constantID := uniqueMigrationNodeID(node.ID+"-value", existingIDs)
+				existingIDs[constantID] = struct{}{}
+				newNodes = append(newNodes, domain.FlowNode{ID: constantID, Type: "data:constant", Position: domain.Position{X: node.Position.X - 260, Y: node.Position.Y + 70}, Data: map[string]any{"config": map[string]any{"value": value}}})
+				definition.Edges = append(definition.Edges, domain.FlowEdge{ID: uniqueMigrationEdgeID(node.ID+"-value", definition.Edges), Source: constantID, Target: node.ID, SourceHandle: "value", TargetHandle: "value", Kind: domain.PinData})
+			}
+			delete(config, "value")
+			node.Data["config"] = config
+			changed = true
+		case "logic:set", "logic:extract_value", "logic:condition", "logic:switch", "logic:merge", "logic:filter", "logic:aggregate", "logic:limit":
+			issues = append(issues, fmt.Sprintf("%s uses removed packet-routing node %q; rebuild this step with typed Blueprint data and flow nodes.", node.ID, node.Type))
+			changed = true
+		}
+	}
+	definition.Nodes = append(definition.Nodes, newNodes...)
+	return definition, issues, changed
+}
+
+func flowNodeConfig(node *domain.FlowNode) map[string]any {
+	if node.Data == nil {
+		node.Data = map[string]any{}
+	}
+	config, ok := node.Data["config"].(map[string]any)
+	if !ok {
+		config = map[string]any{}
+	}
+	return config
+}
+
+func hasDataInput(edges []domain.FlowEdge, nodeID, handle string) bool {
+	for _, edge := range edges {
+		if edge.Target == nodeID && edge.TargetHandle == handle && edge.Kind == domain.PinData {
+			return true
+		}
+	}
+	return false
+}
+
+func legacyRerouteKind(node domain.FlowNode, edges []domain.FlowEdge) (domain.PinKind, bool) {
+	kind := domain.PinKind("")
+	for _, edge := range edges {
+		if edge.Source != node.ID && edge.Target != node.ID {
+			continue
+		}
+		edgeKind := edge.Kind
+		if edgeKind == "" {
+			edgeKind = domain.PinExec
+		}
+		if kind != "" && kind != edgeKind {
+			return "", false
+		}
+		kind = edgeKind
+	}
+	if kind == "" {
+		kind = domain.PinExec
+	}
+	return kind, true
+}
+
+func uniqueMigrationNodeID(prefix string, existing map[string]struct{}) string {
+	id := prefix
+	for index := 2; ; index++ {
+		if _, exists := existing[id]; !exists {
+			return id
+		}
+		id = fmt.Sprintf("%s-%d", prefix, index)
+	}
+}
+
+func uniqueMigrationEdgeID(prefix string, edges []domain.FlowEdge) string {
+	seen := make(map[string]struct{}, len(edges))
+	for _, edge := range edges {
+		seen[edge.ID] = struct{}{}
+	}
+	id := prefix
+	for index := 2; ; index++ {
+		if _, exists := seen[id]; !exists {
+			return id
+		}
+		id = fmt.Sprintf("%s-%d", prefix, index)
+	}
+}

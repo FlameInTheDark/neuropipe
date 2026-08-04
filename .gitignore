@@ -1,0 +1,36 @@
+# Wails and frontend build output
+/build/bin/
+/build/windows/installer/tmp/
+/frontend/dist/
+!/frontend/dist/.gitkeep
+/frontend/node_modules/
+/.wails/
+
+# Go build and test output
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/coverage.out
+
+# Local workspace, diagnostics, and environment files
+/neuropipe.db
+/neuropipe.db-*
+/data/
+/.env
+/.env.*
+!.env.example
+*.log
+
+# Editor and operating-system files
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+bun-debug.log*

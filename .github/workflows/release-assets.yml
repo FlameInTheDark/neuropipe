@@ -1,0 +1,120 @@
+name: Attach release artifacts
+
+on:
+  workflow_run:
+    workflows:
+      - Verify and release
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    name: Build and attach Windows artifacts
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out released commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Find release tag
+        id: release
+        shell: bash
+        run: |
+          git fetch --tags --force
+          tag="$(git tag --points-at HEAD --sort=-version:refname | head -n 1)"
+          if [ -z "$tag" ]; then
+            echo "No release tag was created for this commit."
+            echo "has_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "has_release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        if: steps.release.outputs.has_release == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+          cache: true
+
+      - name: Set up Bun
+        if: steps.release.outputs.has_release == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.22"
+
+      - name: Install frontend dependencies
+        if: steps.release.outputs.has_release == 'true'
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Install and expose NSIS
+        if: steps.release.outputs.has_release == 'true'
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'NSIS'),
+            (Join-Path $env:ProgramFiles 'NSIS'),
+            (Join-Path $env:ChocolateyInstall 'bin')
+          ) | Where-Object { Test-Path (Join-Path $_ 'makensis.exe') }
+
+          $nsisDirectory = $candidates | Select-Object -First 1
+          if (-not $nsisDirectory) {
+            throw 'NSIS installation completed but makensis.exe was not found.'
+          }
+
+          $nsisDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $nsisDirectory 'makensis.exe') /VERSION
+
+      - name: Build production artifacts
+        if: steps.release.outputs.has_release == 'true'
+        run: >-
+          go run github.com/wailsapp/wails/v2/cmd/wails@v2.12.0 build
+          -platform windows/amd64 -nsis -trimpath
+          -ldflags "-s -w -X main.appVersion=${{ steps.release.outputs.tag }}"
+
+      - name: Find release artifacts
+        if: steps.release.outputs.has_release == 'true'
+        id: artifacts
+        shell: pwsh
+        run: |
+          $buildDirectory = Join-Path $PWD 'build/bin'
+          $binary = Get-ChildItem -Path $buildDirectory -File -Filter 'neuropipe.exe' | Select-Object -First 1
+          $installer = Get-ChildItem -Path $buildDirectory -File -Filter '*-installer.exe' | Select-Object -First 1
+
+          if (-not $binary -or -not $installer) {
+            $files = if (Test-Path $buildDirectory) {
+              Get-ChildItem -Path $buildDirectory -File | ForEach-Object { $_.FullName }
+            } else {
+              @('<build/bin does not exist>')
+            }
+            throw "Expected both neuropipe.exe and an NSIS installer. Build output:`n$($files -join "`n")"
+          }
+
+          "binary=$($binary.FullName)" >> $env:GITHUB_OUTPUT
+          "installer=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Attach executable and installer to GitHub release
+        if: steps.release.outputs.has_release == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.release.outputs.tag }}" `
+            "${{ steps.artifacts.outputs.binary }}#Neuropipe-${{ steps.release.outputs.tag }}-windows-amd64.exe" `
+            "${{ steps.artifacts.outputs.installer }}#Neuropipe-${{ steps.release.outputs.tag }}-windows-amd64-installer.exe" `
+            "${{ steps.artifacts.outputs.binary }}#Neuropipe-latest-windows-amd64.exe" `
+            "${{ steps.artifacts.outputs.installer }}#Neuropipe-latest-windows-amd64-installer.exe" `
+            --clobber
