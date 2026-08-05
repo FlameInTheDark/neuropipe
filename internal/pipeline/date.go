@@ -247,7 +247,8 @@ func evaluateDateMath(inputs map[string]any, config map[string]any, tz *time.Loc
 	ms := int64(ts)
 	dt := time.UnixMilli(ms).In(tz)
 
-	dt = dt.AddDate(years, months, days)
+	dt = addCalendarMonths(dt, years, months)
+	dt = dt.AddDate(0, 0, days)
 	dt = dt.Add(time.Duration(hours)*time.Hour +
 		time.Duration(minutes)*time.Minute +
 		time.Duration(seconds)*time.Second +
@@ -258,6 +259,24 @@ func evaluateDateMath(inputs map[string]any, config map[string]any, tz *time.Loc
 		"timestamp": newMs,
 		"iso":       dt.Format(time.RFC3339Nano),
 	}, nil
+}
+
+// addCalendarMonths adds calendar months without overflowing the target
+// month: Jan 31 plus one month lands on the last day of February instead of
+// spilling into March. Time-of-day and location are preserved.
+func addCalendarMonths(dt time.Time, years, months int) time.Time {
+	if years == 0 && months == 0 {
+		return dt
+	}
+	year, month, day := dt.Date()
+	total := year*12 + int(month) - 1 + years*12 + months
+	targetYear := total / 12
+	targetMonth := time.Month(total%12 + 1)
+	lastDay := time.Date(targetYear, targetMonth+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	if day > lastDay {
+		day = lastDay
+	}
+	return time.Date(targetYear, targetMonth, day, dt.Hour(), dt.Minute(), dt.Second(), dt.Nanosecond(), dt.Location())
 }
 
 func evaluateToUnix(inputs map[string]any, milliseconds bool) (map[string]any, error) {

@@ -395,18 +395,48 @@ func TestEvaluateParseCommonFormats(t *testing.T) {
 
 func TestEvaluateDateMathCalendarArithmetic(t *testing.T) {
 	t.Parallel()
-	base := time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC)
-	ts := float64(base.UnixMilli())
-
-	out, err := evaluateDate("date:add", map[string]any{"timestamp": ts, "months": 1}, map[string]any{"timezone": "utc"})
-	if err != nil {
-		t.Fatalf("add month failed: %v", err)
+	tests := []struct {
+		name   string
+		inputs map[string]any
+		want   time.Time
+	}{
+		{
+			name:   "Jan 31 plus one month clamps to Feb 29 in a leap year",
+			inputs: map[string]any{"timestamp": float64(time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC).UnixMilli()), "months": 1.0},
+			want:   time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:   "Mar 31 plus one month clamps to Apr 30",
+			inputs: map[string]any{"timestamp": float64(time.Date(2024, 3, 31, 12, 0, 0, 0, time.UTC).UnixMilli()), "months": 1.0},
+			want:   time.Date(2024, 4, 30, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:   "Feb 29 plus one year clamps to Feb 28",
+			inputs: map[string]any{"timestamp": float64(time.Date(2024, 2, 29, 12, 0, 0, 0, time.UTC).UnixMilli()), "years": 1.0},
+			want:   time.Date(2025, 2, 28, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:   "Jan 31 minus one month stays on Dec 31",
+			inputs: map[string]any{"timestamp": float64(time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC).UnixMilli()), "months": -1.0},
+			want:   time.Date(2023, 12, 31, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:   "May 31 minus one month clamps to Apr 30",
+			inputs: map[string]any{"timestamp": float64(time.Date(2024, 5, 31, 12, 0, 0, 0, time.UTC).UnixMilli()), "months": -1.0},
+			want:   time.Date(2024, 4, 30, 12, 0, 0, 0, time.UTC),
+		},
 	}
 
-	resultTs := out["timestamp"].(float64)
-	result := time.UnixMilli(int64(resultTs)).In(time.UTC)
-
-	if result.Month() != time.February || result.Day() != 29 {
-		t.Errorf("adding 1 month to Jan 31 should give Feb 29 (leap year), got %v", result)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out, err := evaluateDate("date:add", test.inputs, map[string]any{"timezone": "utc"})
+			if err != nil {
+				t.Fatalf("add failed: %v", err)
+			}
+			result := time.UnixMilli(int64(out["timestamp"].(float64))).In(time.UTC)
+			if !result.Equal(test.want) {
+				t.Errorf("got %v, want %v", result, test.want)
+			}
+		})
 	}
 }

@@ -507,12 +507,16 @@ func TestDateNodesInBlueprint(t *testing.T) {
 		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
 		v2Node("now", "date:now", map[string]any{"timezone": "utc"}),
 		v2Node("extract", "date:extract", map[string]any{"timezone": "utc"}),
+		v2Node("threshold", "data:constant", map[string]any{"value": -1.0}),
+		v2Node("isWeekday", "data:greater_than", nil),
 		v2Node("branch", "flow:branch", nil),
 		v2Node("notice", "action:notification", map[string]any{"title": "Date Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-branch", "start", "out", "branch", "in"),
 		dataEdge("now-extract-ts", "now", "timestamp", "extract", "timestamp"),
-		dataEdge("extract-branch-cond", "extract", "weekday", "branch", "condition"),
+		dataEdge("extract-gt-left", "extract", "weekday", "isWeekday", "left"),
+		dataEdge("threshold-gt-right", "threshold", "value", "isWeekday", "right"),
+		dataEdge("gt-branch-cond", "isWeekday", "value", "branch", "condition"),
 		execEdge("branch-notice", "branch", "true", "notice", "in"),
 	}}
 
@@ -570,15 +574,14 @@ func TestDateCreateAndFormatInBlueprint(t *testing.T) {
 func TestDateParseInBlueprint(t *testing.T) {
 	t.Parallel()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("start", "trigger:chat", map[string]any{"label": "Run"}),
 		v2Node("parse", "date:parse", map[string]any{"timezone": "utc"}),
 		v2Node("extract", "date:extract", map[string]any{"timezone": "utc"}),
 		v2Node("notice", "action:notification", map[string]any{"title": "Parse Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
-		execEdge("start-parse", "start", "out", "parse", "in"),
-		execEdge("parse-extract", "parse", "out", "extract", "in"),
+		execEdge("start-notice", "start", "out", "notice", "in"),
+		dataEdge("start-parse-text", "start", "text", "parse", "text"),
 		dataEdge("parse-extract-ts", "parse", "timestamp", "extract", "timestamp"),
-		execEdge("extract-notice", "extract", "out", "notice", "in"),
 		dataEdge("extract-notice-msg", "extract", "iso", "notice", "message"),
 	}}
 
@@ -604,12 +607,9 @@ func TestDateCompareWithBranchInBlueprint(t *testing.T) {
 		v2Node("noticeBefore", "action:notification", map[string]any{"title": "Compare", "message": "Before"}),
 		v2Node("noticeAfter", "action:notification", map[string]any{"title": "Compare", "message": "After"}),
 	}, Edges: []domain.FlowEdge{
-		execEdge("start-now", "start", "out", "now", "in"),
-		execEdge("now-compare", "now", "out", "compare", "in"),
+		execEdge("start-branch", "start", "out", "branch", "in"),
 		dataEdge("now-compare-left", "now", "timestamp", "compare", "left"),
-		execEdge("create-compare", "create", "out", "compare", "in"),
 		dataEdge("create-compare-right", "create", "timestamp", "compare", "right"),
-		execEdge("compare-branch", "compare", "out", "branch", "in"),
 		dataEdge("compare-branch-cond", "compare", "after", "branch", "condition"),
 		execEdge("branch-before", "branch", "true", "noticeAfter", "in"),
 		execEdge("branch-after", "branch", "false", "noticeBefore", "in"),
@@ -635,19 +635,16 @@ func TestDateAddSubtractInBlueprint(t *testing.T) {
 		v2Node("subtract", "date:subtract", map[string]any{"days": 5.0, "timezone": "utc"}),
 		v2Node("extractAdd", "date:extract", map[string]any{"timezone": "utc"}),
 		v2Node("extractSub", "date:extract", map[string]any{"timezone": "utc"}),
+		v2Node("castDay", "data:cast", map[string]any{"target": "text"}),
 		v2Node("notice", "action:notification", map[string]any{"title": "Math Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
-		execEdge("start-create", "start", "out", "create", "in"),
-		execEdge("create-add", "create", "out", "add", "in"),
+		execEdge("start-notice", "start", "out", "notice", "in"),
 		dataEdge("create-add-ts", "create", "timestamp", "add", "timestamp"),
-		execEdge("add-subtract", "add", "out", "subtract", "in"),
 		dataEdge("add-subtract-ts", "add", "timestamp", "subtract", "timestamp"),
-		execEdge("add-extract", "add", "out", "extractAdd", "in"),
 		dataEdge("add-extract-ts", "add", "timestamp", "extractAdd", "timestamp"),
-		execEdge("subtract-extract", "subtract", "out", "extractSub", "in"),
 		dataEdge("subtract-extract-ts", "subtract", "timestamp", "extractSub", "timestamp"),
-		execEdge("extract-notice", "extractSub", "out", "notice", "in"),
-		dataEdge("extract-notice-msg", "extractSub", "day", "notice", "message"),
+		dataEdge("extract-cast-msg", "extractSub", "day", "castDay", "value"),
+		dataEdge("cast-notice-msg", "castDay", "value", "notice", "message"),
 	}}
 
 	sender := &recordingNotificationSender{}
@@ -669,15 +666,14 @@ func TestDateToUnixInBlueprint(t *testing.T) {
 		v2Node("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 14.0, "minute": 30.0, "second": 45.0, "millisecond": 123.0, "timezone": "utc"}),
 		v2Node("toUnix", "date:to_unix", nil),
 		v2Node("toUnixMs", "date:to_unix_ms", nil),
+		v2Node("castValue", "data:cast", map[string]any{"target": "text"}),
 		v2Node("notice", "action:notification", map[string]any{"title": "Unix Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
-		execEdge("start-create", "start", "out", "create", "in"),
-		execEdge("create-toUnix", "create", "out", "toUnix", "in"),
+		execEdge("start-notice", "start", "out", "notice", "in"),
 		dataEdge("create-toUnix-ts", "create", "timestamp", "toUnix", "timestamp"),
-		execEdge("toUnix-toUnixMs", "toUnix", "out", "toUnixMs", "in"),
-		dataEdge("toUnix-toUnixMs-ts", "toUnix", "timestamp", "toUnixMs", "timestamp"),
-		execEdge("toUnixMs-notice", "toUnixMs", "out", "notice", "in"),
-		dataEdge("toUnixMs-notice-msg", "toUnixMs", "value", "notice", "message"),
+		dataEdge("create-toUnixMs-ts", "create", "timestamp", "toUnixMs", "timestamp"),
+		dataEdge("toUnixMs-cast-msg", "toUnixMs", "value", "castValue", "value"),
+		dataEdge("cast-notice-msg", "castValue", "value", "notice", "message"),
 	}}
 
 	sender := &recordingNotificationSender{}
