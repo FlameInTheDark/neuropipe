@@ -327,6 +327,10 @@ func TestEvaluateNowTimezone(t *testing.T) {
 
 func TestEvaluateCreateTimezone(t *testing.T) {
 	t.Parallel()
+	localWall := time.Date(2024, 6, 15, 12, 0, 0, 0, time.Local)
+	utcWall := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	want := float64(localWall.UnixMilli() - utcWall.UnixMilli())
+
 	localOut, _ := evaluateDate("date:create", map[string]any{}, map[string]any{
 		"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 12.0, "timezone": "local",
 	})
@@ -337,33 +341,38 @@ func TestEvaluateCreateTimezone(t *testing.T) {
 	localTs := localOut["timestamp"].(float64)
 	utcTs := utcOut["timestamp"].(float64)
 
-	if localTs == utcTs {
-		t.Errorf("local and utc timestamps should differ for same wall time")
+	if got := localTs - utcTs; got != want {
+		t.Errorf("local and utc timestamp difference = %v, want %v (local offset in ms)", got, want)
 	}
 }
 
 func TestEvaluateExtractTimezone(t *testing.T) {
 	t.Parallel()
+	localDisplay := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC).In(time.Local)
 	ts := float64(time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC).UnixMilli())
 	localOut, _ := evaluateDate("date:extract", map[string]any{"timestamp": ts}, map[string]any{"timezone": "local"})
 	utcOut, _ := evaluateDate("date:extract", map[string]any{"timestamp": ts}, map[string]any{"timezone": "utc"})
 
-	localHour := localOut["hour"].(float64)
-	utcHour := utcOut["hour"].(float64)
-
-	if localHour == utcHour {
-		t.Errorf("local and utc hours should differ for same timestamp")
+	if got := localOut["hour"].(float64); got != float64(localDisplay.Hour()) {
+		t.Errorf("local hour = %v, want %v", got, localDisplay.Hour())
+	}
+	if got := utcOut["hour"].(float64); got != 12 {
+		t.Errorf("utc hour = %v, want 12", got)
 	}
 }
 
 func TestEvaluateFormatTimezone(t *testing.T) {
 	t.Parallel()
+	localDisplay := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC).In(time.Local)
 	ts := float64(time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC).UnixMilli())
 	localOut, _ := evaluateDate("date:format", map[string]any{"timestamp": ts}, map[string]any{"format": "15:04", "timezone": "local"})
 	utcOut, _ := evaluateDate("date:format", map[string]any{"timestamp": ts}, map[string]any{"format": "15:04", "timezone": "utc"})
 
-	if localOut["text"] == utcOut["text"] {
-		t.Errorf("local and utc formatted times should differ")
+	if got := localOut["text"]; got != localDisplay.Format("15:04") {
+		t.Errorf("local formatted time = %q, want %q", got, localDisplay.Format("15:04"))
+	}
+	if got := utcOut["text"]; got != "12:00" {
+		t.Errorf("utc formatted time = %q, want %q", got, "12:00")
 	}
 }
 
