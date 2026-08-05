@@ -1,6 +1,11 @@
 package catalog
 
-import "github.com/FlameInTheDark/neuropipe/internal/domain"
+import (
+	"strconv"
+	"time"
+
+	"github.com/FlameInTheDark/neuropipe/internal/domain"
+)
 
 // blueprintBuiltins are the explicit value and control nodes used by graph v2.
 // Existing first-party nodes are also normalised into Blueprint pins, but these
@@ -12,7 +17,7 @@ func blueprintBuiltins() []domain.NodeDefinition {
 		blueprintNode("data:constant", "Data", "Constant", "Provide a literal typed value.", "circle-dot", "#22c55e", domain.NodePure,
 			nil, []domain.NodePort{dataPin("value", "Value", domain.PinOutput, domain.DataAny)}, []domain.ConfigField{field("value", "Value", "string", "", false)}, map[string]any{}),
 		blueprintNode("data:format_text", "Data", "Format Text", "Format text with an explicit Value data pin.", "text", "#22c55e", domain.NodePure,
-			[]domain.NodePort{dataPin("value", "Value", domain.PinInput, domain.DataAny)}, []domain.NodePort{dataPin("text", "Text", domain.PinOutput, domain.DataText)}, []domain.ConfigField{field("format", "Format", "string", "{value}", true)}, map[string]any{"format": "{value}"}),
+			[]domain.NodePort{dataPin("value", "Value", domain.PinInput, domain.DataAny)}, []domain.NodePort{dataPin("text", "Text", domain.PinOutput, domain.DataText)}, []domain.ConfigField{field("format", "Format", "string", "{.value}", true)}, map[string]any{"format": "{.value}"}),
 		blueprintNode("data:get_field", "Data", "Get Field", "Read a field from an object or list value.", "braces", "#22c55e", domain.NodePure,
 			[]domain.NodePort{dataPin("source", "Source", domain.PinInput, domain.DataAny)}, nil, []domain.ConfigField{fieldOutputsField("outputs", "Outputs")}, map[string]any{"outputs": defaultFieldOutputs()}),
 		// Key and Value remain the legacy port contract for existing v2 drafts.
@@ -47,6 +52,89 @@ func blueprintBuiltins() []domain.NodeDefinition {
 			mathInputs(), mathOutput(), mathFields(), mathDefaults()),
 		blueprintNode("math:divide", "Math", "Divide", "Divide A by B.", "divide", "#86efac", domain.NodePure,
 			mathInputs(), mathOutput(), mathFields(), mathDefaults()),
+
+		blueprintNode("date:now", "Date", "Now", "Get the current date and time.", "calendar", "#f97316", domain.NodePure,
+			nil, []domain.NodePort{
+				dataPin("timestamp", "Timestamp (ms)", domain.PinOutput, domain.DataNumber),
+				dataPin("iso", "ISO 8601", domain.PinOutput, domain.DataText),
+				dataPin("local", "Local String", domain.PinOutput, domain.DataText),
+			}, []domain.ConfigField{
+				selectField("timezone", "Timezone", []string{"local", "utc"}),
+			}, map[string]any{"timezone": "local"}),
+		blueprintNode("date:create", "Date", "Create Date", "Create a date from year, month, day and time components.", "calendar-plus", "#f97316", domain.NodePure,
+			dateCreateInputs(), []domain.NodePort{
+				dataPin("timestamp", "Timestamp (ms)", domain.PinOutput, domain.DataNumber),
+				dataPin("iso", "ISO 8601", domain.PinOutput, domain.DataText),
+			}, dateCreateFields(), dateCreateDefaults()),
+		blueprintNode("date:extract", "Date", "Extract Components", "Extract year, month, day, time and other components from a timestamp.", "calendar-search", "#f97316", domain.NodePure,
+			[]domain.NodePort{dataPin("timestamp", "Timestamp (ms)", domain.PinInput, domain.DataNumber)}, []domain.NodePort{
+				dataPin("year", "Year", domain.PinOutput, domain.DataNumber),
+				dataPin("month", "Month", domain.PinOutput, domain.DataNumber),
+				dataPin("day", "Day", domain.PinOutput, domain.DataNumber),
+				dataPin("hour", "Hour", domain.PinOutput, domain.DataNumber),
+				dataPin("minute", "Minute", domain.PinOutput, domain.DataNumber),
+				dataPin("second", "Second", domain.PinOutput, domain.DataNumber),
+				dataPin("millisecond", "Millisecond", domain.PinOutput, domain.DataNumber),
+				dataPin("weekday", "Weekday (0=Sun)", domain.PinOutput, domain.DataNumber),
+				dataPin("dayOfYear", "Day of Year", domain.PinOutput, domain.DataNumber),
+				dataPin("weekOfYear", "Week of Year", domain.PinOutput, domain.DataNumber),
+				dataPin("iso", "ISO 8601", domain.PinOutput, domain.DataText),
+				dataPin("unix", "Unix Seconds", domain.PinOutput, domain.DataNumber),
+				dataPin("unixMs", "Unix Milliseconds", domain.PinOutput, domain.DataNumber),
+			}, []domain.ConfigField{
+				selectField("timezone", "Timezone", []string{"local", "utc"}),
+			}, map[string]any{"timezone": "local"}),
+		blueprintNode("date:format", "Date", "Format Date", "Format a timestamp as text using a Go time format string (reference: 2006-01-02 15:04:05).", "calendar-days", "#f97316", domain.NodePure,
+			[]domain.NodePort{
+				dataPin("timestamp", "Timestamp (ms)", domain.PinInput, domain.DataNumber),
+				dataPin("format", "Format", domain.PinInput, domain.DataText),
+			}, []domain.NodePort{dataPin("text", "Text", domain.PinOutput, domain.DataText)}, []domain.ConfigField{
+				field("format", "Format", "string", "2006-01-02 15:04:05", true),
+				selectField("timezone", "Timezone", []string{"local", "utc"}),
+			}, map[string]any{"format": "2006-01-02 15:04:05", "timezone": "local"}),
+		blueprintNode("date:parse", "Date", "Parse Date", "Parse a date string into a timestamp. If format is empty, tries common formats (RFC3339, ISO8601, etc.).", "calendar-search", "#f97316", domain.NodePure,
+			[]domain.NodePort{
+				dataPin("text", "Text", domain.PinInput, domain.DataText),
+				dataPin("format", "Format", domain.PinInput, domain.DataText),
+			}, []domain.NodePort{
+				dataPin("timestamp", "Timestamp (ms)", domain.PinOutput, domain.DataNumber),
+				dataPin("iso", "ISO 8601", domain.PinOutput, domain.DataText),
+			}, []domain.ConfigField{
+				field("format", "Format", "string", "", false),
+				selectField("timezone", "Timezone", []string{"local", "utc"}),
+			}, map[string]any{"format": "", "timezone": "local"}),
+		blueprintNode("date:compare", "Date", "Compare Dates", "Compare two timestamps and return boolean results and differences.", "git-compare", "#f97316", domain.NodePure,
+			[]domain.NodePort{
+				dataPin("left", "Left (ms)", domain.PinInput, domain.DataNumber),
+				dataPin("right", "Right (ms)", domain.PinInput, domain.DataNumber),
+			}, []domain.NodePort{
+				dataPin("before", "Before", domain.PinOutput, domain.DataBoolean),
+				dataPin("after", "After", domain.PinOutput, domain.DataBoolean),
+				dataPin("equal", "Equal", domain.PinOutput, domain.DataBoolean),
+				dataPin("diffMs", "Difference (ms)", domain.PinOutput, domain.DataNumber),
+				dataPin("diffSeconds", "Difference (s)", domain.PinOutput, domain.DataNumber),
+				dataPin("diffMinutes", "Difference (min)", domain.PinOutput, domain.DataNumber),
+				dataPin("diffHours", "Difference (h)", domain.PinOutput, domain.DataNumber),
+				dataPin("diffDays", "Difference (days)", domain.PinOutput, domain.DataNumber),
+			}, nil, map[string]any{}),
+		blueprintNode("date:add", "Date", "Add Duration", "Add years, months, days, hours, minutes, seconds, milliseconds to a timestamp.", "calendar-plus-2", "#f97316", domain.NodePure,
+			dateMathInputs(), []domain.NodePort{
+				dataPin("timestamp", "Timestamp (ms)", domain.PinOutput, domain.DataNumber),
+				dataPin("iso", "ISO 8601", domain.PinOutput, domain.DataText),
+			}, dateMathFields(), dateMathDefaults()),
+		blueprintNode("date:subtract", "Date", "Subtract Duration", "Subtract years, months, days, hours, minutes, seconds, milliseconds from a timestamp.", "calendar-minus-2", "#f97316", domain.NodePure,
+			dateMathInputs(), []domain.NodePort{
+				dataPin("timestamp", "Timestamp (ms)", domain.PinOutput, domain.DataNumber),
+				dataPin("iso", "ISO 8601", domain.PinOutput, domain.DataText),
+			}, dateMathFields(), dateMathDefaults()),
+		blueprintNode("date:to_unix", "Date", "To Unix Seconds", "Convert milliseconds timestamp to Unix seconds.", "hash", "#f97316", domain.NodePure,
+			[]domain.NodePort{dataPin("timestamp", "Timestamp (ms)", domain.PinInput, domain.DataNumber)}, []domain.NodePort{
+				dataPin("value", "Unix Seconds", domain.PinOutput, domain.DataNumber),
+			}, nil, map[string]any{}),
+		blueprintNode("date:to_unix_ms", "Date", "To Unix Milliseconds", "Pass through milliseconds timestamp as Unix milliseconds.", "hash", "#f97316", domain.NodePure,
+			[]domain.NodePort{dataPin("timestamp", "Timestamp (ms)", domain.PinInput, domain.DataNumber)}, []domain.NodePort{
+				dataPin("value", "Unix Milliseconds", domain.PinOutput, domain.DataNumber),
+			}, nil, map[string]any{}),
 
 		blueprintNode("flow:branch", "Flow", "Branch", "Route execution from a Boolean data value.", "git-branch", "#fbbf24", domain.NodeImpure,
 			append(execIn(), dataPin("condition", "Condition", domain.PinInput, domain.DataBoolean)), []domain.NodePort{execPin("true", "True", domain.PinOutput), execPin("false", "False", domain.PinOutput)}, nil, map[string]any{}),
@@ -166,4 +254,91 @@ func defaultObjectFields() []any {
 		"key":      "value",
 		"dataType": string(domain.DataAny),
 	}}
+}
+
+func dateCreateInputs() []domain.NodePort {
+	inputs := []domain.NodePort{
+		dataPin("year", "Year", domain.PinInput, domain.DataNumber),
+		dataPin("month", "Month (1-12)", domain.PinInput, domain.DataNumber),
+		dataPin("day", "Day", domain.PinInput, domain.DataNumber),
+		dataPin("hour", "Hour (0-23)", domain.PinInput, domain.DataNumber),
+		dataPin("minute", "Minute (0-59)", domain.PinInput, domain.DataNumber),
+		dataPin("second", "Second (0-59)", domain.PinInput, domain.DataNumber),
+		dataPin("millisecond", "Millisecond (0-999)", domain.PinInput, domain.DataNumber),
+	}
+	for index := range inputs {
+		inputs[index].Default = 0.0
+	}
+	return inputs
+}
+
+func dateCreateFields() []domain.ConfigField {
+	now := time.Now()
+	return []domain.ConfigField{
+		field("year", "Year", "number", strconv.Itoa(now.Year()), false),
+		field("month", "Month (1-12)", "number", "1", false),
+		field("day", "Day", "number", "1", false),
+		field("hour", "Hour (0-23)", "number", "0", false),
+		field("minute", "Minute (0-59)", "number", "0", false),
+		field("second", "Second (0-59)", "number", "0", false),
+		field("millisecond", "Millisecond (0-999)", "number", "0", false),
+		selectField("timezone", "Timezone", []string{"local", "utc"}),
+	}
+}
+
+func dateCreateDefaults() map[string]any {
+	now := time.Now()
+	return map[string]any{
+		"year":        float64(now.Year()),
+		"month":       1.0,
+		"day":         1.0,
+		"hour":        0.0,
+		"minute":      0.0,
+		"second":      0.0,
+		"millisecond": 0.0,
+		"timezone":    "local",
+	}
+}
+
+func dateMathInputs() []domain.NodePort {
+	inputs := []domain.NodePort{
+		dataPin("timestamp", "Timestamp (ms)", domain.PinInput, domain.DataNumber),
+		dataPin("years", "Years", domain.PinInput, domain.DataNumber),
+		dataPin("months", "Months", domain.PinInput, domain.DataNumber),
+		dataPin("days", "Days", domain.PinInput, domain.DataNumber),
+		dataPin("hours", "Hours", domain.PinInput, domain.DataNumber),
+		dataPin("minutes", "Minutes", domain.PinInput, domain.DataNumber),
+		dataPin("seconds", "Seconds", domain.PinInput, domain.DataNumber),
+		dataPin("milliseconds", "Milliseconds", domain.PinInput, domain.DataNumber),
+	}
+	for index := range inputs {
+		inputs[index].Default = 0.0
+	}
+	return inputs
+}
+
+func dateMathFields() []domain.ConfigField {
+	return []domain.ConfigField{
+		field("years", "Years", "number", "0", false),
+		field("months", "Months", "number", "0", false),
+		field("days", "Days", "number", "0", false),
+		field("hours", "Hours", "number", "0", false),
+		field("minutes", "Minutes", "number", "0", false),
+		field("seconds", "Seconds", "number", "0", false),
+		field("milliseconds", "Milliseconds", "number", "0", false),
+		selectField("timezone", "Timezone", []string{"local", "utc"}),
+	}
+}
+
+func dateMathDefaults() map[string]any {
+	return map[string]any{
+		"years":        0.0,
+		"months":       0.0,
+		"days":         0.0,
+		"hours":        0.0,
+		"minutes":      0.0,
+		"seconds":      0.0,
+		"milliseconds": 0.0,
+		"timezone":     "local",
+	}
 }

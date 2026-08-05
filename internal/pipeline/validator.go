@@ -41,9 +41,6 @@ func Validate(definition domain.FlowDefinition, registry *catalog.Registry) erro
 				return err
 			}
 		}
-		if containsTemplate(node.Data) {
-			return ValidationError{Message: fmt.Sprintf("node %q still uses a legacy {{...}} template; wire a data pin instead", node.ID)}
-		}
 		nodes[node.ID], metadata[node.ID] = node, definition
 	}
 	if events == 0 {

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
@@ -594,8 +595,11 @@ func (s *blueprintState) evaluatePure(node domain.FlowNode, inputs map[string]an
 		}
 		return map[string]any{"value": value}, nil
 	case "data:format_text":
-		format := configText(node, "format")
-		return map[string]any{"text": strings.ReplaceAll(format, "{value}", fmt.Sprint(inputs["value"]))}, nil
+		text, err := renderTemplate(configText(node, "format"), inputs)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"text": text}, nil
 	case "data:get_field", "data:break_object":
 		definition, _ := s.engine.registry.Get(node.Type)
 		configuredOutputs, err := getFieldOutputs(config, definition.DefaultConfig)
@@ -686,6 +690,8 @@ func (s *blueprintState) evaluatePure(node domain.FlowNode, inputs map[string]an
 		return map[string]any{"value": inputs["value"]}, nil
 	case "math:add", "math:subtract", "math:multiply", "math:divide":
 		return evaluateMath(node.Type, inputs)
+	case "date:now", "date:create", "date:extract", "date:format", "date:parse", "date:compare", "date:add", "date:subtract", "date:to_unix", "date:to_unix_ms":
+		return evaluateDate(node.Type, inputs, config)
 	}
 	if strings.HasPrefix(node.Type, "function:") {
 		return s.evaluateFunction(node, inputs, frame)
@@ -925,6 +931,21 @@ func configText(node domain.FlowNode, key string) string {
 	value, _ := configFor(node)[key].(string)
 	return strings.TrimSpace(value)
 }
+
+func renderTemplate(format string, data any) (string, error) {
+	tmpl, err := template.New("format").Parse(format)
+	if err != nil {
+		return "", fmt.Errorf("incorrect format template: %w", err)
+	}
+
+	var out strings.Builder
+	if err := tmpl.Execute(&out, data); err != nil {
+		return "", fmt.Errorf("unable to execute template: %w", err)
+	}
+
+	return out.String(), nil
+}
+
 func valueAtAny(value any, path string) any {
 	if strings.TrimSpace(path) == "" {
 		return value

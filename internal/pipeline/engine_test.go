@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -498,4 +499,206 @@ func TestBlueprintBreakStopsInnermostLoop(t *testing.T) {
 	if breaks != 1 || notifications != 1 {
 		t.Fatalf("breaks = %d, notifications = %d; want one each", breaks, notifications)
 	}
+}
+
+func TestDateNodesInBlueprint(t *testing.T) {
+	t.Parallel()
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("now", "date:now", map[string]any{"timezone": "utc"}),
+		v2Node("extract", "date:extract", map[string]any{"timezone": "utc"}),
+		v2Node("branch", "flow:branch", nil),
+		v2Node("notice", "action:notification", map[string]any{"title": "Date Test", "message": "Done"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-branch", "start", "out", "branch", "in"),
+		dataEdge("now-extract-ts", "now", "timestamp", "extract", "timestamp"),
+		dataEdge("extract-branch-cond", "extract", "weekday", "branch", "condition"),
+		execEdge("branch-notice", "branch", "true", "notice", "in"),
+	}}
+
+	result, err := NewEngine(catalog.New(), nil, nil).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var extractRun *domain.NodeRun
+	for _, run := range result.NodeRuns {
+		if run.NodeID == "extract" {
+			extractRun = &run
+			break
+		}
+	}
+	if extractRun == nil {
+		t.Fatal("extract node was not evaluated")
+	}
+
+	outputs, ok := extractRun.Output.(map[string]any)
+	if !ok {
+		t.Fatalf("extract output is not a map: %#v", extractRun.Output)
+	}
+
+	year := outputs["year"].(float64)
+	if year < 2024 || year > 2030 {
+		t.Errorf("year = %v, want reasonable current year", year)
+	}
+}
+
+func TestDateCreateAndFormatInBlueprint(t *testing.T) {
+	t.Parallel()
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 14.0, "minute": 30.0, "second": 45.0, "timezone": "utc"}),
+		v2Node("format", "date:format", map[string]any{"format": "2006-01-02 15:04:05", "timezone": "utc"}),
+		v2Node("notice", "action:notification", map[string]any{"title": "Date Test", "message": "Done"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-notice", "start", "out", "notice", "in"),
+		dataEdge("create-format-ts", "create", "timestamp", "format", "timestamp"),
+		dataEdge("format-notice-msg", "format", "text", "notice", "message"),
+	}}
+
+	sender := &recordingNotificationSender{}
+	_, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if len(sender.calls) != 1 || sender.calls[0].message != "2024-06-15 14:30:45" {
+		t.Fatalf("notification message = %#v, want formatted date", sender.calls)
+	}
+}
+
+func TestDateParseInBlueprint(t *testing.T) {
+	t.Parallel()
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("parse", "date:parse", map[string]any{"timezone": "utc"}),
+		v2Node("extract", "date:extract", map[string]any{"timezone": "utc"}),
+		v2Node("notice", "action:notification", map[string]any{"title": "Parse Test", "message": "Done"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-parse", "start", "out", "parse", "in"),
+		execEdge("parse-extract", "parse", "out", "extract", "in"),
+		dataEdge("parse-extract-ts", "parse", "timestamp", "extract", "timestamp"),
+		execEdge("extract-notice", "extract", "out", "notice", "in"),
+		dataEdge("extract-notice-msg", "extract", "iso", "notice", "message"),
+	}}
+
+	sender := &recordingNotificationSender{}
+	_, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{"text": "2024-06-15T14:30:45Z"})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if len(sender.calls) != 1 || !strings.Contains(sender.calls[0].message, "2024-06-15") {
+		t.Fatalf("notification message = %#v, want parsed date", sender.calls)
+	}
+}
+
+func TestDateCompareWithBranchInBlueprint(t *testing.T) {
+	t.Parallel()
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("now", "date:now", map[string]any{"timezone": "utc"}),
+		v2Node("create", "date:create", map[string]any{"year": 2020.0, "month": 1.0, "day": 1.0, "timezone": "utc"}),
+		v2Node("compare", "date:compare", nil),
+		v2Node("branch", "flow:branch", nil),
+		v2Node("noticeBefore", "action:notification", map[string]any{"title": "Compare", "message": "Before"}),
+		v2Node("noticeAfter", "action:notification", map[string]any{"title": "Compare", "message": "After"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-now", "start", "out", "now", "in"),
+		execEdge("now-compare", "now", "out", "compare", "in"),
+		dataEdge("now-compare-left", "now", "timestamp", "compare", "left"),
+		execEdge("create-compare", "create", "out", "compare", "in"),
+		dataEdge("create-compare-right", "create", "timestamp", "compare", "right"),
+		execEdge("compare-branch", "compare", "out", "branch", "in"),
+		dataEdge("compare-branch-cond", "compare", "after", "branch", "condition"),
+		execEdge("branch-before", "branch", "true", "noticeAfter", "in"),
+		execEdge("branch-after", "branch", "false", "noticeBefore", "in"),
+	}}
+
+	sender := &recordingNotificationSender{}
+	_, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if len(sender.calls) != 1 || sender.calls[0].message != "After" {
+		t.Fatalf("notification message = %#v, want After (now is after 2020)", sender.calls)
+	}
+}
+
+func TestDateAddSubtractInBlueprint(t *testing.T) {
+	t.Parallel()
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "timezone": "utc"}),
+		v2Node("add", "date:add", map[string]any{"days": 10.0, "timezone": "utc"}),
+		v2Node("subtract", "date:subtract", map[string]any{"days": 5.0, "timezone": "utc"}),
+		v2Node("extractAdd", "date:extract", map[string]any{"timezone": "utc"}),
+		v2Node("extractSub", "date:extract", map[string]any{"timezone": "utc"}),
+		v2Node("notice", "action:notification", map[string]any{"title": "Math Test", "message": "Done"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-create", "start", "out", "create", "in"),
+		execEdge("create-add", "create", "out", "add", "in"),
+		dataEdge("create-add-ts", "create", "timestamp", "add", "timestamp"),
+		execEdge("add-subtract", "add", "out", "subtract", "in"),
+		dataEdge("add-subtract-ts", "add", "timestamp", "subtract", "timestamp"),
+		execEdge("add-extract", "add", "out", "extractAdd", "in"),
+		dataEdge("add-extract-ts", "add", "timestamp", "extractAdd", "timestamp"),
+		execEdge("subtract-extract", "subtract", "out", "extractSub", "in"),
+		dataEdge("subtract-extract-ts", "subtract", "timestamp", "extractSub", "timestamp"),
+		execEdge("extract-notice", "extractSub", "out", "notice", "in"),
+		dataEdge("extract-notice-msg", "extractSub", "day", "notice", "message"),
+	}}
+
+	sender := &recordingNotificationSender{}
+	_, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	day := sender.calls[0].message
+	if day != "20" {
+		t.Fatalf("final day = %q, want 20 (15 + 10 - 5)", day)
+	}
+}
+
+func TestDateToUnixInBlueprint(t *testing.T) {
+	t.Parallel()
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 14.0, "minute": 30.0, "second": 45.0, "millisecond": 123.0, "timezone": "utc"}),
+		v2Node("toUnix", "date:to_unix", nil),
+		v2Node("toUnixMs", "date:to_unix_ms", nil),
+		v2Node("notice", "action:notification", map[string]any{"title": "Unix Test", "message": "Done"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-create", "start", "out", "create", "in"),
+		execEdge("create-toUnix", "create", "out", "toUnix", "in"),
+		dataEdge("create-toUnix-ts", "create", "timestamp", "toUnix", "timestamp"),
+		execEdge("toUnix-toUnixMs", "toUnix", "out", "toUnixMs", "in"),
+		dataEdge("toUnix-toUnixMs-ts", "toUnix", "timestamp", "toUnixMs", "timestamp"),
+		execEdge("toUnixMs-notice", "toUnixMs", "out", "notice", "in"),
+		dataEdge("toUnixMs-notice-msg", "toUnixMs", "value", "notice", "message"),
+	}}
+
+	sender := &recordingNotificationSender{}
+	_, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	val := sender.calls[0].message
+	msVal := parseFloat(t, val)
+	secVal := msVal / 1000
+	if secVal < 1718461845 || secVal > 1718461846 {
+		t.Fatalf("unix seconds = %v, want ~1718461845", secVal)
+	}
+}
+
+func parseFloat(t *testing.T, s string) float64 {
+	t.Helper()
+	var f float64
+	if _, err := fmt.Sscanf(s, "%f", &f); err != nil {
+		t.Fatalf("parse float %q: %v", s, err)
+	}
+	return f
 }
