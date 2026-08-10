@@ -680,20 +680,37 @@ func (s *Store) Publish(ctx context.Context, pipeline domain.Pipeline, bindings 
 	if _, err := statements(tx).Insert("pipeline_revisions").Columns("pipeline_id", "revision", "definition", "published_at").Values(pipeline.ID, next, definitionJSON, stamp(now)).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("save published revision: %w", err)
 	}
+	priorTrusted := make(map[string]bool)
+	priorRows, err := statements(tx).Select("node_id", "trusted").From("trigger_bindings").Where(squirrel.Eq{"pipeline_id": pipeline.ID}).QueryContext(ctx)
+	if err != nil {
+		return domain.Pipeline{}, fmt.Errorf("read prior trusted state: %w", err)
+	}
+	for priorRows.Next() {
+		var nodeID string
+		var trusted bool
+		if err := priorRows.Scan(&nodeID, &trusted); err != nil {
+			_ = priorRows.Close()
+			return domain.Pipeline{}, fmt.Errorf("scan prior trusted state: %w", err)
+		}
+		if trusted {
+			priorTrusted[nodeID] = true
+		}
+	}
+	_ = priorRows.Close()
 	if _, err := statements(tx).Delete("trigger_bindings").Where(squirrel.Eq{"pipeline_id": pipeline.ID}).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("remove prior trigger bindings: %w", err)
 	}
 	for _, binding := range bindings {
 		binding.ID = uuid.NewString()
 		binding.PipelineID, binding.Revision = pipeline.ID, next
-		binding.Enabled = binding.Kind == domain.TriggerButton || binding.Kind == domain.TriggerChat || binding.Kind == domain.TriggerHotkey
-		binding.Trusted = false
+		binding.Enabled = binding.Kind == domain.TriggerButton || binding.Kind == domain.TriggerChat || binding.Kind == domain.TriggerHotkey || binding.Kind == domain.TriggerTwitch
+		binding.Trusted = priorTrusted[binding.NodeID]
 		binding.CreatedAt, binding.UpdatedAt = now, now
 		configJSON, err := encode(binding.Config)
 		if err != nil {
 			return domain.Pipeline{}, fmt.Errorf("encode trigger binding config: %w", err)
 		}
-		if _, err := statements(tx).Insert("trigger_bindings").Columns("id", "pipeline_id", "node_id", "revision", "kind", "node_type", "config_json", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "created_at", "updated_at").Values(binding.ID, binding.PipelineID, binding.NodeID, binding.Revision, binding.Kind, binding.NodeType, configJSON, binding.Label, binding.Icon, binding.Color, binding.GridPosition, binding.Hotkey, binding.Cron, binding.Timezone, binding.Enabled, false, stamp(now), stamp(now)).ExecContext(ctx); err != nil {
+		if _, err := statements(tx).Insert("trigger_bindings").Columns("id", "pipeline_id", "node_id", "revision", "kind", "node_type", "config_json", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "created_at", "updated_at").Values(binding.ID, binding.PipelineID, binding.NodeID, binding.Revision, binding.Kind, binding.NodeType, configJSON, binding.Label, binding.Icon, binding.Color, binding.GridPosition, binding.Hotkey, binding.Cron, binding.Timezone, binding.Enabled, binding.Trusted, stamp(now), stamp(now)).ExecContext(ctx); err != nil {
 			return domain.Pipeline{}, fmt.Errorf("save trigger binding: %w", err)
 		}
 	}
@@ -1058,6 +1075,24 @@ func (s *Store) ListTriggers(ctx context.Context, kind domain.TriggerKind) ([]do
 	rows, err := query.OrderBy("grid_position ASC", "label COLLATE NOCASE ASC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list triggers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	bindings := make([]domain.TriggerBinding, 0)
+	for rows.Next() {
+		binding, err := scanBinding(rows)
+		if err != nil {
+			return nil, err
+		}
+		bindings = append(bindings, binding)
+	}
+	return bindings, rows.Err()
+}
+
+// ListTriggersByPipeline returns all trigger bindings for a specific pipeline.
+func (s *Store) ListTriggersByPipeline(ctx context.Context, pipelineID string) ([]domain.TriggerBinding, error) {
+	rows, err := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "node_type", "config_json", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings").Where(squirrel.Eq{"pipeline_id": pipelineID}).OrderBy("updated_at DESC").QueryContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list triggers by pipeline: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	bindings := make([]domain.TriggerBinding, 0)

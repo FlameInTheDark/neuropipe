@@ -257,6 +257,35 @@ func (d *Desktop) PublishPipeline(pipeline domain.Pipeline) (domain.Pipeline, er
 	if err := d.hotkeys.Reload(d.context()); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("pipeline was published, but global hotkeys could not be registered: %w", err)
 	}
+
+	// Re-grant capabilities for the new revision if any triggers are trusted.
+	triggers, err := d.store.ListTriggersByPipeline(d.context(), published.ID)
+	if err == nil {
+		hasTrusted := false
+		for _, t := range triggers {
+			if t.Trusted && t.Revision == published.PublishedRevision {
+				hasTrusted = true
+				break
+			}
+		}
+		if hasTrusted {
+			definition, err := d.store.PublishedDefinition(d.context(), published.ID, published.PublishedRevision)
+			if err == nil {
+				for _, capability := range security.RequiredCapabilities(definition, d.registry) {
+					if err := d.store.Grant(d.context(), domain.PermissionGrant{
+						PipelineID: published.ID,
+						Revision:   published.PublishedRevision,
+						Capability: capability,
+						Scope:      "*",
+					}); err != nil {
+						// Log error but don't fail the publish; user can re-trust manually.
+						d.emit("log.error", fmt.Sprintf("grant capability %s for pipeline %s revision %d: %v", capability, published.ID, published.PublishedRevision, err))
+					}
+				}
+			}
+		}
+	}
+
 	d.twitch.Reconcile()
 	return published, nil
 }

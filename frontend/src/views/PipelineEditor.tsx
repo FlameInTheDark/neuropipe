@@ -32,7 +32,6 @@ import {
   Bot,
   Check,
   ChevronRight,
-  CircleAlert,
   CirclePlay,
   Copy,
   FileCode2,
@@ -1330,19 +1329,6 @@ function EditorContents({
           </Button>
         </div>
       </header>
-      {pipeline.hasUnpublishedChanges ? (
-        <div
-          className="flex shrink-0 items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-5 py-2 text-xs text-amber-200"
-          role="status"
-        >
-          <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-          <p>
-            {t("pipelineStatus.draftUpdateNotice", {
-              version: pipeline.publishedRevision,
-            })}
-          </p>
-        </div>
-      ) : null}
       <div className="min-h-0 flex-1">
         <div
           className="grid h-full min-h-0"
