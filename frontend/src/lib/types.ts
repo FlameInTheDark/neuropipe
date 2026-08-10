@@ -1,7 +1,7 @@
 import type { Edge, Node, Viewport } from "@xyflow/react";
 
 export type PipelineStatus = "draft" | "active" | "archived" | "legacy";
-export type TriggerKind = "button" | "cron" | "file" | "hotkey" | "webhook" | "chat";
+export type TriggerKind = "button" | "cron" | "file" | "hotkey" | "webhook" | "chat" | "twitch";
 export type RunStatus =
   "pending" | "running" | "completed" | "failed" | "skipped" | "cancelled";
 
@@ -65,6 +65,8 @@ export interface Pipeline {
   status: PipelineStatus;
   draftDefinition: FlowDefinition;
   publishedRevision: number;
+	/** True when the editable draft differs from the revision triggers execute. */
+  hasUnpublishedChanges: boolean;
   migrationIssue?: string;
   createdAt: string;
   updatedAt: string;
@@ -90,6 +92,8 @@ export interface TriggerBinding {
   nodeId: string;
   revision: number;
   kind: TriggerKind;
+	  nodeType?: string;
+	  config?: Record<string, unknown>;
   label: string;
   icon: string;
   color: string;
@@ -142,6 +146,8 @@ export interface NodeDefinition {
   icon: string;
   color: string;
   mode: NodeExecutionMode;
+  triggerKind?: TriggerKind;
+	portContractOwned?: boolean;
   inputs: NodePort[];
   outputs: NodePort[];
   fields: ConfigField[];
@@ -369,7 +375,18 @@ export interface Settings {
   llamaRuntime: LlamaRuntimeSettings;
   api: APISettings;
   metrics: MetricsSettings;
+	  twitch: TwitchSettings;
 }
+export type TwitchIdentityStatus = "connected" | "expired" | "reconnect-required" | "revoked";
+export type TwitchConnectionMethod = "device-code" | "manual";
+export interface TwitchIdentity { id: string; label: string; userId: string; login: string; scopes: string[]; expiresAt?: string; status: TwitchIdentityStatus; method: TwitchConnectionMethod; }
+export interface TwitchSettings { clientId: string; defaultBotIdentityId?: string; identities: TwitchIdentity[]; }
+export interface TwitchEventConditionField { id: string; label: string; description: string; required: boolean; }
+export interface TwitchEventDescriptor { type: string; version: string; label: string; description: string; requiredScopes: string[]; conditions: TwitchEventConditionField[]; eventType: TypeSpec; chatMessage: boolean; }
+export interface TwitchStatus { connected: boolean; connectionState: string; activeSubscriptions: number; lastError?: string; }
+export interface TwitchDeviceAuthorizationRequest { identityId?: string; label: string; scopes: string[]; }
+export interface TwitchDeviceAuthorization { id: string; userCode: string; verificationUri: string; expiresAt: string; intervalSeconds: number; }
+export interface TwitchManualIdentityRequest { label: string; accessToken: string; }
 export interface TrayMenuLabels {
   show: string;
   settings: string;

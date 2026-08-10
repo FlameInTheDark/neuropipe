@@ -111,6 +111,8 @@ CREATE TABLE IF NOT EXISTS trigger_bindings (
   node_id TEXT NOT NULL,
   revision INTEGER NOT NULL,
   kind TEXT NOT NULL,
+	  node_type TEXT NOT NULL DEFAULT '',
+	  config_json TEXT NOT NULL DEFAULT '{}',
   label TEXT NOT NULL,
   icon TEXT NOT NULL,
   color TEXT NOT NULL,
@@ -401,6 +403,9 @@ CREATE TABLE IF NOT EXISTS metric_resource_rollups (
 	if err := s.ensureExecutionTimingColumns(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureTriggerNodeMetadataColumns(ctx); err != nil {
+		return err
+	}
 	if err := s.repairV3LegacyMarkers(ctx); err != nil {
 		return err
 	}
@@ -520,6 +525,26 @@ func (s *Store) ensureExecutionTimingColumns(ctx context.Context) error {
 	return nil
 }
 
+func (s *Store) ensureTriggerNodeMetadataColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{name: "node_type", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "config_json", definition: "TEXT NOT NULL DEFAULT '{}'"},
+	}
+	for _, column := range columns {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('trigger_bindings') WHERE name = ?`, column.name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect trigger_bindings.%s migration: %w", column.name, err)
+		}
+		if exists > 0 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE trigger_bindings ADD COLUMN %s %s", column.name, column.definition)); err != nil {
+			return fmt.Errorf("add trigger_bindings.%s column: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
 // CreatePipeline persists a new draft pipeline.
 func (s *Store) CreatePipeline(ctx context.Context, name string, definition domain.FlowDefinition) (domain.Pipeline, error) {
 	now := time.Now().UTC()
@@ -587,6 +612,16 @@ func (s *Store) GetPipeline(ctx context.Context, id string) (domain.Pipeline, er
 		return domain.Pipeline{}, err
 	}
 	pipeline.Status = domain.PipelineStatus(status)
+	if pipeline.PublishedRevision > 0 {
+		var publishedDefinitionJSON string
+		if err := statements(s.db).Select("definition").From("pipeline_revisions").Where(squirrel.Eq{
+			"pipeline_id": pipeline.ID,
+			"revision":    pipeline.PublishedRevision,
+		}).QueryRowContext(ctx).Scan(&publishedDefinitionJSON); err != nil {
+			return domain.Pipeline{}, fmt.Errorf("get published pipeline definition: %w", err)
+		}
+		pipeline.HasUnpublishedChanges = definitionJSON != publishedDefinitionJSON
+	}
 	pipeline.CreatedAt, pipeline.UpdatedAt = parseTime(created), parseTime(updated)
 	return pipeline, nil
 }
@@ -654,7 +689,11 @@ func (s *Store) Publish(ctx context.Context, pipeline domain.Pipeline, bindings 
 		binding.Enabled = binding.Kind == domain.TriggerButton || binding.Kind == domain.TriggerChat || binding.Kind == domain.TriggerHotkey
 		binding.Trusted = false
 		binding.CreatedAt, binding.UpdatedAt = now, now
-		if _, err := statements(tx).Insert("trigger_bindings").Columns("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "created_at", "updated_at").Values(binding.ID, binding.PipelineID, binding.NodeID, binding.Revision, binding.Kind, binding.Label, binding.Icon, binding.Color, binding.GridPosition, binding.Hotkey, binding.Cron, binding.Timezone, binding.Enabled, false, stamp(now), stamp(now)).ExecContext(ctx); err != nil {
+		configJSON, err := encode(binding.Config)
+		if err != nil {
+			return domain.Pipeline{}, fmt.Errorf("encode trigger binding config: %w", err)
+		}
+		if _, err := statements(tx).Insert("trigger_bindings").Columns("id", "pipeline_id", "node_id", "revision", "kind", "node_type", "config_json", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "created_at", "updated_at").Values(binding.ID, binding.PipelineID, binding.NodeID, binding.Revision, binding.Kind, binding.NodeType, configJSON, binding.Label, binding.Icon, binding.Color, binding.GridPosition, binding.Hotkey, binding.Cron, binding.Timezone, binding.Enabled, false, stamp(now), stamp(now)).ExecContext(ctx); err != nil {
 			return domain.Pipeline{}, fmt.Errorf("save trigger binding: %w", err)
 		}
 	}
@@ -1012,7 +1051,7 @@ func FunctionNodeDefinition(function domain.CustomFunction) domain.NodeDefinitio
 
 // ListTriggers returns button or cron bindings for the matching product surface.
 func (s *Store) ListTriggers(ctx context.Context, kind domain.TriggerKind) ([]domain.TriggerBinding, error) {
-	query := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings")
+	query := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "node_type", "config_json", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings")
 	if kind != "" {
 		query = query.Where(squirrel.Eq{"kind": kind})
 	}
@@ -1035,7 +1074,7 @@ func (s *Store) ListTriggers(ctx context.Context, kind domain.TriggerKind) ([]do
 // ListAllTriggers returns every active trigger binding for the local API and
 // diagnostics surfaces. It deliberately exposes binding metadata only.
 func (s *Store) ListAllTriggers(ctx context.Context) ([]domain.TriggerBinding, error) {
-	rows, err := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings").OrderBy("updated_at DESC").QueryContext(ctx)
+	rows, err := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "node_type", "config_json", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings").OrderBy("updated_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list triggers: %w", err)
 	}
@@ -1053,7 +1092,7 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]domain.TriggerBinding, e
 
 // GetTrigger returns a selected binding by ID.
 func (s *Store) GetTrigger(ctx context.Context, id string) (domain.TriggerBinding, error) {
-	row := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings").Where(squirrel.Eq{"id": id}).QueryRowContext(ctx)
+	row := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "node_type", "config_json", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings").Where(squirrel.Eq{"id": id}).QueryRowContext(ctx)
 	return scanBinding(row)
 }
 
@@ -1819,6 +1858,7 @@ func (s *Store) LoadSettings(ctx context.Context, pluginDirectory string) (domai
 		Providers: []domain.ProviderConfig{{
 			ID: "ollama-local", Name: "Local Ollama", Kind: domain.ProviderOllama, BaseURL: "http://127.0.0.1:11434", Enabled: true,
 		}},
+		Twitch: domain.TwitchSettings{Identities: []domain.TwitchIdentity{}},
 	}
 	var value string
 	err := statements(s.db).Select("value").From("settings").Where(squirrel.Eq{"key": "app"}).QueryRowContext(ctx).Scan(&value)
@@ -1873,6 +1913,9 @@ func (s *Store) LoadSettings(ctx context.Context, pluginDirectory string) (domai
 	}
 	if settings.DefaultProviderID == "" {
 		settings.DefaultProviderID = settings.Providers[0].ID
+	}
+	if settings.Twitch.Identities == nil {
+		settings.Twitch.Identities = []domain.TwitchIdentity{}
 	}
 	return settings, nil
 }
@@ -1944,14 +1987,18 @@ func scanChatApproval(scanner chatApprovalScanner) (domain.ChatApproval, error) 
 
 func scanBinding(scanner bindingScanner) (domain.TriggerBinding, error) {
 	var binding domain.TriggerBinding
-	var kind, lastStatus, created, updated string
+	var kind, nodeType, configJSON, lastStatus, created, updated string
 	var enabled, trusted int
 	var nextRun, lastRun sql.NullString
-	err := scanner.Scan(&binding.ID, &binding.PipelineID, &binding.NodeID, &binding.Revision, &kind, &binding.Label, &binding.Icon, &binding.Color, &binding.GridPosition, &binding.Hotkey, &binding.Cron, &binding.Timezone, &enabled, &trusted, &nextRun, &lastRun, &lastStatus, &created, &updated)
+	err := scanner.Scan(&binding.ID, &binding.PipelineID, &binding.NodeID, &binding.Revision, &kind, &nodeType, &configJSON, &binding.Label, &binding.Icon, &binding.Color, &binding.GridPosition, &binding.Hotkey, &binding.Cron, &binding.Timezone, &enabled, &trusted, &nextRun, &lastRun, &lastStatus, &created, &updated)
 	if err != nil {
 		return domain.TriggerBinding{}, fmt.Errorf("scan trigger binding: %w", err)
 	}
-	binding.Kind, binding.Enabled, binding.Trusted = domain.TriggerKind(kind), enabled == 1, trusted == 1
+	binding.Kind, binding.NodeType, binding.Enabled, binding.Trusted = domain.TriggerKind(kind), nodeType, enabled == 1, trusted == 1
+	binding.Config = map[string]any{}
+	if strings.TrimSpace(configJSON) != "" && decode(configJSON, &binding.Config) != nil {
+		return domain.TriggerBinding{}, fmt.Errorf("decode trigger binding configuration")
+	}
 	binding.LastRunStatus, binding.CreatedAt, binding.UpdatedAt = domain.RunStatus(lastStatus), parseTime(created), parseTime(updated)
 	if nextRun.Valid {
 		value := parseTime(nextRun.String)

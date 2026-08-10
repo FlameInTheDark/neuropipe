@@ -292,6 +292,20 @@ type JavaScriptHTTPResponse struct {
 	Body    []byte
 }
 
+// TwitchChatSenderProvider is the narrow runtime port used by the Twitch Send
+// Chat Message node. It prevents a node module from importing the EventSub
+// service, HTTP client, vault, or Wails façade.
+type TwitchChatSenderProvider interface {
+	TwitchChatSender() TwitchChatSender
+}
+
+// TwitchChatSender accepts only the action's typed request and returns a
+// non-secret delivery result. Identity selection and OAuth token handling are
+// owned by infrastructure.
+type TwitchChatSender interface {
+	SendTwitchChatMessage(context.Context, domain.TwitchChatMessageRequest) (domain.TwitchChatMessageResult, error)
+}
+
 // Registry checks node IDs and provides deterministic access to first-party
 // module implementations.
 type Registry struct {
@@ -311,7 +325,7 @@ func (r *Registry) Register(node Node) error {
 	if definition.Type == "" {
 		return fmt.Errorf("node definition needs a type")
 	}
-	if definition.Mode != domain.NodePure && definition.Mode != domain.NodeImpure {
+	if definition.Mode != domain.NodePure && definition.Mode != domain.NodeImpure && definition.Mode != domain.NodeEvent {
 		return fmt.Errorf("node %q has unsupported executable mode %q", definition.Type, definition.Mode)
 	}
 	r.mu.Lock()

@@ -159,6 +159,8 @@ func validate(value reflect.Value, target domain.TypeSpec, path string) error {
 		return fmt.Errorf("%s is nil, need %s", path, target.Kind)
 	}
 	switch target.Kind {
+	case domain.TypeAny:
+		return nil
 	case domain.TypeBool:
 		if value.Kind() != reflect.Bool {
 			return typeError(path, target, value)

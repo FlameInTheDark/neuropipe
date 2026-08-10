@@ -119,6 +119,13 @@ func WithJavaScriptHost(host nodes.JavaScriptHost) EngineOption {
 	return func(engine *Engine) { engine.javascript = host }
 }
 
+// WithTwitchChatSender supplies the sole outbound Twitch capability required
+// by the Twitch node module. OAuth, EventSub, and persistence remain outside
+// the graph engine.
+func WithTwitchChatSender(sender nodes.TwitchChatSender) EngineOption {
+	return func(engine *Engine) { engine.twitch = sender }
+}
+
 // ValidationError explains why a definition cannot be published.
 type ValidationError struct {
 	Message string `json:"message"`

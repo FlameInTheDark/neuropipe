@@ -37,6 +37,7 @@ import (
 	localruntime "github.com/FlameInTheDark/neuropipe/internal/runtime"
 	"github.com/FlameInTheDark/neuropipe/internal/scheduler"
 	"github.com/FlameInTheDark/neuropipe/internal/security"
+	twitchservice "github.com/FlameInTheDark/neuropipe/internal/twitch"
 	"github.com/FlameInTheDark/neuropipe/internal/updatecheck"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -69,6 +70,7 @@ type Desktop struct {
 	runtimeInstallProgress domain.InstallProgress
 	modelInstallProgress   domain.InstallProgress
 	api                    *httpapi.Server
+	twitch                 *twitchservice.Service
 	settingsMu             sync.RWMutex
 	settings               domain.Settings
 	trayMu                 sync.RWMutex
@@ -135,6 +137,9 @@ func New(version string) (*Desktop, error) {
 		execution.WithMetricsRecorder(desktop.metrics),
 	)
 	desktop.runs.SetMaxConcurrentRuns(settings.MaxConcurrentRuns)
+	desktop.twitch = twitchservice.New(vault, store, desktop.runs, desktop.saveTwitchIdentity, desktop.emit)
+	desktop.twitch.Configure(settings.Twitch)
+	desktop.runs.SetTwitchChatSender(desktop.twitch)
 	desktop.chat = chatservice.NewService(store, desktop.runs, desktop.providers, desktop.emit)
 	desktop.scheduler = scheduler.New(store, desktop.runs)
 	desktop.hotkeys = hotkey.New(store, desktop.runs)
@@ -161,6 +166,7 @@ func (d *Desktop) Startup(ctx context.Context) {
 	if err := d.api.Configure(ctx, d.GetSettings().API); err != nil {
 		d.emit("api.status.error", err.Error())
 	}
+	d.twitch.Start(ctx)
 	if d.settings.LlamaRuntime.AutoStart {
 		_, _ = d.StartLlamaRuntime()
 	}
@@ -172,6 +178,7 @@ func (d *Desktop) Shutdown(context.Context) {
 	_ = d.api.Stop(context.Background())
 	d.hotkeys.Stop()
 	d.scheduler.Stop()
+	d.twitch.Stop()
 	d.chat.Stop()
 	d.runs.Stop()
 	d.metrics.Stop()
@@ -236,7 +243,7 @@ func (d *Desktop) PublishPipeline(pipeline domain.Pipeline) (domain.Pipeline, er
 	if err := pipelineValidate(pipeline.DraftDefinition, d.registry); err != nil {
 		return domain.Pipeline{}, err
 	}
-	bindings := bindingsFor(pipeline)
+	bindings := bindingsFor(pipeline, d.registry)
 	if err := d.hotkeys.Validate(d.context(), pipeline.ID, bindings); err != nil {
 		return domain.Pipeline{}, err
 	}
@@ -250,6 +257,7 @@ func (d *Desktop) PublishPipeline(pipeline domain.Pipeline) (domain.Pipeline, er
 	if err := d.hotkeys.Reload(d.context()); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("pipeline was published, but global hotkeys could not be registered: %w", err)
 	}
+	d.twitch.Reconcile()
 	return published, nil
 }
 
@@ -371,6 +379,30 @@ func (d *Desktop) ListTriggerButtons() ([]domain.TriggerBinding, error) {
 
 func (d *Desktop) ListSchedules() ([]domain.TriggerBinding, error) {
 	return d.store.ListTriggers(d.context(), domain.TriggerCron)
+}
+
+// ListTwitchTriggers exposes credential-free EventSub binding state for the
+// explicit trust/enable controls in Twitch settings.
+func (d *Desktop) ListTwitchTriggers() ([]domain.TriggerBinding, error) {
+	return d.store.ListTriggers(d.context(), domain.TriggerTwitch)
+}
+
+func (d *Desktop) SetTwitchTriggerEnabled(id string, enabled bool) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerTwitch {
+		return fmt.Errorf("trigger %q is not a Twitch trigger", binding.Label)
+	}
+	if enabled && !binding.Trusted {
+		return fmt.Errorf("trust the published pipeline revision before enabling this Twitch trigger")
+	}
+	if err := d.store.SetTriggerEnabled(d.context(), id, enabled); err != nil {
+		return err
+	}
+	d.twitch.Reconcile()
+	return nil
 }
 
 // ListAllTriggers returns every published trigger binding for local API clients.
@@ -567,11 +599,88 @@ func (d *Desktop) TrustPipelineRevision(pipelineID string, revision int) error {
 			return err
 		}
 	}
-	return d.store.TrustRevision(d.context(), pipelineID, revision)
+	if err := d.store.TrustRevision(d.context(), pipelineID, revision); err != nil {
+		return err
+	}
+	d.twitch.Reconcile()
+	return nil
 }
 
 func (d *Desktop) GrantCapability(grant domain.PermissionGrant) error {
 	return d.store.Grant(d.context(), grant)
+}
+
+// GetTwitchStatus exposes lifecycle state without exposing OAuth credentials.
+func (d *Desktop) GetTwitchStatus() domain.TwitchStatus { return d.twitch.Status() }
+
+// ListTwitchEventCatalog supplies the strict EventSub metadata used by the
+// trigger editor and settings UI.
+func (d *Desktop) ListTwitchEventCatalog() []domain.TwitchEventDescriptor { return d.twitch.Catalog() }
+
+func (d *Desktop) StartTwitchDeviceAuthorization(request domain.TwitchDeviceAuthorizationRequest) (domain.TwitchDeviceAuthorization, error) {
+	return d.twitch.BeginDeviceAuthorization(d.context(), request)
+}
+
+func (d *Desktop) CancelTwitchDeviceAuthorization(id string) { d.twitch.CancelDeviceAuthorization(id) }
+
+func (d *Desktop) AddTwitchManualIdentity(request domain.TwitchManualIdentityRequest) (domain.TwitchIdentity, error) {
+	return d.twitch.AddManualIdentity(d.context(), request)
+}
+
+func (d *Desktop) RemoveTwitchIdentity(id string) error {
+	return d.twitch.RemoveIdentity(d.context(), id)
+}
+
+func (d *Desktop) TrustTwitchTrigger(id string) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerTwitch {
+		return fmt.Errorf("trigger %q is not a Twitch trigger", binding.Label)
+	}
+	return d.TrustPipelineRevision(binding.PipelineID, binding.Revision)
+}
+
+// ResolveNodeDefinition keeps editor pin rendering in lockstep with the
+// module-owned dynamic port resolver.
+func (d *Desktop) ResolveNodeDefinition(node domain.FlowNode) (domain.NodeDefinition, error) {
+	definition, found := d.registry.Get(node.Type)
+	if !found {
+		return domain.NodeDefinition{}, fmt.Errorf("node type %q is unavailable", node.Type)
+	}
+	if module, found := d.registry.Node(node.Type); found {
+		return module.Resolve(node)
+	}
+	return definition, nil
+}
+
+func (d *Desktop) saveTwitchIdentity(ctx context.Context, identity domain.TwitchIdentity) error {
+	d.settingsMu.Lock()
+	defer d.settingsMu.Unlock()
+	identities := d.settings.Twitch.Identities[:0]
+	found := false
+	for _, item := range d.settings.Twitch.Identities {
+		if item.ID != identity.ID {
+			identities = append(identities, item)
+			continue
+		}
+		found = true
+		if identity.Status != domain.TwitchIdentityRevoked {
+			identities = append(identities, identity)
+		}
+	}
+	if !found && identity.Status != domain.TwitchIdentityRevoked {
+		identities = append(identities, identity)
+	}
+	d.settings.Twitch.Identities = identities
+	if d.settings.Twitch.DefaultBotIdentityID == identity.ID && identity.Status == domain.TwitchIdentityRevoked {
+		d.settings.Twitch.DefaultBotIdentityID = ""
+	}
+	if d.settings.Twitch.DefaultBotIdentityID == "" && identity.Status == domain.TwitchIdentityConnected {
+		d.settings.Twitch.DefaultBotIdentityID = identity.ID
+	}
+	return d.store.SaveSettings(ctx, d.settings)
 }
 
 func (d *Desktop) GetSettings() domain.Settings {
@@ -625,6 +734,9 @@ func (d *Desktop) SaveSettings(settings domain.Settings) error {
 		return err
 	}
 	d.settings = settings
+	if d.twitch != nil {
+		d.twitch.Configure(settings.Twitch)
+	}
 	d.providers.Configure(settings)
 	d.metrics.UpdateSettings(settings.Metrics)
 	_ = d.metrics.Purge(d.context())
@@ -1389,11 +1501,11 @@ func pipelineValidate(definition domain.FlowDefinition, registry *catalog.Regist
 	return pipeline.Validate(definition, registry)
 }
 
-func bindingsFor(pipeline domain.Pipeline) []domain.TriggerBinding {
+func bindingsFor(pipeline domain.Pipeline, registry *catalog.Registry) []domain.TriggerBinding {
 	bindings := make([]domain.TriggerBinding, 0)
 	for _, node := range pipeline.DraftDefinition.Nodes {
-		kind, ok := triggerKind(node.Type)
-		if !ok {
+		definition, ok := registry.Get(node.Type)
+		if !ok || definition.TriggerKind == "" {
 			continue
 		}
 		config := node.Data
@@ -1416,28 +1528,21 @@ func bindingsFor(pipeline domain.Pipeline) []domain.TriggerBinding {
 		case int:
 			gridPosition = value
 		}
-		bindings = append(bindings, domain.TriggerBinding{NodeID: node.ID, Kind: kind, Label: label, Icon: defaultString(icon, "play"), Color: defaultString(color, "#fafafa"), GridPosition: gridPosition, Hotkey: hotkey, Cron: cron, Timezone: defaultString(timezone, "Local")})
+		bindings = append(bindings, domain.TriggerBinding{NodeID: node.ID, NodeType: node.Type, Config: cloneConfig(config), Kind: definition.TriggerKind, Label: label, Icon: defaultString(icon, "play"), Color: defaultString(color, "#fafafa"), GridPosition: gridPosition, Hotkey: hotkey, Cron: cron, Timezone: defaultString(timezone, "Local")})
 	}
 	return bindings
 }
 
-func triggerKind(nodeType string) (domain.TriggerKind, bool) {
-	switch nodeType {
-	case "trigger:button":
-		return domain.TriggerButton, true
-	case "trigger:cron":
-		return domain.TriggerCron, true
-	case "trigger:file_watch":
-		return domain.TriggerFile, true
-	case "trigger:hotkey":
-		return domain.TriggerHotkey, true
-	case "trigger:webhook":
-		return domain.TriggerHook, true
-	case "trigger:chat":
-		return domain.TriggerChat, true
-	default:
-		return "", false
+func cloneConfig(config map[string]any) map[string]any {
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return map[string]any{}
 	}
+	var cloned map[string]any
+	if err := json.Unmarshal(encoded, &cloned); err != nil {
+		return map[string]any{}
+	}
+	return cloned
 }
 
 func defaultString(value, fallback string) string {

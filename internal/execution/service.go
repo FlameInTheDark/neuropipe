@@ -9,6 +9,7 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes"
 	"github.com/FlameInTheDark/neuropipe/internal/persistence"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
 	"github.com/FlameInTheDark/neuropipe/internal/security"
@@ -31,6 +32,7 @@ type Service struct {
 	emit     EventSink
 	notifier pipeline.NotificationSender
 	metrics  MetricsRecorder
+	twitch   nodes.TwitchChatSender
 
 	mu            sync.Mutex
 	running       map[string]struct{}
@@ -59,6 +61,15 @@ type queuedRun struct {
 
 // ServiceOption extends an execution coordinator with optional local services.
 type ServiceOption func(*Service)
+
+// WithTwitchChatSender attaches the narrow outbound Twitch capability used by
+// graph execution; OAuth and EventSub remain outside this coordinator.
+func WithTwitchChatSender(sender nodes.TwitchChatSender) ServiceOption {
+	return func(service *Service) { service.twitch = sender }
+}
+
+// SetTwitchChatSender completes Desktop composition before workers start.
+func (s *Service) SetTwitchChatSender(sender nodes.TwitchChatSender) { s.twitch = sender }
 
 // NewService creates an execution coordinator.
 func NewService(store *persistence.Store, registry *catalog.Registry, llm pipeline.LLMRunner, emit EventSink, options ...ServiceOption) *Service {
@@ -408,6 +419,7 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		pipeline.WithNotificationSender(s.notifier),
 		pipeline.WithChatWriter(chatWriter),
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, execution.PipelineID, execution.ID)),
+		pipeline.WithTwitchChatSender(s.twitch),
 	)
 	result, runErr := engine.Execute(runCtx, job.definition, job.triggerNodeID, job.input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
@@ -489,6 +501,7 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 		pipeline.WithNotificationSender(s.notifier),
 		pipeline.WithChatWriter(chatWriter),
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, pipelineID, execution.ID)),
+		pipeline.WithTwitchChatSender(s.twitch),
 	)
 	result, runErr := engine.Execute(ctx, definition, triggerNodeID, input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)

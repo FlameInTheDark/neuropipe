@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -99,10 +100,31 @@ func (s *blueprintState) start(nodeID string, initial Packet) error {
 		return fmt.Errorf("selected trigger %q does not exist", nodeID)
 	}
 	definition, _ := s.engine.registry.Get(node.Type)
+	var err error
+	definition, err = definitionForRegisteredNode(s.engine.registry, definition, node)
+	if err != nil {
+		return fmt.Errorf("selected trigger %q has invalid configuration: %w", nodeID, err)
+	}
 	if definition.Mode != domain.NodeEvent {
 		return fmt.Errorf("node %q is not an event trigger", nodeID)
 	}
 	frame := newBlueprintFrame()
+	if module, registered := s.engine.registry.Node(node.Type); registered {
+		result, executeErr := module.Execute(s.ctx, nodes.Invocation{Node: node, Definition: definition, SchemaVersion: s.definition.SchemaVersion, Config: configFor(node), Inputs: map[string]any{"event": initial["event"]}}, s)
+		if executeErr != nil {
+			return s.recordFailure(node, map[string]any{"event": initial["event"]}, executeErr)
+		}
+		frame.values[node.ID] = result.Outputs
+		if err := s.recordEvent(node, frame.values[node.ID]); err != nil {
+			return err
+		}
+		for _, port := range result.Ports {
+			if err := s.follow(node.ID, port, frame); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if node.Type == "trigger:chat" {
 		frame.values[node.ID] = map[string]any{
 			"text":      fmt.Sprint(initial["text"]),
@@ -387,14 +409,24 @@ func (s *blueprintState) resolveInputs(node domain.FlowNode, definition domain.N
 		if err != nil {
 			return result, err
 		}
+		fromConfiguration := false
 		if !found {
 			value, found = config[pin.ID]
+			fromConfiguration = found
 		}
 		if !found && pin.Default != nil {
 			value, found = pin.Default, true
+			fromConfiguration = true
 		}
 		if !found && pin.Required {
 			return result, fmt.Errorf("node %q requires data pin %q", node.ID, pin.Label)
+		}
+		if found && fromConfiguration && s.definition.SchemaVersion >= domain.GraphSchemaV3 && pin.Type != nil {
+			var canonicalErr error
+			value, canonicalErr = canonicalConfigurationValue(value, *pin.Type)
+			if canonicalErr != nil {
+				return result, fmt.Errorf("node %q pin %q: %w", node.ID, pin.Label, canonicalErr)
+			}
 		}
 		if found && s.definition.SchemaVersion >= domain.GraphSchemaV3 && pin.Type != nil {
 			if err := typespec.ValidateValue(value, *pin.Type); err != nil {
@@ -408,6 +440,43 @@ func (s *blueprintState) resolveInputs(node domain.FlowNode, definition domain.N
 		}
 	}
 	return result, nil
+}
+
+// canonicalConfigurationValue is the JSON/Wails boundary for persisted
+// inspector values. JSON represents all numbers as a single number token, so
+// an integral float64 is reified as a Go int only when the *declared config
+// pin* is Int. Wired data never takes this path: a Float wire remains a Float
+// and is rejected by an Int pin without an explicit Cast node.
+func canonicalConfigurationValue(value any, target domain.TypeSpec) (any, error) {
+	if target.Kind != domain.TypeInt {
+		return value, nil
+	}
+	var number float64
+	switch typed := value.(type) {
+	case int:
+		return typed, nil
+	case float64:
+		number = typed
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return nil, fmt.Errorf("must be an integer")
+		}
+		number = parsed
+	default:
+		return value, nil
+	}
+	// A number arriving through a JSON/Wails any-map is a float64. Keep the
+	// conversion inside its exact IEEE-754 integer range on 64-bit builds.
+	max := float64(9_007_199_254_740_991)
+	if strconv.IntSize == 32 {
+		max = 2_147_483_647
+	}
+	min := -max - 1
+	if math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || number < min || number > max {
+		return nil, fmt.Errorf("must be a finite integer")
+	}
+	return int(number), nil
 }
 
 func (s *blueprintState) resolveInput(targetID string, pin domain.NodePort, frame *blueprintFrame) (any, bool, error) {
@@ -567,6 +636,10 @@ func (s *blueprintState) DeleteVariable(name string) { delete(s.variables, name)
 func (s *blueprintState) JavaScriptHost() nodes.JavaScriptHost {
 	return s.engine.javascript
 }
+
+// TwitchChatSender implements the focused runtime port consumed by the Twitch
+// action node without exposing the concrete engine or desktop service.
+func (s *blueprintState) TwitchChatSender() nodes.TwitchChatSender { return s.engine.twitch }
 
 // Return implements nodes.ReturnSignaler.
 func (s *blueprintState) Return(value map[string]any) {

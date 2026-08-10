@@ -112,6 +112,8 @@ const (
 	TriggerHook   TriggerKind = "webhook"
 	// TriggerChat starts a published pipeline from a local conversation.
 	TriggerChat TriggerKind = "chat"
+	// TriggerTwitch starts a trusted pipeline from a Twitch EventSub event.
+	TriggerTwitch TriggerKind = "twitch"
 )
 
 type RunStatus string
@@ -157,9 +159,13 @@ type Pipeline struct {
 	Status            PipelineStatus `json:"status"`
 	DraftDefinition   FlowDefinition `json:"draftDefinition"`
 	PublishedRevision int            `json:"publishedRevision"`
-	MigrationIssue    string         `json:"migrationIssue,omitempty"`
-	CreatedAt         time.Time      `json:"createdAt"`
-	UpdatedAt         time.Time      `json:"updatedAt"`
+	// HasUnpublishedChanges distinguishes an editable draft from the immutable
+	// revision that triggers currently run. Trust is revision-scoped and must
+	// never make the draft read-only.
+	HasUnpublishedChanges bool      `json:"hasUnpublishedChanges"`
+	MigrationIssue        string    `json:"migrationIssue,omitempty"`
+	CreatedAt             time.Time `json:"createdAt"`
+	UpdatedAt             time.Time `json:"updatedAt"`
 }
 
 type PipelineSummary struct {
@@ -211,25 +217,29 @@ type FlowEdge struct {
 }
 
 type TriggerBinding struct {
-	ID            string      `json:"id"`
-	PipelineID    string      `json:"pipelineId"`
-	NodeID        string      `json:"nodeId"`
-	Revision      int         `json:"revision"`
-	Kind          TriggerKind `json:"kind"`
-	Label         string      `json:"label"`
-	Icon          string      `json:"icon"`
-	Color         string      `json:"color"`
-	GridPosition  int         `json:"gridPosition"`
-	Hotkey        string      `json:"hotkey,omitempty"`
-	Cron          string      `json:"cron,omitempty"`
-	Timezone      string      `json:"timezone,omitempty"`
-	Enabled       bool        `json:"enabled"`
-	Trusted       bool        `json:"trusted"`
-	NextRunAt     *time.Time  `json:"nextRunAt,omitempty"`
-	LastRunAt     *time.Time  `json:"lastRunAt,omitempty"`
-	LastRunStatus RunStatus   `json:"lastRunStatus,omitempty"`
-	CreatedAt     time.Time   `json:"createdAt"`
-	UpdatedAt     time.Time   `json:"updatedAt"`
+	ID         string      `json:"id"`
+	PipelineID string      `json:"pipelineId"`
+	NodeID     string      `json:"nodeId"`
+	Revision   int         `json:"revision"`
+	Kind       TriggerKind `json:"kind"`
+	// NodeType and Config are the immutable, canonical trigger-node metadata
+	// used by external trigger services. They contain no secret values.
+	NodeType      string         `json:"nodeType,omitempty"`
+	Config        map[string]any `json:"config,omitempty"`
+	Label         string         `json:"label"`
+	Icon          string         `json:"icon"`
+	Color         string         `json:"color"`
+	GridPosition  int            `json:"gridPosition"`
+	Hotkey        string         `json:"hotkey,omitempty"`
+	Cron          string         `json:"cron,omitempty"`
+	Timezone      string         `json:"timezone,omitempty"`
+	Enabled       bool           `json:"enabled"`
+	Trusted       bool           `json:"trusted"`
+	NextRunAt     *time.Time     `json:"nextRunAt,omitempty"`
+	LastRunAt     *time.Time     `json:"lastRunAt,omitempty"`
+	LastRunStatus RunStatus      `json:"lastRunStatus,omitempty"`
+	CreatedAt     time.Time      `json:"createdAt"`
+	UpdatedAt     time.Time      `json:"updatedAt"`
 }
 
 type Execution struct {
@@ -439,19 +449,26 @@ type NodeRun struct {
 }
 
 type NodeDefinition struct {
-	Type          string            `json:"type"`
-	Category      string            `json:"category"`
-	Label         string            `json:"label"`
-	Description   string            `json:"description"`
-	Icon          string            `json:"icon"`
-	Color         string            `json:"color"`
-	Mode          NodeExecutionMode `json:"mode"`
-	Inputs        []NodePort        `json:"inputs"`
-	Outputs       []NodePort        `json:"outputs"`
-	Fields        []ConfigField     `json:"fields"`
-	Capabilities  []Capability      `json:"capabilities,omitempty"`
-	DefaultConfig map[string]any    `json:"defaultConfig"`
-	Source        string            `json:"source"`
+	Type        string            `json:"type"`
+	Category    string            `json:"category"`
+	Label       string            `json:"label"`
+	Description string            `json:"description"`
+	Icon        string            `json:"icon"`
+	Color       string            `json:"color"`
+	Mode        NodeExecutionMode `json:"mode"`
+	// TriggerKind lets publishing derive bindings from module metadata instead
+	// of duplicating node-type switches in application services.
+	TriggerKind TriggerKind `json:"triggerKind,omitempty"`
+	// PortContractOwned marks definitions whose input and output ports are
+	// complete module contracts. The legacy catalog must not append generic
+	// payload/result pins to these definitions.
+	PortContractOwned bool           `json:"portContractOwned,omitempty"`
+	Inputs            []NodePort     `json:"inputs"`
+	Outputs           []NodePort     `json:"outputs"`
+	Fields            []ConfigField  `json:"fields"`
+	Capabilities      []Capability   `json:"capabilities,omitempty"`
+	DefaultConfig     map[string]any `json:"defaultConfig"`
+	Source            string         `json:"source"`
 }
 
 type NodePort struct {
@@ -606,6 +623,109 @@ type Settings struct {
 	LlamaRuntime         LlamaRuntimeSettings `json:"llamaRuntime"`
 	API                  APISettings          `json:"api"`
 	Metrics              MetricsSettings      `json:"metrics"`
+	Twitch               TwitchSettings       `json:"twitch"`
+}
+
+// TwitchSettings contains public configuration only. OAuth credentials remain
+// in the DPAPI-backed vault and must never be returned through Wails.
+type TwitchSettings struct {
+	ClientID             string           `json:"clientId"`
+	DefaultBotIdentityID string           `json:"defaultBotIdentityId,omitempty"`
+	Identities           []TwitchIdentity `json:"identities"`
+}
+
+type TwitchIdentityStatus string
+
+const (
+	TwitchIdentityConnected         TwitchIdentityStatus = "connected"
+	TwitchIdentityExpired           TwitchIdentityStatus = "expired"
+	TwitchIdentityReconnectRequired TwitchIdentityStatus = "reconnect-required"
+	TwitchIdentityRevoked           TwitchIdentityStatus = "revoked"
+)
+
+type TwitchConnectionMethod string
+
+const (
+	TwitchConnectionDeviceCode TwitchConnectionMethod = "device-code"
+	TwitchConnectionManual     TwitchConnectionMethod = "manual"
+)
+
+// TwitchIdentity is safe to persist in settings and expose to the editor. It
+// deliberately omits both access and refresh tokens and their vault keys.
+type TwitchIdentity struct {
+	ID        string                 `json:"id"`
+	Label     string                 `json:"label"`
+	UserID    string                 `json:"userId"`
+	Login     string                 `json:"login"`
+	Scopes    []string               `json:"scopes"`
+	ExpiresAt *time.Time             `json:"expiresAt,omitempty"`
+	Status    TwitchIdentityStatus   `json:"status"`
+	Method    TwitchConnectionMethod `json:"method"`
+}
+
+// TwitchEventConditionField describes one EventSub condition without leaking
+// OAuth implementation details into node packages or the renderer.
+type TwitchEventConditionField struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+}
+
+// TwitchEventDescriptor is the catalog contract shared by settings and the
+// dynamic trigger node. EventType is a current EventSub subscription type.
+type TwitchEventDescriptor struct {
+	Type           string                      `json:"type"`
+	Version        string                      `json:"version"`
+	Label          string                      `json:"label"`
+	Description    string                      `json:"description"`
+	RequiredScopes []string                    `json:"requiredScopes"`
+	Conditions     []TwitchEventConditionField `json:"conditions"`
+	EventType      TypeSpec                    `json:"eventType"`
+	ChatMessage    bool                        `json:"chatMessage"`
+}
+
+type TwitchStatus struct {
+	Connected           bool   `json:"connected"`
+	ConnectionState     string `json:"connectionState"`
+	ActiveSubscriptions int    `json:"activeSubscriptions"`
+	LastError           string `json:"lastError,omitempty"`
+}
+
+type TwitchDeviceAuthorizationRequest struct {
+	// IdentityID reconnects an existing public identity with a new scope set.
+	// An empty ID creates a new connected identity once authorization completes.
+	IdentityID string   `json:"identityId,omitempty"`
+	Label      string   `json:"label"`
+	Scopes     []string `json:"scopes"`
+}
+
+// TwitchDeviceAuthorization is the short-lived public half of an OAuth
+// device-code flow. The internal polling state and all tokens stay private.
+type TwitchDeviceAuthorization struct {
+	ID              string    `json:"id"`
+	UserCode        string    `json:"userCode"`
+	VerificationURI string    `json:"verificationUri"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	IntervalSeconds int       `json:"intervalSeconds"`
+}
+
+type TwitchManualIdentityRequest struct {
+	Label       string `json:"label"`
+	AccessToken string `json:"accessToken"`
+}
+
+type TwitchChatMessageRequest struct {
+	IdentityID    string `json:"identityId,omitempty"`
+	Channel       string `json:"channel"`
+	Message       string `json:"message"`
+	ReplyParentID string `json:"replyParentMessageId,omitempty"`
+}
+
+type TwitchChatMessageResult struct {
+	MessageID string `json:"messageId,omitempty"`
+	Sent      bool   `json:"sent"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // LLMMetricContext identifies a call without retaining its prompt, response,

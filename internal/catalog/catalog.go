@@ -187,7 +187,29 @@ func builtins() []domain.NodeDefinition {
 }
 
 func node(nodeType, category, label, description, icon, color string, inputs, outputs []domain.NodePort, fields []domain.ConfigField, defaults map[string]any, capabilities ...domain.Capability) domain.NodeDefinition {
-	return normalizeDefinition(domain.NodeDefinition{Type: nodeType, Category: category, Label: label, Description: description, Icon: icon, Color: color, Inputs: inputs, Outputs: outputs, Fields: fields, Capabilities: capabilities, DefaultConfig: defaults, Source: "builtin"})
+	return normalizeDefinition(domain.NodeDefinition{Type: nodeType, Category: category, Label: label, Description: description, Icon: icon, Color: color, Inputs: inputs, Outputs: outputs, Fields: fields, Capabilities: capabilities, DefaultConfig: defaults, TriggerKind: legacyTriggerKind(nodeType), Source: "builtin"})
+}
+
+// legacyTriggerKind only annotates the remaining pre-module catalog entries.
+// Publishing consumes NodeDefinition.TriggerKind, so no application service
+// duplicates this list and newly modular triggers declare it themselves.
+func legacyTriggerKind(nodeType string) domain.TriggerKind {
+	switch nodeType {
+	case "trigger:button":
+		return domain.TriggerButton
+	case "trigger:cron":
+		return domain.TriggerCron
+	case "trigger:file_watch":
+		return domain.TriggerFile
+	case "trigger:hotkey":
+		return domain.TriggerHotkey
+	case "trigger:webhook":
+		return domain.TriggerHook
+	case "trigger:chat":
+		return domain.TriggerChat
+	default:
+		return ""
+	}
 }
 
 func normalizeDefinition(definition domain.NodeDefinition) domain.NodeDefinition {
@@ -262,6 +284,9 @@ func inferMode(definition domain.NodeDefinition) domain.NodeExecutionMode {
 }
 
 func addFieldPins(definition domain.NodeDefinition) domain.NodeDefinition {
+	if definition.PortContractOwned {
+		return definition
+	}
 	if definition.Mode == domain.NodeVisual {
 		return definition
 	}

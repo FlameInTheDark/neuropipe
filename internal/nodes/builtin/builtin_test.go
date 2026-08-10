@@ -17,6 +17,7 @@ func TestRegisterAllRegistersNodeBehaviorWithMetadata(t *testing.T) {
 		switch definition.Mode {
 		case domain.NodePure:
 		case domain.NodeImpure:
+		case domain.NodeEvent:
 		default:
 			t.Fatalf("%s has unsupported mode %q", definition.Type, definition.Mode)
 		}

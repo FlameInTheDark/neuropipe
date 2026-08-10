@@ -35,6 +35,7 @@ type Engine struct {
 	notifications NotificationSender
 	chat          ChatWriter
 	javascript    nodes.JavaScriptHost
+	twitch        nodes.TwitchChatSender
 	variables     Packet
 }
 

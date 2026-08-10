@@ -50,6 +50,18 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/divide"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/multiply"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/subtract"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/case"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/contains"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/endswith"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/indexof"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/join"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/replace"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/split"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/startswith"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/substring"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/trim"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/twitch/event"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/twitch/sendchatmessage"
 )
 
 // RegisterAll registers first-party modules in a stable, reviewable order.
@@ -101,6 +113,18 @@ func RegisterAll(registrar nodes.Registrar) error {
 		listdirectory.Register,
 		readfile.Register,
 		writefile.Register,
+		event.Register,
+		sendchatmessage.Register,
+		split.Register,
+		join.Register,
+		contains.Register,
+		replace.Register,
+		trim.Register,
+		change.Register,
+		startswith.Register,
+		endswith.Register,
+		indexof.Register,
+		substring.Register,
 	} {
 		if err := register(registrar); err != nil {
 			return err

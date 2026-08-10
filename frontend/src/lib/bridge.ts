@@ -1,4 +1,4 @@
-import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SecretMetadata, Settings, TrayMenuLabels, TriggerBinding, UpdateAvailability } from '@/lib/types'
+import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SecretMetadata, Settings, TrayMenuLabels, TriggerBinding, TwitchDeviceAuthorization, TwitchDeviceAuthorizationRequest, TwitchEventDescriptor, TwitchIdentity, TwitchManualIdentityRequest, TwitchStatus, UpdateAvailability } from '@/lib/types'
 import i18n from '@/i18n'
 
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
@@ -20,6 +20,7 @@ export const desktop = {
   savePipeline: (pipeline: Pipeline) => call<Pipeline>('SavePipeline', pipeline),
   publishPipeline: (pipeline: Pipeline) => call<Pipeline>('PublishPipeline', pipeline),
   listNodes: () => call<NodeDefinition[]>('ListNodeDefinitions'),
+	resolveNodeDefinition: (node: unknown) => call<NodeDefinition>('ResolveNodeDefinition', node),
   validateJavaScript: (code: string) => call<void>('ValidateJavaScript', code),
   listDocumentation: (language: string) => call<DocumentationEntry[]>('ListDocumentation', language),
   getDocumentation: (language: string, id: string) => call<DocumentationDocument>('GetDocumentation', language, id),
@@ -33,6 +34,9 @@ export const desktop = {
   deleteFunction: (id: string) => call<void>('DeleteFunction', id),
   listButtons: () => call<TriggerBinding[]>('ListTriggerButtons'),
   listSchedules: () => call<TriggerBinding[]>('ListSchedules'),
+	listTwitchTriggers: () => call<TriggerBinding[]>('ListTwitchTriggers'),
+	setTwitchTriggerEnabled: (id: string, enabled: boolean) => call<void>('SetTwitchTriggerEnabled', id, enabled),
+	trustTwitchTrigger: (id: string) => call<void>('TrustTwitchTrigger', id),
   setScheduleEnabled: (id: string, enabled: boolean) => call<void>('SetScheduleEnabled', id, enabled),
   runTrigger: (id: string) => call<Execution>('RunTrigger', id),
   runPipelineDraft: (pipelineId: string, triggerNodeId: string) => call<Execution>('RunPipelineDraft', pipelineId, triggerNodeId),
@@ -58,6 +62,12 @@ export const desktop = {
   trustRevision: (pipelineId: string, revision: number) => call<void>('TrustPipelineRevision', pipelineId, revision),
   getSettings: () => call<Settings>('GetSettings'),
   saveSettings: (settings: Settings) => call<void>('SaveSettings', settings),
+	getTwitchStatus: () => call<TwitchStatus>('GetTwitchStatus'),
+	listTwitchEventCatalog: () => call<TwitchEventDescriptor[]>('ListTwitchEventCatalog'),
+	startTwitchDeviceAuthorization: (request: TwitchDeviceAuthorizationRequest) => call<TwitchDeviceAuthorization>('StartTwitchDeviceAuthorization', request),
+	cancelTwitchDeviceAuthorization: (id: string) => call<void>('CancelTwitchDeviceAuthorization', id),
+	addTwitchManualIdentity: (request: TwitchManualIdentityRequest) => call<TwitchIdentity>('AddTwitchManualIdentity', request),
+	removeTwitchIdentity: (id: string) => call<void>('RemoveTwitchIdentity', id),
 	configureTrayMenu: (labels: TrayMenuLabels) => call<void>('ConfigureTrayMenu', labels),
   chooseContentDirectory: () => call<string>('ChooseContentDirectory'),
   getLlamaRuntimeStatus: () => call<LlamaRuntimeStatus>('GetLlamaRuntimeStatus'),

@@ -43,6 +43,14 @@ func TestValidateValueChecksNestedRecords(t *testing.T) {
 	}
 }
 
+func TestValidateValueAllowsAnyNestedInsideStructuredContracts(t *testing.T) {
+	key, value := String(), Any()
+	contract := domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{{Name: "payload", Type: domain.TypeSpec{Kind: domain.TypeMap, Key: &key, Value: &value}}}}
+	if err := ValidateValue(map[string]any{"payload": map[string]any{"count": 3, "items": []any{"text"}}}, contract); err != nil {
+		t.Fatalf("nested any value was rejected: %v", err)
+	}
+}
+
 func TestNamedRecordRequiresItsNamedGoValue(t *testing.T) {
 	type User struct{ Name string }
 	type Account struct{ Name string }

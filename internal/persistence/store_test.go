@@ -72,6 +72,51 @@ func TestPublishCreatesImmutableRevisionAndBindings(t *testing.T) {
 	}
 }
 
+func TestTrustedRevisionStillAllowsDraftUpdatesAndRepublishing(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	definition := domain.FlowDefinition{Nodes: []domain.FlowNode{{
+		ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Before"}},
+	}}}
+	pipeline, err := store.CreatePipeline(ctx, "Editable after trust", definition)
+	if err != nil {
+		t.Fatalf("CreatePipeline() error = %v", err)
+	}
+	binding := domain.TriggerBinding{NodeID: "button", Kind: domain.TriggerButton, Label: "Run"}
+	published, err := store.Publish(ctx, pipeline, []domain.TriggerBinding{binding})
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if err := store.TrustRevision(ctx, published.ID, published.PublishedRevision); err != nil {
+		t.Fatalf("TrustRevision() error = %v", err)
+	}
+
+	published.DraftDefinition.Nodes[0].Data = map[string]any{"config": map[string]any{"label": "After"}}
+	saved, err := store.SaveDraft(ctx, published)
+	if err != nil {
+		t.Fatalf("SaveDraft() after trust error = %v", err)
+	}
+	if saved.PublishedRevision != 1 || saved.Status != domain.PipelineActive || !saved.HasUnpublishedChanges {
+		t.Fatalf("saved pipeline = %#v, want active revision 1 with an unpublished draft", saved)
+	}
+
+	republished, err := store.Publish(ctx, saved, []domain.TriggerBinding{binding})
+	if err != nil {
+		t.Fatalf("Publish() after trust error = %v", err)
+	}
+	if republished.PublishedRevision != 2 || republished.HasUnpublishedChanges {
+		t.Fatalf("republished pipeline = %#v, want revision 2 without draft changes", republished)
+	}
+	bindings, err := store.ListTriggers(ctx, domain.TriggerButton)
+	if err != nil || len(bindings) != 1 || bindings[0].Revision != 2 || bindings[0].Trusted {
+		t.Fatalf("replacement bindings = %#v, %v; want an untrusted revision 2 binding", bindings, err)
+	}
+}
+
 func TestPublishEnablesGlobalHotkeyBinding(t *testing.T) {
 	store, err := New(filepath.Join(t.TempDir(), "data"))
 	if err != nil {

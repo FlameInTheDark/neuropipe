@@ -9,10 +9,12 @@ require (
 	github.com/getlantern/systray v1.2.2
 	github.com/gofiber/fiber/v3 v3.4.0
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/mattn/go-sqlite3 v1.14.41
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/wailsapp/wails/v2 v2.12.0
 	golang.org/x/sys v0.46.0
+	golang.org/x/text v0.38.0
 )
 
 require (
@@ -32,7 +34,6 @@ require (
 	github.com/gofiber/schema v1.8.0 // indirect
 	github.com/gofiber/utils/v2 v2.1.1 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/labstack/echo/v4 v4.13.3 // indirect
@@ -60,5 +61,4 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
 )

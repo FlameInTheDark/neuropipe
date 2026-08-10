@@ -139,14 +139,16 @@ export function resolveJavaScriptInputs(
   definition: NodeDefinition,
   config: Record<string, unknown>,
 ): NodePort[] {
-  return [...definition.inputs, ...ports(defaultJavaScriptNodeConfig(config).inputs, "input")];
+  const inputs = Array.isArray(definition.inputs) ? definition.inputs : [];
+  return [...inputs, ...ports(defaultJavaScriptNodeConfig(config).inputs, "input")];
 }
 
 export function resolveJavaScriptOutputs(
   definition: NodeDefinition,
   config: Record<string, unknown>,
 ): NodePort[] {
-  return [...definition.outputs, ...ports(defaultJavaScriptNodeConfig(config).outputs, "output")];
+  const outputs = Array.isArray(definition.outputs) ? definition.outputs : [];
+  return [...outputs, ...ports(defaultJavaScriptNodeConfig(config).outputs, "output")];
 }
 
 export function isJavaScriptIdentifier(value: string) {

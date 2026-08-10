@@ -32,6 +32,7 @@ import {
   Bot,
   Check,
   ChevronRight,
+  CircleAlert,
   CirclePlay,
   Copy,
   FileCode2,
@@ -93,7 +94,9 @@ import type {
 import { isTypeAssignable } from "@/lib/type-spec";
 import { useUIStore } from "@/stores/ui";
 import i18n from "@/i18n";
+import { localizeNodeDefinitions } from "@/i18n/node-catalog";
 import { useTranslation } from "react-i18next";
+import { TwitchIdentitySelect } from "@/components/TwitchIdentitySelect";
 
 interface EditorNodeData {
   type: string;
@@ -102,6 +105,9 @@ interface EditorNodeData {
   icon?: string;
   inputs?: NodePort[];
   outputs?: NodePort[];
+	// Dynamic modules keep the backend-resolved metadata with the editor node.
+	// It is intentionally omitted when serialising a FlowNode.
+	resolvedDefinition?: NodeDefinition;
   lastRun?: NodeRun;
 }
 type EditorNode = FlowNode & { data: EditorNodeData };
@@ -537,15 +543,24 @@ function EditorContents({
         desktop.listExecutions(pipelineID),
       ]);
       setPipeline(nextPipeline);
-      setNodes(
-        withExecutionResults(
-          hydrateNodes(
-            asArray(nextPipeline.draftDefinition?.nodes),
-            definitions,
-          ),
-          asArray(nextHistory)[0],
-        ),
-      );
+		const hydrated = withExecutionResults(
+			hydrateNodes(asArray(nextPipeline.draftDefinition?.nodes), definitions),
+			asArray(nextHistory)[0],
+		);
+		setNodes(hydrated);
+		const dynamic = hydrated.filter((node) => node.data.type === "twitch:event");
+		if (dynamic.length > 0) {
+			void Promise.all(dynamic.map(async (node) => {
+				const definition = await desktop.resolveNodeDefinition({ id: node.id, type: node.data.type, position: node.position, data: { config: node.data.config } });
+				return { node, definition: localizeNodeDefinitions([definition], i18n.language)[0] ?? definition };
+			})).then((resolved) => {
+				const byID = new Map(resolved.map((item) => [item.node.id, item.definition]));
+				setNodes((current) => current.map((node) => {
+					const definition = byID.get(node.id);
+					return definition ? { ...node, data: { ...node.data, resolvedDefinition: definition, inputs: resolveInputs(definition, node.data.config), outputs: resolveOutputs(definition, node.data.config) } } : node;
+				}));
+			}).catch(() => { /* validation reports the backend resolver error on save/publish */ });
+		}
       setEdges(
         withExecutionEdges(
           asArray(nextPipeline.draftDefinition?.edges),
@@ -577,7 +592,7 @@ function EditorContents({
   });
 
   const selected = nodes.find((node) => node.id === selectedID);
-  const selectedDefinition = definitions.find(
+  const selectedDefinition = selected?.data.resolvedDefinition ?? definitions.find(
     (definition) => definition.type === selected?.data.type,
   );
   const selectedSourceFields = useMemo(() => {
@@ -739,6 +754,20 @@ function EditorContents({
     (definition: NodeDefinition, position = { x: 280, y: 180 }) => {
       const node = createEditorNode(definition, snapPosition(position));
       setNodes((current) => [...current, node]);
+		if (node.data.type === "twitch:event") {
+			void desktop.resolveNodeDefinition({
+				id: node.id,
+				type: node.data.type,
+				position: node.position,
+				data: { config: node.data.config },
+			}).then((raw) => {
+				const resolved = localizeNodeDefinitions([raw], i18n.language)[0] ?? raw;
+				setNodes((current) => current.map((item) => item.id === node.id ? {
+					...item,
+					data: { ...item.data, resolvedDefinition: resolved, inputs: resolveInputs(resolved, item.data.config), outputs: resolveOutputs(resolved, item.data.config) },
+				} : item));
+			}).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t("editor.saveFailed")));
+		}
       setSelectedID(node.id);
       setDirty(true);
       return node.id;
@@ -919,7 +948,10 @@ function EditorContents({
           ...values,
         })
       : undefined;
-    const removedOutputIDs = nextConfig
+	// The backend resolves Twitch event ports from the selected EventSub type.
+	// Keep existing wires until that authoritative resolution finishes; this
+	// prevents a field edit from silently deleting graph data edges.
+    const removedOutputIDs = nextConfig && selectedNode?.data.type !== "twitch:event"
       ? (selectedNode!.data.outputs ?? [])
           .filter((output) =>
             !resolveOutputs(selectedDefinition, nextConfig).some(
@@ -946,6 +978,23 @@ function EditorContents({
         };
       }),
     );
+	// Dynamic first-party contracts stay owned by the backend module. The
+	// Twitch trigger is resolved after its event selection changes so the
+	// canvas, compatibility highlighting, and runtime share one port shape.
+	if (selectedNode?.data.type === "twitch:event" && nextConfig) {
+		void desktop.resolveNodeDefinition({
+			id: selectedNode.id,
+			type: selectedNode.data.type,
+			position: selectedNode.position,
+			data: { config: nextConfig },
+		}).then((raw) => {
+			const resolved = localizeNodeDefinitions([raw], i18n.language)[0] ?? raw;
+			setNodes((current) => current.map((node) => node.id === selectedNode.id ? {
+				...node,
+			data: { ...node.data, resolvedDefinition: resolved, inputs: resolveInputs(resolved, nextConfig), outputs: resolveOutputs(resolved, nextConfig) },
+			} : node));
+		}).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t("editor.saveFailed")));
+	}
     if (removedOutputIDs.length > 0) {
       setEdges((current) =>
         current.filter(
@@ -1230,7 +1279,9 @@ function EditorContents({
               </Tooltip>
             )}
             <p className="text-xs text-zinc-600">
-              {pipeline.status === "active"
+              {pipeline.hasUnpublishedChanges
+                ? t("pipelineStatus.draftUpdate", { version: pipeline.publishedRevision })
+                : pipeline.status === "active"
                 ? t("editor.published", { version: pipeline.publishedRevision })
                 : t("editor.draft")}
               {dirty ? ` · ${t("editor.unsaved")}` : ""}
@@ -1279,6 +1330,19 @@ function EditorContents({
           </Button>
         </div>
       </header>
+      {pipeline.hasUnpublishedChanges ? (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-5 py-2 text-xs text-amber-200"
+          role="status"
+        >
+          <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
+          <p>
+            {t("pipelineStatus.draftUpdateNotice", {
+              version: pipeline.publishedRevision,
+            })}
+          </p>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1">
         <div
           className="grid h-full min-h-0"
@@ -1802,6 +1866,12 @@ function ConfigControl({
         <JavaScriptCodeControl
           config={{ ...nodeConfig, [field.name]: resolvedValue }}
           onChange={(config) => onConfigChange(config as unknown as Record<string, unknown>)}
+        />
+      ) : field.kind === "twitch-identity" ? (
+        <TwitchIdentitySelect
+          value={stringValue}
+          onValueChange={onChange}
+          ariaLabel={field.label}
         />
       ) : field.kind === "select" || field.kind === "wire-representation" ? (
         <Select
@@ -2434,9 +2504,10 @@ function hydrateNodes(
         type,
         label: definition?.label,
         icon: definition?.icon,
-        inputs: resolveInputs(definition, config),
-        outputs: resolveOutputs(definition, config),
-        config,
+		inputs: resolveInputs(definition, config),
+		outputs: resolveOutputs(definition, config),
+		resolvedDefinition: definition,
+		config,
       },
     } as EditorNode;
   });
@@ -2459,6 +2530,7 @@ function createEditorNode(
       icon: definition.icon,
       inputs: resolveInputs(definition, config),
       outputs: resolveOutputs(definition, config),
+		resolvedDefinition: definition,
       config,
     },
   };

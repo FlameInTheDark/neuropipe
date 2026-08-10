@@ -259,28 +259,33 @@ export function nextMappingID<T extends { id: string }>(mappings: readonly T[]) 
   }
 }
 
+function definitionPorts(ports: NodePort[] | undefined | null): NodePort[] {
+  return Array.isArray(ports) ? ports : [];
+}
+
 export function resolveConfigDrivenInputs(
   definition: NodeDefinition | undefined,
   config: Record<string, unknown>,
 ): NodePort[] {
   if (!definition) return [];
+  const inputs = definitionPorts(definition.inputs);
   if (definition.type === "action:javascript") {
-    return resolveJavaScriptInputs(definition, config);
+    return resolveJavaScriptInputs({ ...definition, inputs }, config);
   }
   if (definition.type === "data:base64_encode" || definition.type === "data:base64_decode") {
     const representation = textBytesRepresentation(config.inputType ?? definition.defaultConfig?.inputType);
-    return definition.inputs.map((pin) =>
+    return inputs.map((pin) =>
       pin.id === "value" ? textBytesPin(pin, representation) : pin,
     );
   }
   if (definition.type === "action:file_write") {
     const representation = textBytesRepresentation(config.contentType ?? definition.defaultConfig?.contentType);
-    return definition.inputs.map((pin) =>
+    return inputs.map((pin) =>
       pin.id === "content" ? textBytesPin(pin, representation) : pin,
     );
   }
   if (definition.type !== "data:build_object" || config.fields === undefined) {
-    return [...definition.inputs];
+    return [...inputs];
   }
   const fields = objectFieldsFromValue(
     config.fields ?? definition.defaultConfig?.fields,
@@ -302,8 +307,9 @@ export function resolveConfigDrivenOutputs(
   config: Record<string, unknown>,
 ): NodePort[] {
   if (!definition) return [];
+  const outputs = definitionPorts(definition.outputs);
   if (definition.type === "action:javascript") {
-    return resolveJavaScriptOutputs(definition, config);
+    return resolveJavaScriptOutputs({ ...definition, outputs }, config);
   }
   if (
     definition.type === "data:base64_encode" ||
@@ -311,7 +317,7 @@ export function resolveConfigDrivenOutputs(
     definition.type === "action:file_read"
   ) {
     const representation = textBytesRepresentation(config.outputType ?? definition.defaultConfig?.outputType);
-    return definition.outputs.map((pin) =>
+    return outputs.map((pin) =>
       pin.id === "result" ? textBytesPin(pin, representation) : pin,
     );
   }
@@ -330,7 +336,7 @@ export function resolveConfigDrivenOutputs(
         color: "#fafafa",
         maxConnections: 1,
       })),
-      ...definition.outputs,
+      ...outputs,
     ];
   }
   if (definition.type === "llm:choice") {
@@ -346,7 +352,7 @@ export function resolveConfigDrivenOutputs(
         color: "#fafafa",
         maxConnections: 1,
       })),
-      ...definition.outputs,
+      ...outputs,
     ];
   }
   if (definition.type === "data:constant") {
@@ -355,7 +361,7 @@ export function resolveConfigDrivenOutputs(
       target === "text" || target === "number" || target === "boolean"
         ? target
         : "any";
-    return definition.outputs.map((pin) =>
+    return outputs.map((pin) =>
       pin.id === "value"
         ? { ...pin, dataType, type: typeSpecFromDataType(dataType), color: dataPinColor(dataType) }
         : pin,
@@ -364,14 +370,14 @@ export function resolveConfigDrivenOutputs(
   if (definition.type === "data:cast") {
     const target = config.target ?? definition.defaultConfig?.target;
     const dataType: DataType = target === "text" || target === "number" || target === "boolean" ? target : "any";
-    return definition.outputs.map((pin) =>
+    return outputs.map((pin) =>
       pin.id === "value" ? { ...pin, dataType, type: typeSpecFromDataType(dataType), color: dataPinColor(dataType) } : pin,
     );
   }
   if (definition.type === "data:type_assert") {
     const type = typeSpecFromValue(config.typeSpec ?? definition.defaultConfig?.typeSpec);
     const dataType = dataTypeForTypeSpec(type);
-    return definition.outputs.map((pin) =>
+    return outputs.map((pin) =>
       pin.id === "value" ? { ...pin, dataType, type, color: dataPinColor(dataType) } : pin,
     );
   }
@@ -379,7 +385,7 @@ export function resolveConfigDrivenOutputs(
     definition.type !== "data:get_field" &&
     definition.type !== "data:break_object"
   ) {
-    return [...definition.outputs];
+    return [...outputs];
   }
   const hasLegacyPath =
     definition.type === "data:get_field" &&
