@@ -7,7 +7,7 @@ import (
 )
 
 // APIVersion changes only for breaking plugin contract changes.
-const APIVersion = "v1"
+const APIVersion = "v2"
 
 // Bundle describes one independently versioned plugin process.
 type Bundle struct {
@@ -41,14 +41,41 @@ type NodeSpec struct {
 	Icon         string       `json:"icon"`
 	Color        string       `json:"color"`
 	Capabilities []string     `json:"capabilities"`
+	Inputs       []InputPort  `json:"inputs"`
 	Outputs      []OutputPort `json:"outputs"`
 	Fields       []FieldSpec  `json:"fields"`
 }
 
+// TypeSpec is the public, JSON-safe wire contract used by plugin node pins.
+// It mirrors the host's V3 types without exposing an internal Go package.
+type TypeSpec struct {
+	Kind    string          `json:"kind"`
+	Name    string          `json:"name,omitempty"`
+	Element *TypeSpec       `json:"element,omitempty"`
+	Key     *TypeSpec       `json:"key,omitempty"`
+	Value   *TypeSpec       `json:"value,omitempty"`
+	Fields  []TypeFieldSpec `json:"fields,omitempty"`
+}
+
+type TypeFieldSpec struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Type     TypeSpec `json:"type"`
+	Optional bool     `json:"optional,omitempty"`
+}
+
+type InputPort struct {
+	ID       string   `json:"id"`
+	Label    string   `json:"label"`
+	Type     TypeSpec `json:"type"`
+	Required bool     `json:"required,omitempty"`
+}
+
 type OutputPort struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Kind  string `json:"kind"`
+	ID    string   `json:"id"`
+	Label string   `json:"label"`
+	Kind  string   `json:"kind"`
+	Type  TypeSpec `json:"type,omitempty"`
 }
 
 type FieldSpec struct {

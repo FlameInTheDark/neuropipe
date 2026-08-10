@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BlueprintContextMenu } from "@/components/BlueprintContextMenu";
+import { contextMenuPosition } from "@/components/ContextMenu";
 import {
   FieldOutputsEditor,
   ObjectFieldsEditor,
@@ -39,9 +40,11 @@ import {
 import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEditor";
 import { BlueprintNodeLibrary } from "@/components/BlueprintNodeLibrary";
 import { BlueprintPinTooltip } from "@/components/BlueprintPinTooltip";
+import { JavaScriptCodeControl } from "@/components/JavaScriptCodeControl";
 import { IconAppearancePicker, LucideIcon, LucideIconPicker } from "@/components/LucideIconPicker";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { desktop } from "@/lib/bridge";
 import { nodePinColor } from "@/lib/node-pins";
@@ -49,6 +52,7 @@ import {
   resolveConfigDrivenInputs,
   resolveConfigDrivenOutputs,
 } from "@/lib/blueprint-dynamic-pins";
+import { isTypeAssignable, typeSpecFromDataType } from "@/lib/type-spec";
 import { usePersistedChoice } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 import type {
@@ -105,12 +109,12 @@ const dataTypes: DataType[] = [
 ];
 
 function compatiblePins(source: NodePort, target: NodePort) {
-  return (
-    source.kind === target.kind &&
-    (source.kind === "exec" ||
-      source.dataType === "any" ||
-      target.dataType === "any" ||
-      source.dataType === target.dataType)
+  if (source.kind !== target.kind || source.kind !== "data") {
+    return source.kind === target.kind;
+  }
+  return isTypeAssignable(
+    source.type ?? typeSpecFromDataType(source.dataType ?? "any"),
+    target.type ?? typeSpecFromDataType(target.dataType ?? "any"),
   );
 }
 
@@ -291,11 +295,11 @@ export function FunctionEditor({
         ?.data.outputs.find((pin) => pin.id === edge.sourceHandle)?.fields ?? []
     );
   }, [edges, nodes, selected]);
-  const updateNodeConfig = (field: string, value: unknown) => {
+  const updateNodeConfigValues = (values: Record<string, unknown>) => {
     if (!selectedID) return;
     const selectedNode = nodes.find((node) => node.id === selectedID);
     const nextConfig = selectedNode
-      ? { ...selectedNode.data.config, [field]: value }
+      ? { ...selectedNode.data.config, ...values }
       : undefined;
     const removedOutputIDs = nextConfig
       ? selectedNode!.data.outputs
@@ -315,7 +319,7 @@ export function FunctionEditor({
     setNodes((current) =>
       current.map((node) => {
         if (node.id !== selectedID) return node;
-        const config = { ...node.data.config, [field]: value };
+        const config = { ...node.data.config, ...values };
         const definition = definitions.find((item) => item.type === node.data.type);
         return {
           ...node,
@@ -339,6 +343,9 @@ export function FunctionEditor({
     }
     setDirty(true);
   };
+  const updateNodeConfig = (field: string, value: unknown) => {
+    updateNodeConfigValues({ [field]: value });
+  };
   const addPin = (side: "inputs" | "outputs") =>
     update({
       [side]: [
@@ -347,6 +354,7 @@ export function FunctionEditor({
           id: crypto.randomUUID(),
           name: side === "inputs" ? "Input" : "Output",
           dataType: "any",
+          type: typeSpecFromDataType("any"),
         },
       ],
     } as Pick<CustomFunction, typeof side>);
@@ -356,9 +364,12 @@ export function FunctionEditor({
     change: Partial<FunctionPin>,
   ) =>
     update({
-      [side]: (item?.[side] ?? []).map((pin, pinIndex) =>
-        pinIndex === index ? { ...pin, ...change } : pin,
-      ),
+      [side]: (item?.[side] ?? []).map((pin, pinIndex) => {
+        if (pinIndex !== index) return pin;
+        const next = { ...pin, ...change };
+        if (change.dataType) next.type = typeSpecFromDataType(change.dataType);
+        return next;
+      }),
     } as Pick<CustomFunction, typeof side>);
   const removePin = (side: "inputs" | "outputs", id: string) =>
     update({
@@ -524,12 +535,16 @@ export function FunctionEditor({
     const bounds = canvasRef.current?.getBoundingClientRect();
     const width = 332;
     const height = 450;
-    const gutter = 8;
+    const menuPosition = contextMenuPosition(
+      event,
+      { width, height },
+      bounds,
+    );
     const relativeX = bounds ? event.clientX - bounds.left : event.clientX;
     const relativeY = bounds ? event.clientY - bounds.top : event.clientY;
     setMenu({
-      x: bounds ? Math.max(gutter, Math.min(relativeX, Math.max(gutter, bounds.width - width - gutter))) : relativeX,
-      y: bounds ? Math.max(gutter, Math.min(relativeY, Math.max(gutter, bounds.height - height - gutter))) : relativeY,
+      x: menuPosition.x,
+      y: menuPosition.y,
       position: flow?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) ?? { x: relativeX, y: relativeY },
       nodeID,
       edgeID,
@@ -574,7 +589,7 @@ export function FunctionEditor({
     try {
       setBusy(publish ? "publish" : "save");
       const draftDefinition = {
-        schemaVersion: 2,
+        schemaVersion: item.draftDefinition.schemaVersion,
         nodes: nodes.map((node) => ({
           id: node.id,
           type: node.data.type,
@@ -646,7 +661,7 @@ export function FunctionEditor({
               className="h-7 w-64 text-sm font-semibold"
             />
             <p className="mt-1 text-xs text-zinc-600">
-              {item.mode === "pure" ? t("functions.pure") : t("functions.impure")} ·{" "}
+              {item.kind === "tool" ? t("functions.tool") : item.mode === "pure" ? t("functions.pure") : t("functions.impure")} ·{" "}
               {item.publishedRevision
                 ? t("functionEditor.published", { version: item.publishedRevision })
                 : t("functionEditor.draft")}
@@ -752,22 +767,23 @@ export function FunctionEditor({
             <Background color="#27272a" gap={20} size={1} />
             <Controls showInteractive={false} />
             <Panel position="top-left" className="!m-3 flex gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1">
-              <Button size="sm" variant="ghost" onClick={autoLayout}>
-                <LayoutGrid className="size-3.5" />
-                {t("editor.layout")}
-              </Button>
-              <Tooltip content={gridSnapMode === "on" ? t("editor.snapOff") : t("editor.snapOn")} side="bottom">
-                <Button size="sm" variant={gridSnapMode === "on" ? "secondary" : "ghost"} aria-pressed={gridSnapMode === "on"} onClick={() => setGridSnapMode(gridSnapMode === "on" ? "off" : "on")}>
-                  <Magnet className="size-3.5" />
-                  {t("editorActions.snap")}
+              <Tooltip content={t("editor.layout")} side="bottom">
+                <Button size="sm" variant="ghost" className="size-7 p-0" onClick={autoLayout} aria-label={t("editor.layout")}>
+                  <LayoutGrid className="size-3.5" />
                 </Button>
               </Tooltip>
-              <Button size="sm" variant="ghost" onClick={duplicateSelected} disabled={!selectedID}>
-                <Copy className="size-3.5" />
-                {t("editorActions.duplicate")}
-              </Button>
+              <Tooltip content={gridSnapMode === "on" ? t("editor.snapOff") : t("editor.snapOn")} side="bottom">
+                <Button size="sm" variant={gridSnapMode === "on" ? "secondary" : "ghost"} className="size-7 p-0" aria-label={gridSnapMode === "on" ? t("editor.snapOff") : t("editor.snapOn")} aria-pressed={gridSnapMode === "on"} onClick={() => setGridSnapMode(gridSnapMode === "on" ? "off" : "on")}>
+                  <Magnet className="size-3.5" />
+                </Button>
+              </Tooltip>
+              <Tooltip content={t("editorActions.duplicate")} side="bottom">
+                <Button size="sm" variant="ghost" className="size-7 p-0" aria-label={t("editorActions.duplicate")} onClick={duplicateSelected} disabled={!selectedID}>
+                  <Copy className="size-3.5" />
+                </Button>
+              </Tooltip>
               <Tooltip content={t("editorActions.delete")} side="bottom">
-                <Button size="sm" variant="ghost" onClick={removeSelected} disabled={!selectedID} aria-label={t("editorActions.delete")}>
+                <Button size="sm" variant="ghost" className="size-7 p-0" onClick={removeSelected} disabled={!selectedID} aria-label={t("editorActions.delete")}>
                   <Trash2 className="size-3.5 text-red-300" />
                 </Button>
               </Tooltip>
@@ -797,7 +813,7 @@ export function FunctionEditor({
             />
           ) : null}
         </div>
-        <aside className="muted-scroll overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-4">
+        <aside className="muted-scroll min-w-0 overflow-x-hidden overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-4">
           <section className="space-y-3">
             <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-zinc-600">
               {t("functionEditor.details")}
@@ -814,10 +830,22 @@ export function FunctionEditor({
               className="min-h-20 w-full rounded-md border border-zinc-700 bg-zinc-950 p-2 text-xs text-zinc-200 outline-none focus:border-zinc-500"
             />
             <p className="rounded-md border border-zinc-800 bg-zinc-900/50 px-2.5 py-2 text-xs text-zinc-400">
-              {item.mode === "pure"
-                ? t("functionEditor.pureDescription")
-                : t("functionEditor.impureDescription")}
+              {item.kind === "tool"
+                ? t("functionEditor.toolDescription")
+                : item.mode === "pure"
+                  ? t("functionEditor.pureDescription")
+                  : t("functionEditor.impureDescription")}
             </p>
+            {item.kind === "tool" ? (
+              <div className="rounded-md border border-fuchsia-400/20 bg-fuchsia-500/5 px-2.5 py-2 text-xs leading-5 text-zinc-300">
+                <p className="font-medium text-fuchsia-100">
+                  {t("functionEditor.toolContractTitle")}
+                </p>
+                <p className="mt-1 text-zinc-400">
+                  {t("functionEditor.toolContractDescription")}
+                </p>
+              </div>
+            ) : null}
           </section>
           <section className="mt-6">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-[.14em] text-zinc-600">
@@ -834,7 +862,8 @@ export function FunctionEditor({
             (field) =>
               field.kind === "field-outputs" ||
               field.kind === "object-fields" ||
-              field.kind === "switch-cases",
+              field.kind === "switch-cases" ||
+              field.kind === "javascript-editor",
           ) ? (
             <section className="mt-6 space-y-3">
               <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-zinc-600">
@@ -878,6 +907,15 @@ export function FunctionEditor({
                     />
                   );
                 }
+                if (field.kind === "javascript-editor") {
+                  return (
+                    <JavaScriptCodeControl
+                      key={field.name}
+                      config={{ ...selected?.data.config, [field.name]: value }}
+                      onChange={(config) => updateNodeConfigValues(config as unknown as Record<string, unknown>)}
+                    />
+                  );
+                }
                 return null;
               })}
             </section>
@@ -886,6 +924,7 @@ export function FunctionEditor({
             title={t("functionEditor.inputs")}
             pins={item.inputs}
             side="inputs"
+            tool={item.kind === "tool"}
             onAdd={() => addPin("inputs")}
             onUpdate={updatePin}
             onRemove={removePin}
@@ -894,6 +933,7 @@ export function FunctionEditor({
             title={t("functionEditor.outputs")}
             pins={item.outputs}
             side="outputs"
+            tool={item.kind === "tool"}
             onAdd={() => addPin("outputs")}
             onUpdate={updatePin}
             onRemove={removePin}
@@ -917,6 +957,7 @@ function PinList({
   title,
   pins,
   side,
+  tool,
   onAdd,
   onUpdate,
   onRemove,
@@ -924,6 +965,7 @@ function PinList({
   title: string;
   pins: FunctionPin[];
   side: "inputs" | "outputs";
+  tool: boolean;
   onAdd: () => void;
   onUpdate: (
     side: "inputs" | "outputs",
@@ -938,12 +980,19 @@ function PinList({
     label: t(`editor.${value}`),
   }));
   return (
-    <section className="mt-6">
+    <section className="mt-6 min-w-0">
       <div className="mb-2 flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-zinc-600">
           {title}
         </p>
-        <Button size="sm" variant="ghost" onClick={onAdd}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onAdd}
+          aria-label={
+            side === "inputs" ? t("editor.addInput") : t("editor.addOutput")
+          }
+        >
           <Plus className="size-3" />
         </Button>
       </div>
@@ -951,31 +1000,64 @@ function PinList({
         {pins.map((pin, index) => (
           <div
             key={pin.id}
-            className="grid grid-cols-[minmax(0,1fr)_100px_28px] gap-1"
+            className={cn(
+              "min-w-0 rounded-md",
+              tool && "border border-zinc-800 bg-zinc-900/30 p-2",
+            )}
           >
-            <Input
-              value={pin.name}
-              onChange={(event) =>
-                onUpdate(side, index, { name: event.target.value })
-              }
-              aria-label={t("functionEditor.pinName", { title })}
-            />
-            <Select
-              value={pin.dataType}
-              onValueChange={(value) =>
-                onUpdate(side, index, { dataType: value as DataType })
-              }
-              ariaLabel={t("functionEditor.pinType", { title })}
-              options={options}
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={t("functionEditor.removePin", { name: pin.name || title })}
-              onClick={() => onRemove(side, pin.id)}
-            >
-              <Trash2 className="size-3 text-red-300" />
-            </Button>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_100px_28px] gap-1">
+              <Input
+                value={pin.name}
+                onChange={(event) =>
+                  onUpdate(side, index, { name: event.target.value })
+                }
+                aria-label={t("functionEditor.pinName", { title })}
+                className="min-w-0"
+              />
+              <Select
+                value={pin.dataType}
+                onValueChange={(value) =>
+                  onUpdate(side, index, { dataType: value as DataType })
+                }
+                ariaLabel={t("functionEditor.pinType", { title })}
+                className="min-w-0"
+                options={options}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t("functionEditor.removePin", { name: pin.name || title })}
+                onClick={() => onRemove(side, pin.id)}
+              >
+                <Trash2 className="size-3 text-red-300" />
+              </Button>
+            </div>
+            {tool ? (
+              <label className="mt-2 block text-[10px] font-medium uppercase tracking-[.12em] text-zinc-500">
+                {t("functionEditor.pinGuidance")}
+                <textarea
+                  value={pin.description ?? ""}
+                  onChange={(event) =>
+                    onUpdate(side, index, { description: event.target.value })
+                  }
+                  placeholder={t("functionEditor.pinGuidancePlaceholder")}
+                  rows={2}
+                  className="mt-1.5 min-h-[48px] w-full resize-y rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs leading-5 text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-500"
+                />
+              </label>
+            ) : null}
+            {tool && side === "inputs" ? (
+              <div className="mt-2 flex items-center justify-between text-xs text-zinc-400">
+                <span>{t("functionEditor.requiredInput")}</span>
+                <Switch
+                  checked={pin.required === true}
+                  onCheckedChange={(required) =>
+                    onUpdate(side, index, { required })
+                  }
+                  label={t("functionEditor.requiredInput", { name: pin.name || title })}
+                />
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -1058,6 +1140,7 @@ function boundaryPins(
       kind: "data" as const,
       direction: "output" as const,
       dataType: pin.dataType,
+      type: pin.type ?? typeSpecFromDataType(pin.dataType),
     }));
   if (type === "function:output" && direction === "input")
     return item.outputs.map((pin) => ({
@@ -1066,6 +1149,7 @@ function boundaryPins(
       kind: "data" as const,
       direction: "input" as const,
       dataType: pin.dataType,
+      type: pin.type ?? typeSpecFromDataType(pin.dataType),
     }));
   if (type === "function:entry" && direction === "output")
     return [
@@ -1076,6 +1160,7 @@ function boundaryPins(
         kind: "data" as const,
         direction: "output" as const,
         dataType: pin.dataType,
+        type: pin.type ?? typeSpecFromDataType(pin.dataType),
       })),
     ];
   if (type === "function:return" && direction === "input")
@@ -1087,6 +1172,7 @@ function boundaryPins(
         kind: "data" as const,
         direction: "input" as const,
         dataType: pin.dataType,
+        type: pin.type ?? typeSpecFromDataType(pin.dataType),
       })),
     ];
   return pins;

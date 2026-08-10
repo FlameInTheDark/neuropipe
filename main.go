@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log"
 
@@ -9,10 +10,14 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed build/windows/icon.ico
+var trayIcon []byte
 
 // appVersion is replaced by the release workflow. Development builds keep the
 // default value and deliberately skip the public update check.
@@ -23,6 +28,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	tray := app.NewSystemTray(desktop, trayIcon)
 
 	if err := wails.Run(&options.App{
 		Title:            "Neuropipe",
@@ -33,10 +39,23 @@ func main() {
 		Frameless:        true,
 		BackgroundColour: &options.RGBA{R: 9, G: 9, B: 11, A: 255},
 		AssetServer:      &assetserver.Options{Assets: assets},
-		OnStartup:        desktop.Startup,
-		OnShutdown:       desktop.Shutdown,
-		Bind:             []interface{}{desktop},
-		Windows:          &windows.Options{WebviewIsTransparent: false},
+		OnStartup: func(ctx context.Context) {
+			desktop.Startup(ctx)
+			tray.Start()
+		},
+		OnBeforeClose: func(ctx context.Context) bool {
+			if !app.ShouldHideOnClose(desktop.ShouldHideToTrayOnClose(), tray) {
+				return false
+			}
+			wailsruntime.WindowHide(ctx)
+			return true
+		},
+		OnShutdown: func(ctx context.Context) {
+			tray.Stop()
+			desktop.Shutdown(ctx)
+		},
+		Bind:    []interface{}{desktop},
+		Windows: &windows.Options{WebviewIsTransparent: false},
 	}); err != nil {
 		log.Fatal(err)
 	}

@@ -37,8 +37,8 @@ export function Tooltip({ content, children, side = 'top', align = 'center', wra
   const [open, setOpen] = useState(false)
   const [suppressedUntilLeave, setSuppressedUntilLeave] = useState(false)
   const layout = wrap
-    ? 'max-w-[min(20rem,calc(100vw-1rem))] whitespace-normal break-words'
-    : 'whitespace-nowrap'
+    ? 'w-max max-w-[min(22rem,calc(100vw-1rem))] whitespace-normal break-words'
+    : 'w-max max-w-[calc(100vw-1rem)] whitespace-nowrap'
   const typography = size === 'body'
     ? 'text-xs font-normal leading-5'
     : 'text-[10px] font-medium leading-normal'

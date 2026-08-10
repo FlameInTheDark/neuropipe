@@ -46,6 +46,36 @@ func TestHTTPNodeSendsConfiguredHeadersAndCustomUserAgent(t *testing.T) {
 	}
 }
 
+func TestBlueprintExecutesV3JavaScriptWithTypedOutput(t *testing.T) {
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("script", "action:javascript", map[string]any{
+			"code":   "return { message: 'JavaScript ready' };",
+			"inputs": []any{},
+			"outputs": []any{map[string]any{
+				"id": "message", "label": "Message", "type": map[string]any{"kind": "string"}, "required": true,
+			}},
+			"capabilities": []any{},
+		}),
+		v2Node("notice", "action:notification", map[string]any{"title": "JavaScript"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-script", "start", "out", "script", "in"),
+		execEdge("script-notice", "script", "out", "notice", "in"),
+		dataEdge("script-message", "script", "message", "notice", "message"),
+	}}
+	sender := &recordingNotificationSender{}
+	result, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if got, want := sender.calls, []notificationCall{{title: "JavaScript", message: "JavaScript ready"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notifications = %#v, want %#v", got, want)
+	}
+	if len(result.NodeRuns) != 3 || result.NodeRuns[1].NodeType != "action:javascript" {
+		t.Fatalf("node runs = %#v", result.NodeRuns)
+	}
+}
+
 func TestHTTPResultCanFeedBreakObject(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "text/plain")
@@ -149,6 +179,22 @@ func TestBlueprintCachesPureDataAndRoutesExec(t *testing.T) {
 	}
 	if pureRuns != 1 {
 		t.Fatalf("pure value evaluations = %d, want one cached evaluation", pureRuns)
+	}
+}
+
+func TestBlueprintTypeAssertRejectsMismatchedRuntimeValue(t *testing.T) {
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("constant", "data:constant", map[string]any{"value": "not a Boolean"}),
+		v2Node("assert", "data:type_assert", map[string]any{"typeSpec": map[string]any{"kind": "bool"}}),
+		v2Node("branch", "flow:branch", nil),
+	}, Edges: []domain.FlowEdge{
+		execEdge("exec", "start", "out", "branch", "in"),
+		dataEdge("source-assert", "constant", "value", "assert", "value"),
+		dataEdge("assert-condition", "assert", "value", "branch", "condition"),
+	}}
+	if _, err := NewEngine(catalog.New(), nil, nil).Execute(context.Background(), flow, "start", Packet{}); err == nil || !strings.Contains(err.Error(), "type assertion failed") {
+		t.Fatalf("Execute() error = %v, want type assertion failure", err)
 	}
 }
 

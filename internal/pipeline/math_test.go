@@ -8,6 +8,7 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes"
 )
 
 func TestEvaluateMath(t *testing.T) {
@@ -29,18 +30,22 @@ func TestEvaluateMath(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			outputs, err := evaluateMath(test.nodeType, map[string]any{"a": test.a, "b": test.b})
+			module, ok := catalog.New().Node(test.nodeType)
+			if !ok {
+				t.Fatalf("missing node module %s", test.nodeType)
+			}
+			result, err := module.Execute(context.Background(), nodes.Invocation{Node: domain.FlowNode{Type: test.nodeType}, Definition: module.Definition(), Inputs: map[string]any{"a": test.a, "b": test.b}}, nil)
 			if test.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-					t.Fatalf("evaluateMath() error = %v, want %q", err, test.wantErr)
+					t.Fatalf("math node evaluation error = %v, want %q", err, test.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("evaluateMath() error = %v", err)
+				t.Fatalf("math node evaluation error = %v", err)
 			}
-			if got, ok := outputs["result"].(float64); !ok || got != test.want {
-				t.Fatalf("result = %#v, want %v", outputs["result"], test.want)
+			if got, ok := result.Outputs["result"].(float64); !ok || got != test.want {
+				t.Fatalf("result = %#v, want %v", result.Outputs["result"], test.want)
 			}
 		})
 	}

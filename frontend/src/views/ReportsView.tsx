@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Columns2, Clock3, FileText, Newspaper, Search, Tag, Trash2, Workflow } from 'lucide-react'
+import { ContextMenu, contextMenuPointFromElement, contextMenuPosition, type ContextMenuPoint, type ContextMenuPosition } from '@/components/ContextMenu'
 import { MarkdownContent } from '@/components/MarkdownContent'
 import { Button } from '@/components/ui/button'
 import { DateRangePicker } from '@/components/ui/date-range-picker'
@@ -15,14 +16,14 @@ import { cn, formatDate } from '@/lib/utils'
 import { useConfirmationStore } from '@/stores/confirmation'
 import { useUIStore } from '@/stores/ui'
 import { useTranslation } from 'react-i18next'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 type ReportView = 'split' | 'posts'
 type ReportSort = 'newest' | 'oldest' | 'tag'
 
 interface ReportMenu {
   report: Report
-  x: number
-  y: number
+  position: ContextMenuPosition
 }
 
 const reportViews = ['split', 'posts'] as const
@@ -72,7 +73,6 @@ export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefre
   const [sort, setSort] = useState<ReportSort>('newest')
   const [menu, setMenu] = useState<ReportMenu>()
   const [deletingID, setDeletingID] = useState('')
-  const menuRef = useRef<HTMLDivElement>(null)
 
   const availableTags = useMemo(() => Array.from(new Map(reports.flatMap((report) => report.tags.map((item) => [item.toLowerCase(), item] as const))).values()).sort((left, right) => left.localeCompare(right)), [reports])
   const filteredReports = useMemo(() => {
@@ -104,27 +104,18 @@ export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefre
   const clearFilters = () => { setQuery(''); setTag(''); setFrom(''); setTo('') }
 
   useEffect(() => {
+    void onRefresh()
+  }, [onRefresh])
+
+  useEffect(() => EventsOn('reports.updated', () => { void onRefresh() }), [onRefresh])
+
+  useEffect(() => {
     if (selectedID && filteredReports.some((report) => report.id === selectedID)) return
     setSelectedID(filteredReports[0]?.id)
   }, [filteredReports, selectedID])
 
-  useEffect(() => {
-    if (!menu) return
-    const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setMenu(undefined) }
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(undefined) }
-    window.addEventListener('pointerdown', close)
-    window.addEventListener('keydown', escape)
-    return () => {
-      window.removeEventListener('pointerdown', close)
-      window.removeEventListener('keydown', escape)
-    }
-  }, [menu])
-
-  const openMenu = (clientX: number, clientY: number, report: Report) => {
-    const width = 176
-    const height = 48
-    const gutter = 8
-    setMenu({ report, x: Math.max(gutter, Math.min(clientX, window.innerWidth - width - gutter)), y: Math.max(gutter, Math.min(clientY, window.innerHeight - height - gutter)) })
+  const openMenu = (point: ContextMenuPoint, report: Report) => {
+    setMenu({ report, position: contextMenuPosition(point, { width: 176, height: 48 }) })
   }
 
   const remove = async (report: Report) => {
@@ -148,7 +139,7 @@ export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefre
 
   const reportMenu = (report: Report, event: { clientX: number; clientY: number; preventDefault: () => void }) => {
     event.preventDefault()
-    openMenu(event.clientX, event.clientY, report)
+    openMenu(event, report)
   }
 
   return <section className="flex h-full min-h-0 flex-col">
@@ -165,7 +156,7 @@ export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefre
         {filteredReports.length === 0 ? <div className="surface flex h-48 flex-col items-center justify-center rounded-xl text-center"><Search className="mb-3 size-5 text-zinc-600" /><p className="text-sm font-medium text-zinc-300">{t('reports.noMatching')}</p><p className="mt-1 text-xs text-zinc-500">{t('reports.noMatchingDescription')}</p><Button className="mt-4" size="sm" variant="outline" onClick={clearFilters}>{t('reports.clearFilters')}</Button></div> : view === 'split' ? <div className="grid h-[calc(100%-4.5rem)] min-h-0 gap-5 lg:grid-cols-[minmax(19rem,.85fr)_minmax(0,1.5fr)]">
           <div className="surface muted-scroll min-h-0 overflow-y-auto rounded-xl p-2">
             {filteredReports.map((report) => <article key={report.id} onContextMenu={(event) => reportMenu(report, event)} className={cn('rounded-lg border border-transparent p-3 transition-colors', selected?.id === report.id ? 'border-zinc-700 bg-zinc-900' : 'hover:bg-zinc-900/70')}>
-              <button type="button" className="w-full text-left" onClick={() => setSelectedID(report.id)} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; const bounds = event.currentTarget.getBoundingClientRect(); reportMenu(report, { clientX: bounds.left + 24, clientY: bounds.top + 24, preventDefault: () => event.preventDefault() }) }} aria-current={selected?.id === report.id ? 'true' : undefined}>
+              <button type="button" className="w-full text-left" onClick={() => setSelectedID(report.id)} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); openMenu(contextMenuPointFromElement(event.currentTarget), report) }} aria-current={selected?.id === report.id ? 'true' : undefined}>
                 <h2 className="truncate text-sm font-medium text-zinc-100">{report.title}</h2>
                 <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-zinc-500">{reportPreview(report.markdown, t('reports.noContent'))}</p>
               </button>
@@ -177,9 +168,9 @@ export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefre
             <div className="border-b border-zinc-800 pb-5"><h2 className="text-lg font-semibold text-zinc-100">{selected.title}</h2><ReportTags report={selected} onSelect={setTag} /><ReportMetadata report={selected} onOpenPipeline={() => openPipeline(selected)} /></div>
             <div className="mt-6"><ReportMarkdown markdown={selected.markdown} /></div>
           </article> : null}
-        </div> : <div className="muted-scroll h-[calc(100%-4.5rem)] min-h-0 overflow-y-auto"><div className="mx-auto max-w-3xl space-y-5 pb-8">{filteredReports.map((report) => <article key={report.id} tabIndex={0} onContextMenu={(event) => reportMenu(report, event)} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; const bounds = event.currentTarget.getBoundingClientRect(); reportMenu(report, { clientX: bounds.left + 24, clientY: bounds.top + 24, preventDefault: () => event.preventDefault() }) }} className="surface rounded-xl p-7 outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"><h2 className="text-xl font-semibold tracking-tight text-zinc-100">{report.title}</h2><ReportTags report={report} onSelect={setTag} /><ReportMetadata report={report} onOpenPipeline={() => openPipeline(report)} /><div className="mt-7 border-t border-zinc-800 pt-6"><ReportMarkdown markdown={report.markdown} /></div></article>)}</div></div>}
+        </div> : <div className="muted-scroll h-[calc(100%-4.5rem)] min-h-0 overflow-y-auto"><div className="mx-auto max-w-3xl space-y-5 pb-8">{filteredReports.map((report) => <article key={report.id} tabIndex={0} onContextMenu={(event) => reportMenu(report, event)} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); openMenu(contextMenuPointFromElement(event.currentTarget), report) }} className="surface rounded-xl p-7 outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"><h2 className="text-xl font-semibold tracking-tight text-zinc-100">{report.title}</h2><ReportTags report={report} onSelect={setTag} /><ReportMetadata report={report} onOpenPipeline={() => openPipeline(report)} /><div className="mt-7 border-t border-zinc-800 pt-6"><ReportMarkdown markdown={report.markdown} /></div></article>)}</div></div>}
       </>}
-      {menu ? <div ref={menuRef} role="menu" aria-label={t('reports.options', { name: menu.report.title })} className="fixed z-50 w-44 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl shadow-black/60" style={{ left: menu.x, top: menu.y }}><button autoFocus role="menuitem" disabled={deletingID !== ''} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void remove(menu.report)}><Trash2 className="size-3.5" />{t('reports.deleteConfirm')}</button></div> : null}
+      {menu ? <ContextMenu position={menu.position} ariaLabel={t('reports.options', { name: menu.report.title })} className="w-44" onClose={() => setMenu(undefined)}><button role="menuitem" disabled={deletingID !== ''} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void remove(menu.report)}><Trash2 className="size-3.5" />{t('reports.deleteConfirm')}</button></ContextMenu> : null}
     </div>
   </section>
 }

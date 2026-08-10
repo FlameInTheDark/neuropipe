@@ -24,7 +24,7 @@ AI action nodes use the selected provider/model and execute through an exec inpu
 
 ## Agent
 
-**Purpose:** solve a task with explicitly connected tools. **Pins:** Exec input, Output and Tools exec outputs, Result. **Configure:** instructions and maximum turns. **Produces:** content/tool activity. **Capability:** depends only on connected tools. **Failure:** turn budgets, denied capabilities, and tool errors stop safely. **Example:** Agent → connected HTTP tool → Report.
+**Purpose:** solve a task with explicitly connected published LLM tool functions. **Pins:** Exec input, an unlimited **Tools** tool input, Exec output, and Result. **Configure:** instructions and maximum turns. **Produces:** content and typed tool results for subsequent model turns. **Capability:** connected tool capabilities remain subject to normal publication trust. **Failure:** turn budgets stop safely; invalid arguments return safe contract feedback to the model. **Example:** `Get city forecast.Tool → Agent.Tools`; Agent → Report. See **LLM tool functions** for the complete contract and examples.
 
 ## Coding Agent
 

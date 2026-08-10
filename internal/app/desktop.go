@@ -24,10 +24,12 @@ import (
 	documentation "github.com/FlameInTheDark/neuropipe/internal/documentation"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/execution"
+	"github.com/FlameInTheDark/neuropipe/internal/hotkey"
 	"github.com/FlameInTheDark/neuropipe/internal/httpapi"
 	"github.com/FlameInTheDark/neuropipe/internal/llm"
 	"github.com/FlameInTheDark/neuropipe/internal/localization"
 	"github.com/FlameInTheDark/neuropipe/internal/metrics"
+	javascriptnode "github.com/FlameInTheDark/neuropipe/internal/nodes/code/javascript"
 	"github.com/FlameInTheDark/neuropipe/internal/notifications"
 	"github.com/FlameInTheDark/neuropipe/internal/persistence"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
@@ -58,6 +60,7 @@ type Desktop struct {
 	documentation          *documentation.Service
 	runs                   *execution.Service
 	chat                   *chatservice.Service
+	hotkeys                *hotkey.Service
 	scheduler              *scheduler.Service
 	llama                  *localruntime.LlamaManager
 	llamaFiles             *localruntime.LlamaCatalog
@@ -68,6 +71,8 @@ type Desktop struct {
 	api                    *httpapi.Server
 	settingsMu             sync.RWMutex
 	settings               domain.Settings
+	trayMu                 sync.RWMutex
+	trayMenu               trayLabelSink
 	updates                UpdateChecker
 	updateMu               sync.RWMutex
 	update                 domain.UpdateAvailability
@@ -132,12 +137,13 @@ func New(version string) (*Desktop, error) {
 	desktop.runs.SetMaxConcurrentRuns(settings.MaxConcurrentRuns)
 	desktop.chat = chatservice.NewService(store, desktop.runs, desktop.providers, desktop.emit)
 	desktop.scheduler = scheduler.New(store, desktop.runs)
+	desktop.hotkeys = hotkey.New(store, desktop.runs)
 	desktop.configureContentDirectory(contentDirectory)
 	desktop.api = httpapi.New(desktop, vault)
 	return desktop, nil
 }
 
-// Startup stores the Wails context and activates trusted schedules.
+// Startup stores the Wails context and activates registered local triggers.
 func (d *Desktop) Startup(ctx context.Context) {
 	d.ctx = ctx
 	d.startUpdateChecks(ctx)
@@ -149,6 +155,9 @@ func (d *Desktop) Startup(ctx context.Context) {
 	_ = d.store.PurgeExecutions(ctx, d.settings.RetentionDays)
 	_ = d.metrics.Purge(ctx)
 	_ = d.scheduler.Start(ctx)
+	if err := d.hotkeys.Start(ctx); err != nil {
+		d.emit("hotkeys.status.error", err.Error())
+	}
 	if err := d.api.Configure(ctx, d.GetSettings().API); err != nil {
 		d.emit("api.status.error", err.Error())
 	}
@@ -161,6 +170,7 @@ func (d *Desktop) Startup(ctx context.Context) {
 func (d *Desktop) Shutdown(context.Context) {
 	d.stopUpdateChecks()
 	_ = d.api.Stop(context.Background())
+	d.hotkeys.Stop()
 	d.scheduler.Stop()
 	d.chat.Stop()
 	d.runs.Stop()
@@ -183,7 +193,10 @@ func (d *Desktop) DeletePipeline(id string) error {
 	if err := d.store.DeletePipeline(d.context(), id); err != nil {
 		return err
 	}
-	return d.scheduler.Reload(d.context())
+	if err := d.scheduler.Reload(d.context()); err != nil {
+		return err
+	}
+	return d.hotkeys.Reload(d.context())
 }
 
 // DuplicatePipeline creates an editable draft copy without duplicating live
@@ -193,7 +206,7 @@ func (d *Desktop) DuplicatePipeline(id string) (domain.Pipeline, error) {
 	if err != nil {
 		return domain.Pipeline{}, err
 	}
-	if original.DraftDefinition.SchemaVersion != domain.GraphSchemaV2 {
+	if !isCurrentBlueprintSchema(original.DraftDefinition.SchemaVersion) {
 		return domain.Pipeline{}, fmt.Errorf("legacy pipelines must be rebuilt instead of duplicated")
 	}
 	copy, err := d.store.CreatePipeline(d.context(), original.Name+" copy", original.DraftDefinition)
@@ -223,12 +236,19 @@ func (d *Desktop) PublishPipeline(pipeline domain.Pipeline) (domain.Pipeline, er
 	if err := pipelineValidate(pipeline.DraftDefinition, d.registry); err != nil {
 		return domain.Pipeline{}, err
 	}
-	published, err := d.store.Publish(d.context(), pipeline, bindingsFor(pipeline))
+	bindings := bindingsFor(pipeline)
+	if err := d.hotkeys.Validate(d.context(), pipeline.ID, bindings); err != nil {
+		return domain.Pipeline{}, err
+	}
+	published, err := d.store.Publish(d.context(), pipeline, bindings)
 	if err != nil {
 		return domain.Pipeline{}, err
 	}
 	if err := d.scheduler.Reload(d.context()); err != nil {
 		return domain.Pipeline{}, err
+	}
+	if err := d.hotkeys.Reload(d.context()); err != nil {
+		return domain.Pipeline{}, fmt.Errorf("pipeline was published, but global hotkeys could not be registered: %w", err)
 	}
 	return published, nil
 }
@@ -238,6 +258,13 @@ func (d *Desktop) ListNodeDefinitions() ([]domain.NodeDefinition, error) {
 		return nil, err
 	}
 	return d.registry.All(), nil
+}
+
+// ValidateJavaScript checks JavaScript source with the embedded Blueprint
+// interpreter before the editor stores it in a draft. It never executes code
+// or makes host services available.
+func (d *Desktop) ValidateJavaScript(code string) error {
+	return javascriptnode.Validate(code)
 }
 
 // ListDocumentation returns the local documentation tree. Markdown content is
@@ -268,9 +295,10 @@ func (d *Desktop) ListFunctions() ([]domain.FunctionSummary, error) {
 	return d.store.ListFunctions(d.context())
 }
 
-// CreateFunction creates a draft custom function. mode is "pure" or "impure".
-func (d *Desktop) CreateFunction(name string, mode domain.NodeExecutionMode) (domain.CustomFunction, error) {
-	return d.store.CreateFunction(d.context(), name, mode)
+// CreateFunction creates a typed draft custom function selected in the
+// function-creation dialog.
+func (d *Desktop) CreateFunction(request domain.CreateFunctionRequest) (domain.CustomFunction, error) {
+	return d.store.CreateFunctionWithRequest(d.context(), request)
 }
 
 func (d *Desktop) GetFunction(id string) (domain.CustomFunction, error) {
@@ -1185,7 +1213,7 @@ func appDataRoot() (string, error) {
 }
 
 func defaultDefinition() domain.FlowDefinition {
-	return domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+	return domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
 		{ID: "button-trigger", Type: "trigger:button", Position: domain.Position{X: 100, Y: 180}, Data: map[string]any{"config": map[string]any{"label": "Run pipeline", "icon": "play", "color": "#fafafa", "gridPosition": 0}}},
 		{ID: "notification", Type: "action:notification", Position: domain.Position{X: 420, Y: 180}, Data: map[string]any{"config": map[string]any{"title": "Neuropipe", "message": "Blueprint ready"}}},
 	}, Edges: []domain.FlowEdge{{ID: "button-to-notification", Source: "button-trigger", SourceHandle: "out", Target: "notification", TargetHandle: "in", Kind: domain.PinExec}}, Viewport: domain.Viewport{X: 0, Y: 0, Zoom: 1}}
@@ -1252,8 +1280,22 @@ func validateFunction(function domain.CustomFunction, registry *catalog.Registry
 	if strings.TrimSpace(function.Name) == "" {
 		return fmt.Errorf("function name is required")
 	}
-	if function.DraftDefinition.SchemaVersion != domain.GraphSchemaV2 {
-		return fmt.Errorf("function must use Blueprint v2")
+	if !isCurrentBlueprintSchema(function.DraftDefinition.SchemaVersion) {
+		return fmt.Errorf("function must use Blueprint v3")
+	}
+	if function.Kind == "" {
+		function.Kind = domain.FunctionStandard
+	}
+	if function.Kind != domain.FunctionStandard && function.Kind != domain.FunctionTool {
+		return fmt.Errorf("function has an invalid kind")
+	}
+	if function.Kind == domain.FunctionTool && function.Mode != domain.NodeImpure {
+		return fmt.Errorf("an LLM tool function must be impure")
+	}
+	if function.Kind == domain.FunctionTool {
+		if err := pipeline.ValidateToolFunction(function); err != nil {
+			return err
+		}
 	}
 	if err := validateFunctionPins("input", function.Inputs); err != nil {
 		return err
@@ -1298,6 +1340,10 @@ func validateFunction(function domain.CustomFunction, registry *catalog.Registry
 		return fmt.Errorf("a pure function needs exactly one Function Inputs and Function Outputs node")
 	}
 	return nil
+}
+
+func isCurrentBlueprintSchema(version int) bool {
+	return version == domain.GraphSchemaV2 || version == domain.GraphSchemaV3
 }
 
 func validateFunctionPins(side string, pins []domain.FunctionPin) error {

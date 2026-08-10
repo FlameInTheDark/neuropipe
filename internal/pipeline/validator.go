@@ -6,13 +6,15 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/typespec"
 )
 
-// Validate ensures a Blueprint-v2 graph has safe control flow and typed pin
-// connections before it is run or published.
+// Validate ensures a supported Blueprint graph has safe control flow and typed
+// pin connections before it is run or published. V3 adds strict TypeSpec
+// contracts; V2 remains readable until its persistence migration runs.
 func Validate(definition domain.FlowDefinition, registry *catalog.Registry) error {
-	if definition.SchemaVersion != domain.GraphSchemaV2 {
-		return ValidationError{Message: "legacy graph: rebuild this pipeline with Blueprint v2 pins"}
+	if definition.SchemaVersion != domain.GraphSchemaV2 && definition.SchemaVersion != domain.GraphSchemaV3 {
+		return ValidationError{Message: "legacy graph: rebuild this pipeline with Blueprint v3 pins"}
 	}
 	if len(definition.Nodes) == 0 {
 		return ValidationError{Message: "a pipeline needs at least one node"}
@@ -31,7 +33,7 @@ func Validate(definition domain.FlowDefinition, registry *catalog.Registry) erro
 		if !exists {
 			return ValidationError{Message: fmt.Sprintf("node %q uses unavailable type %q", node.ID, node.Type)}
 		}
-		definition, err := definitionForNode(definition, node)
+		definition, err := definitionForRegisteredNode(registry, definition, node)
 		if err != nil {
 			return ValidationError{Message: fmt.Sprintf("node %q has invalid configuration: %v", node.ID, err)}
 		}
@@ -77,17 +79,18 @@ func Validate(definition domain.FlowDefinition, registry *catalog.Registry) erro
 		if sourcePin.Kind != kind || targetPin.Kind != kind {
 			return ValidationError{Message: fmt.Sprintf("edge %q must connect matching %s pins", edge.ID, kind)}
 		}
-		if kind == domain.PinData && !typesCompatible(sourcePin.DataType, targetPin.DataType) {
-			return ValidationError{Message: fmt.Sprintf("edge %q cannot connect %s data to %s", edge.ID, sourcePin.DataType, targetPin.DataType)}
+		if kind == domain.PinData && !pinsCompatibleForSchema(definition.SchemaVersion, sourcePin, targetPin) {
+			return ValidationError{Message: fmt.Sprintf("edge %q cannot connect %s data to %s", edge.ID, pinTypeName(sourcePin), pinTypeName(targetPin))}
 		}
 		key := edge.Target + ":" + targetHandle
 		incoming[key]++
 		if targetPin.MaxConnections > 0 && incoming[key] > targetPin.MaxConnections {
 			return ValidationError{Message: fmt.Sprintf("pin %q accepts only %d connection", targetHandle, targetPin.MaxConnections)}
 		}
-		if kind == domain.PinExec {
+		switch kind {
+		case domain.PinExec:
 			execGraph[edge.Source] = append(execGraph[edge.Source], edge.Target)
-		} else {
+		case domain.PinData:
 			dataGraph[edge.Source] = append(dataGraph[edge.Source], edge.Target)
 		}
 	}
@@ -120,6 +123,27 @@ func typesCompatible(source, target domain.DataType) bool {
 	return source == domain.DataAny || target == domain.DataAny || source == target
 }
 
+func pinsCompatible(source, target domain.NodePort) bool {
+	if source.Type != nil && target.Type != nil {
+		return typespec.Assignable(*source.Type, *target.Type)
+	}
+	return typesCompatible(source.DataType, target.DataType)
+}
+
+func pinsCompatibleForSchema(schemaVersion int, source, target domain.NodePort) bool {
+	if schemaVersion >= domain.GraphSchemaV3 {
+		return pinsCompatible(source, target)
+	}
+	return typesCompatible(source.DataType, target.DataType)
+}
+
+func pinTypeName(pin domain.NodePort) string {
+	if pin.Type != nil {
+		return string(pin.Type.Kind)
+	}
+	return string(pin.DataType)
+}
+
 func validateTrigger(node domain.FlowNode) error {
 	config := configFor(node)
 	switch node.Type {
@@ -137,26 +161,6 @@ func validateTrigger(node domain.FlowNode) error {
 		}
 	}
 	return nil
-}
-
-func containsTemplate(value any) bool {
-	switch typed := value.(type) {
-	case string:
-		return strings.Contains(typed, "{{") && strings.Contains(typed, "}}")
-	case map[string]any:
-		for _, nested := range typed {
-			if containsTemplate(nested) {
-				return true
-			}
-		}
-	case []any:
-		for _, nested := range typed {
-			if containsTemplate(nested) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func hasCycle(nodes map[string]domain.FlowNode, adjacency map[string][]string) bool {

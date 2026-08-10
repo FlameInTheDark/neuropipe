@@ -13,6 +13,8 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/localization"
+	"github.com/FlameInTheDark/neuropipe/internal/typespec"
+	squirrel "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -46,6 +48,10 @@ func New(root string) (*Store, error) {
 		_ = database.Close()
 		return nil, err
 	}
+	if err := store.migrateBlueprintV3(context.Background()); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
 	return store, nil
 }
 
@@ -53,14 +59,14 @@ func New(root string) (*Store, error) {
 // one-way Blueprint-v2 migration, but only when v1 graphs actually exist.
 func (s *Store) backupLegacyGraphs(ctx context.Context) error {
 	var tables int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pipelines'`).Scan(&tables); err != nil {
+	if err := statements(s.db).Select("COUNT(*)").From("sqlite_master").Where(squirrel.Eq{"type": "table", "name": "pipelines"}).QueryRowContext(ctx).Scan(&tables); err != nil {
 		return fmt.Errorf("check database schema: %w", err)
 	}
 	if tables == 0 {
 		return nil
 	}
 	var legacy int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipelines WHERE draft_definition NOT LIKE '%"schemaVersion":2%'`).Scan(&legacy); err != nil {
+	if err := statements(s.db).Select("COUNT(*)").From("pipelines").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":2%").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":3%").QueryRowContext(ctx).Scan(&legacy); err != nil {
 		return fmt.Errorf("check legacy graphs: %w", err)
 	}
 	if legacy == 0 {
@@ -236,6 +242,7 @@ CREATE TABLE IF NOT EXISTS functions (
   icon TEXT NOT NULL DEFAULT 'braces',
   icon_color TEXT NOT NULL DEFAULT '#c4b5fd',
   icon_background TEXT NOT NULL DEFAULT '#2e1065',
+  kind TEXT NOT NULL DEFAULT 'function',
   mode TEXT NOT NULL,
   inputs_json TEXT NOT NULL DEFAULT '[]',
   outputs_json TEXT NOT NULL DEFAULT '[]',
@@ -388,14 +395,37 @@ CREATE TABLE IF NOT EXISTS metric_resource_rollups (
 	if err := s.ensureIconAppearanceColumns(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureFunctionKindColumn(ctx); err != nil {
+		return err
+	}
 	if err := s.ensureExecutionTimingColumns(ctx); err != nil {
 		return err
 	}
-	// Graph v1 has no schemaVersion marker. Preserve it for manual rebuild and
-	// ensure its triggers cannot run after the v2 runtime is installed.
-	_, _ = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO legacy_graphs (pipeline_id, detected_at, reason) SELECT id, ?, 'Blueprint v2 rebuild required' FROM pipelines WHERE draft_definition NOT LIKE '%"schemaVersion":2%'`, stamp(time.Now().UTC()))
-	_, _ = s.db.ExecContext(ctx, `UPDATE trigger_bindings SET enabled = 0, updated_at = ? WHERE pipeline_id IN (SELECT pipeline_id FROM legacy_graphs)`, stamp(time.Now().UTC()))
-	_, _ = s.db.ExecContext(ctx, `UPDATE pipelines SET status = ?, updated_at = ? WHERE id IN (SELECT pipeline_id FROM legacy_graphs)`, domain.PipelineLegacy, stamp(time.Now().UTC()))
+	if err := s.repairV3LegacyMarkers(ctx); err != nil {
+		return err
+	}
+	// Graphs without a supported schema version are preserved for manual rebuild
+	// and their triggers are disabled before the V3 runtime can process them.
+	legacyPipelines := sqliteStatements.Select("id").Column("?", stamp(time.Now().UTC())).Column("?", "Blueprint v3 rebuild required").From("pipelines").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":2%").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":3%")
+	_, _ = statements(s.db).Insert("legacy_graphs").Columns("pipeline_id", "detected_at", "reason").Select(legacyPipelines).Suffix("ON CONFLICT (pipeline_id) DO NOTHING").ExecContext(ctx)
+	legacyMarkers := sqliteStatements.Select("pipeline_id").From("legacy_graphs")
+	_, _ = statements(s.db).Update("trigger_bindings").Set("enabled", false).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Expr("pipeline_id IN (?)", legacyMarkers)).ExecContext(ctx)
+	_, _ = statements(s.db).Update("pipelines").Set("status", domain.PipelineLegacy).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Expr("id IN (?)", legacyMarkers)).ExecContext(ctx)
+	return nil
+}
+
+// repairV3LegacyMarkers removes records written by the brief V3 detector bug
+// that classified valid V3 graphs as legacy. The graph is deliberately made a
+// draft: restoring publication would require reconstructing the prior revision
+// and trust state, while drafts are immediately editable and safe.
+func (s *Store) repairV3LegacyMarkers(ctx context.Context) error {
+	v3Pipelines := sqliteStatements.Select("id").From("pipelines").Where("draft_definition LIKE ?", "%\"schemaVersion\":3%")
+	if _, err := statements(s.db).Delete("legacy_graphs").Where(squirrel.Expr("pipeline_id IN (?)", v3Pipelines)).ExecContext(ctx); err != nil {
+		return fmt.Errorf("remove invalid V3 legacy markers: %w", err)
+	}
+	if _, err := statements(s.db).Update("pipelines").Set("status", domain.PipelineDraft).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"status": domain.PipelineLegacy}).Where("draft_definition LIKE ?", "%\"schemaVersion\":3%").ExecContext(ctx); err != nil {
+		return fmt.Errorf("restore invalid V3 legacy pipelines: %w", err)
+	}
 	return nil
 }
 
@@ -453,6 +483,20 @@ func (s *Store) ensureIconAppearanceColumns(ctx context.Context) error {
 	return nil
 }
 
+func (s *Store) ensureFunctionKindColumn(ctx context.Context) error {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('functions') WHERE name = 'kind'`).Scan(&exists); err != nil {
+		return fmt.Errorf("inspect functions.kind migration: %w", err)
+	}
+	if exists > 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE functions ADD COLUMN kind TEXT NOT NULL DEFAULT 'function'`); err != nil {
+		return fmt.Errorf("add functions.kind column: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ensureExecutionTimingColumns(ctx context.Context) error {
 	columns := []struct {
 		name       string
@@ -487,7 +531,7 @@ func (s *Store) CreatePipeline(ctx context.Context, name string, definition doma
 	if err != nil {
 		return domain.Pipeline{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO pipelines (id, name, description, icon, icon_color, icon_background, status, draft_definition, published_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, pipeline.ID, pipeline.Name, pipeline.Description, pipeline.Icon, pipeline.IconColor, pipeline.IconBackground, pipeline.Status, definitionJSON, 0, stamp(now), stamp(now))
+	_, err = statements(s.db).Insert("pipelines").Columns("id", "name", "description", "icon", "icon_color", "icon_background", "status", "draft_definition", "published_revision", "created_at", "updated_at").Values(pipeline.ID, pipeline.Name, pipeline.Description, pipeline.Icon, pipeline.IconColor, pipeline.IconBackground, pipeline.Status, definitionJSON, 0, stamp(now), stamp(now)).ExecContext(ctx)
 	if err != nil {
 		return domain.Pipeline{}, fmt.Errorf("create pipeline: %w", err)
 	}
@@ -497,7 +541,7 @@ func (s *Store) CreatePipeline(ctx context.Context, name string, definition doma
 // DeletePipeline permanently removes a pipeline and its revisions, bindings,
 // executions, and reports through the SQLite foreign-key relationships.
 func (s *Store) DeletePipeline(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM pipelines WHERE id = ?`, id)
+	result, err := statements(s.db).Delete("pipelines").Where(squirrel.Eq{"id": id}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("delete pipeline: %w", err)
 	}
@@ -509,7 +553,8 @@ func (s *Store) DeletePipeline(ctx context.Context, id string) error {
 
 // ListPipelines returns concise cards ordered by newest edits.
 func (s *Store) ListPipelines(ctx context.Context) ([]domain.PipelineSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, p.description, p.icon, p.icon_color, p.icon_background, p.status, p.published_revision, p.updated_at, COUNT(t.id), COALESCE((SELECT issue FROM blueprint_migration_issues mi WHERE mi.pipeline_id = p.id ORDER BY mi.detected_at DESC LIMIT 1), '') FROM pipelines p LEFT JOIN trigger_bindings t ON t.pipeline_id = p.id GROUP BY p.id ORDER BY p.updated_at DESC`)
+	migrationIssue := sqliteStatements.Select("issue").From("blueprint_migration_issues mi").Where("mi.pipeline_id = p.id").OrderBy("mi.detected_at DESC").Limit(1)
+	rows, err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.published_revision", "p.updated_at", "COUNT(t.id)").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").LeftJoin("trigger_bindings t ON t.pipeline_id = p.id").GroupBy("p.id").OrderBy("p.updated_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list pipelines: %w", err)
 	}
@@ -533,7 +578,8 @@ func (s *Store) ListPipelines(ctx context.Context) ([]domain.PipelineSummary, er
 func (s *Store) GetPipeline(ctx context.Context, id string) (domain.Pipeline, error) {
 	var pipeline domain.Pipeline
 	var status, definitionJSON, created, updated string
-	err := s.db.QueryRowContext(ctx, `SELECT p.id, p.name, p.description, p.icon, p.icon_color, p.icon_background, p.status, p.draft_definition, p.published_revision, p.created_at, p.updated_at, COALESCE((SELECT issue FROM blueprint_migration_issues mi WHERE mi.pipeline_id = p.id ORDER BY mi.detected_at DESC LIMIT 1), '') FROM pipelines p WHERE p.id = ?`, id).Scan(&pipeline.ID, &pipeline.Name, &pipeline.Description, &pipeline.Icon, &pipeline.IconColor, &pipeline.IconBackground, &status, &definitionJSON, &pipeline.PublishedRevision, &created, &updated, &pipeline.MigrationIssue)
+	migrationIssue := sqliteStatements.Select("issue").From("blueprint_migration_issues mi").Where("mi.pipeline_id = p.id").OrderBy("mi.detected_at DESC").Limit(1)
+	err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.draft_definition", "p.published_revision", "p.created_at", "p.updated_at").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").Where(squirrel.Eq{"p.id": id}).QueryRowContext(ctx).Scan(&pipeline.ID, &pipeline.Name, &pipeline.Description, &pipeline.Icon, &pipeline.IconColor, &pipeline.IconBackground, &status, &definitionJSON, &pipeline.PublishedRevision, &created, &updated, &pipeline.MigrationIssue)
 	if err != nil {
 		return domain.Pipeline{}, fmt.Errorf("get pipeline: %w", err)
 	}
@@ -548,11 +594,11 @@ func (s *Store) GetPipeline(ctx context.Context, id string) (domain.Pipeline, er
 // SaveDraft updates the editable definition without changing live triggers.
 func (s *Store) SaveDraft(ctx context.Context, pipeline domain.Pipeline) (domain.Pipeline, error) {
 	var status string
-	if err := s.db.QueryRowContext(ctx, `SELECT status FROM pipelines WHERE id = ?`, pipeline.ID).Scan(&status); err != nil {
+	if err := statements(s.db).Select("status").From("pipelines").Where(squirrel.Eq{"id": pipeline.ID}).QueryRowContext(ctx).Scan(&status); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("read draft status: %w", err)
 	}
 	if domain.PipelineStatus(status) == domain.PipelineLegacy {
-		return domain.Pipeline{}, fmt.Errorf("legacy pipeline %q is read-only; create a new Blueprint v2 pipeline", pipeline.Name)
+		return domain.Pipeline{}, fmt.Errorf("legacy pipeline %q is read-only; create a new Blueprint v3 pipeline", pipeline.Name)
 	}
 	definitionJSON, err := encode(pipeline.DraftDefinition)
 	if err != nil {
@@ -571,7 +617,7 @@ func (s *Store) SaveDraft(ctx context.Context, pipeline domain.Pipeline) (domain
 	if pipeline.IconBackground == "" {
 		pipeline.IconBackground = "#27272a"
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE pipelines SET name = ?, description = ?, icon = ?, icon_color = ?, icon_background = ?, draft_definition = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(pipeline.Name), pipeline.Description, pipeline.Icon, pipeline.IconColor, pipeline.IconBackground, definitionJSON, stamp(pipeline.UpdatedAt), pipeline.ID)
+	_, err = statements(s.db).Update("pipelines").Set("name", strings.TrimSpace(pipeline.Name)).Set("description", pipeline.Description).Set("icon", pipeline.Icon).Set("icon_color", pipeline.IconColor).Set("icon_background", pipeline.IconBackground).Set("draft_definition", definitionJSON).Set("updated_at", stamp(pipeline.UpdatedAt)).Where(squirrel.Eq{"id": pipeline.ID}).ExecContext(ctx)
 	if err != nil {
 		return domain.Pipeline{}, fmt.Errorf("save draft: %w", err)
 	}
@@ -587,7 +633,7 @@ func (s *Store) Publish(ctx context.Context, pipeline domain.Pipeline, bindings 
 	defer func() { _ = tx.Rollback() }()
 
 	var current int
-	if err := tx.QueryRowContext(ctx, `SELECT published_revision FROM pipelines WHERE id = ?`, pipeline.ID).Scan(&current); err != nil {
+	if err := statements(tx).Select("published_revision").From("pipelines").Where(squirrel.Eq{"id": pipeline.ID}).QueryRowContext(ctx).Scan(&current); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("read pipeline revision: %w", err)
 	}
 	next := current + 1
@@ -596,29 +642,29 @@ func (s *Store) Publish(ctx context.Context, pipeline domain.Pipeline, bindings 
 	if err != nil {
 		return domain.Pipeline{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pipeline_revisions (pipeline_id, revision, definition, published_at) VALUES (?, ?, ?, ?)`, pipeline.ID, next, definitionJSON, stamp(now)); err != nil {
+	if _, err := statements(tx).Insert("pipeline_revisions").Columns("pipeline_id", "revision", "definition", "published_at").Values(pipeline.ID, next, definitionJSON, stamp(now)).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("save published revision: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM trigger_bindings WHERE pipeline_id = ?`, pipeline.ID); err != nil {
+	if _, err := statements(tx).Delete("trigger_bindings").Where(squirrel.Eq{"pipeline_id": pipeline.ID}).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("remove prior trigger bindings: %w", err)
 	}
 	for _, binding := range bindings {
 		binding.ID = uuid.NewString()
 		binding.PipelineID, binding.Revision = pipeline.ID, next
-		binding.Enabled = binding.Kind == domain.TriggerButton || binding.Kind == domain.TriggerChat
+		binding.Enabled = binding.Kind == domain.TriggerButton || binding.Kind == domain.TriggerChat || binding.Kind == domain.TriggerHotkey
 		binding.Trusted = false
 		binding.CreatedAt, binding.UpdatedAt = now, now
-		if _, err := tx.ExecContext(ctx, `INSERT INTO trigger_bindings (id, pipeline_id, node_id, revision, kind, label, icon, color, grid_position, hotkey, cron, timezone, enabled, trusted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, binding.ID, binding.PipelineID, binding.NodeID, binding.Revision, binding.Kind, binding.Label, binding.Icon, binding.Color, binding.GridPosition, binding.Hotkey, binding.Cron, binding.Timezone, binding.Enabled, false, stamp(now), stamp(now)); err != nil {
+		if _, err := statements(tx).Insert("trigger_bindings").Columns("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "created_at", "updated_at").Values(binding.ID, binding.PipelineID, binding.NodeID, binding.Revision, binding.Kind, binding.Label, binding.Icon, binding.Color, binding.GridPosition, binding.Hotkey, binding.Cron, binding.Timezone, binding.Enabled, false, stamp(now), stamp(now)).ExecContext(ctx); err != nil {
 			return domain.Pipeline{}, fmt.Errorf("save trigger binding: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM permissions WHERE pipeline_id = ?`, pipeline.ID); err != nil {
+	if _, err := statements(tx).Delete("permissions").Where(squirrel.Eq{"pipeline_id": pipeline.ID}).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("revoke prior permission grants: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM blueprint_migration_issues WHERE pipeline_id = ?`, pipeline.ID); err != nil {
+	if _, err := statements(tx).Delete("blueprint_migration_issues").Where(squirrel.Eq{"pipeline_id": pipeline.ID}).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("clear resolved migration issues: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE pipelines SET status = ?, published_revision = ?, updated_at = ? WHERE id = ?`, domain.PipelineActive, next, stamp(now), pipeline.ID); err != nil {
+	if _, err := statements(tx).Update("pipelines").Set("status", domain.PipelineActive).Set("published_revision", next).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": pipeline.ID}).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("activate pipeline: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -630,7 +676,7 @@ func (s *Store) Publish(ctx context.Context, pipeline domain.Pipeline, bindings 
 // PublishedDefinition returns the immutable revision used for trigger execution.
 func (s *Store) PublishedDefinition(ctx context.Context, pipelineID string, revision int) (domain.FlowDefinition, error) {
 	var definitionJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT definition FROM pipeline_revisions WHERE pipeline_id = ? AND revision = ?`, pipelineID, revision).Scan(&definitionJSON)
+	err := statements(s.db).Select("definition").From("pipeline_revisions").Where(squirrel.Eq{"pipeline_id": pipelineID, "revision": revision}).QueryRowContext(ctx).Scan(&definitionJSON)
 	if err != nil {
 		return domain.FlowDefinition{}, fmt.Errorf("get published definition: %w", err)
 	}
@@ -641,14 +687,32 @@ func (s *Store) PublishedDefinition(ctx context.Context, pipelineID string, revi
 	return definition, nil
 }
 
-// CreateFunction stores a new global function draft with a Blueprint-v2 body.
+// CreateFunction stores a new standard global function draft. It remains as a
+// compact repository API for callers that do not need creation metadata.
 func (s *Store) CreateFunction(ctx context.Context, name string, mode domain.NodeExecutionMode) (domain.CustomFunction, error) {
-	if mode != domain.NodePure {
+	return s.CreateFunctionWithRequest(ctx, domain.CreateFunctionRequest{Name: name, Kind: domain.FunctionStandard, Mode: mode})
+}
+
+// CreateFunctionWithRequest stores a new global function draft from the
+// explicit kind and metadata selected in the function-creation dialog.
+func (s *Store) CreateFunctionWithRequest(ctx context.Context, request domain.CreateFunctionRequest) (domain.CustomFunction, error) {
+	kind := request.Kind
+	if kind == "" {
+		kind = domain.FunctionStandard
+	}
+	if kind != domain.FunctionStandard && kind != domain.FunctionTool {
+		return domain.CustomFunction{}, fmt.Errorf("invalid function kind %q", kind)
+	}
+	mode := request.Mode
+	if kind == domain.FunctionTool || mode != domain.NodePure {
 		mode = domain.NodeImpure
 	}
 	now := time.Now().UTC()
 	definition := defaultFunctionDefinition(mode)
-	function := domain.CustomFunction{ID: uuid.NewString(), Name: strings.TrimSpace(name), Category: "Functions", Icon: "braces", IconColor: "#c4b5fd", IconBackground: "#2e1065", Mode: mode, Inputs: []domain.FunctionPin{}, Outputs: []domain.FunctionPin{}, DraftDefinition: definition, CreatedAt: now, UpdatedAt: now}
+	function := domain.CustomFunction{ID: uuid.NewString(), Name: strings.TrimSpace(request.Name), Description: strings.TrimSpace(request.Description), Category: "Functions", Icon: "braces", IconColor: "#c4b5fd", IconBackground: "#2e1065", Kind: kind, Mode: mode, Inputs: []domain.FunctionPin{}, Outputs: []domain.FunctionPin{}, DraftDefinition: definition, CreatedAt: now, UpdatedAt: now}
+	if kind == domain.FunctionTool {
+		function.Icon, function.IconColor, function.IconBackground = "wrench", "#f472b6", "#500724"
+	}
 	if function.Name == "" {
 		function.Name = "Untitled function"
 	}
@@ -664,7 +728,7 @@ func (s *Store) CreateFunction(ctx context.Context, name string, mode domain.Nod
 	if err != nil {
 		return domain.CustomFunction{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO functions (id, name, description, category, icon, icon_color, icon_background, mode, inputs_json, outputs_json, draft_definition, published_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, function.ID, function.Name, function.Description, function.Category, function.Icon, function.IconColor, function.IconBackground, function.Mode, inputs, outputs, flow, stamp(now), stamp(now))
+	_, err = statements(s.db).Insert("functions").Columns("id", "name", "description", "category", "icon", "icon_color", "icon_background", "kind", "mode", "inputs_json", "outputs_json", "draft_definition", "published_revision", "created_at", "updated_at").Values(function.ID, function.Name, function.Description, function.Category, function.Icon, function.IconColor, function.IconBackground, function.Kind, function.Mode, inputs, outputs, flow, 0, stamp(now), stamp(now)).ExecContext(ctx)
 	if err != nil {
 		return domain.CustomFunction{}, fmt.Errorf("create function: %w", err)
 	}
@@ -673,7 +737,7 @@ func (s *Store) CreateFunction(ctx context.Context, name string, mode domain.Nod
 
 // ListFunctions returns the global Functions-library cards.
 func (s *Store) ListFunctions(ctx context.Context) ([]domain.FunctionSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, category, icon, icon_color, icon_background, mode, published_revision, updated_at FROM functions ORDER BY category COLLATE NOCASE, name COLLATE NOCASE`)
+	rows, err := statements(s.db).Select("id", "name", "description", "category", "icon", "icon_color", "icon_background", "kind", "mode", "published_revision", "updated_at").From("functions").OrderBy("category COLLATE NOCASE", "name COLLATE NOCASE").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list functions: %w", err)
 	}
@@ -681,11 +745,11 @@ func (s *Store) ListFunctions(ctx context.Context) ([]domain.FunctionSummary, er
 	result := make([]domain.FunctionSummary, 0)
 	for rows.Next() {
 		var item domain.FunctionSummary
-		var mode, updated string
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Icon, &item.IconColor, &item.IconBackground, &mode, &item.PublishedRevision, &updated); err != nil {
+		var kind, mode, updated string
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Category, &item.Icon, &item.IconColor, &item.IconBackground, &kind, &mode, &item.PublishedRevision, &updated); err != nil {
 			return nil, fmt.Errorf("scan function summary: %w", err)
 		}
-		item.Mode, item.UpdatedAt = domain.NodeExecutionMode(mode), parseTime(updated)
+		item.Kind, item.Mode, item.UpdatedAt = domain.FunctionKind(kind), domain.NodeExecutionMode(mode), parseTime(updated)
 		result = append(result, item)
 	}
 	return result, rows.Err()
@@ -694,8 +758,8 @@ func (s *Store) ListFunctions(ctx context.Context) ([]domain.FunctionSummary, er
 // GetFunction loads an editable global function draft.
 func (s *Store) GetFunction(ctx context.Context, id string) (domain.CustomFunction, error) {
 	var function domain.CustomFunction
-	var mode, inputs, outputs, definition, created, updated string
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, category, icon, icon_color, icon_background, mode, inputs_json, outputs_json, draft_definition, published_revision, created_at, updated_at FROM functions WHERE id = ?`, id).Scan(&function.ID, &function.Name, &function.Description, &function.Category, &function.Icon, &function.IconColor, &function.IconBackground, &mode, &inputs, &outputs, &definition, &function.PublishedRevision, &created, &updated)
+	var kind, mode, inputs, outputs, definition, created, updated string
+	err := statements(s.db).Select("id", "name", "description", "category", "icon", "icon_color", "icon_background", "kind", "mode", "inputs_json", "outputs_json", "draft_definition", "published_revision", "created_at", "updated_at").From("functions").Where(squirrel.Eq{"id": id}).QueryRowContext(ctx).Scan(&function.ID, &function.Name, &function.Description, &function.Category, &function.Icon, &function.IconColor, &function.IconBackground, &kind, &mode, &inputs, &outputs, &definition, &function.PublishedRevision, &created, &updated)
 	if err != nil {
 		return domain.CustomFunction{}, fmt.Errorf("get function: %w", err)
 	}
@@ -708,7 +772,7 @@ func (s *Store) GetFunction(ctx context.Context, id string) (domain.CustomFuncti
 	if err := decode(definition, &function.DraftDefinition); err != nil {
 		return domain.CustomFunction{}, err
 	}
-	function.Mode, function.CreatedAt, function.UpdatedAt = domain.NodeExecutionMode(mode), parseTime(created), parseTime(updated)
+	function.Kind, function.Mode, function.CreatedAt, function.UpdatedAt = domain.FunctionKind(kind), domain.NodeExecutionMode(mode), parseTime(created), parseTime(updated)
 	return function, nil
 }
 
@@ -716,6 +780,15 @@ func (s *Store) GetFunction(ctx context.Context, id string) (domain.CustomFuncti
 func (s *Store) SaveFunctionDraft(ctx context.Context, function domain.CustomFunction) (domain.CustomFunction, error) {
 	if strings.TrimSpace(function.Name) == "" {
 		return domain.CustomFunction{}, fmt.Errorf("function name is required")
+	}
+	if function.Kind == "" {
+		function.Kind = domain.FunctionStandard
+	}
+	if function.Kind != domain.FunctionStandard && function.Kind != domain.FunctionTool {
+		return domain.CustomFunction{}, fmt.Errorf("invalid function kind %q", function.Kind)
+	}
+	if function.Kind == domain.FunctionTool {
+		function.Mode = domain.NodeImpure
 	}
 	if strings.TrimSpace(function.Category) == "" {
 		function.Category = "Functions"
@@ -742,7 +815,7 @@ func (s *Store) SaveFunctionDraft(ctx context.Context, function domain.CustomFun
 	if strings.TrimSpace(function.IconBackground) == "" {
 		function.IconBackground = "#2e1065"
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE functions SET name = ?, description = ?, category = ?, icon = ?, icon_color = ?, icon_background = ?, mode = ?, inputs_json = ?, outputs_json = ?, draft_definition = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(function.Name), function.Description, function.Category, function.Icon, function.IconColor, function.IconBackground, function.Mode, inputs, outputs, flow, stamp(now), function.ID)
+	result, err := statements(s.db).Update("functions").Set("name", strings.TrimSpace(function.Name)).Set("description", function.Description).Set("category", function.Category).Set("icon", function.Icon).Set("icon_color", function.IconColor).Set("icon_background", function.IconBackground).Set("kind", function.Kind).Set("mode", function.Mode).Set("inputs_json", inputs).Set("outputs_json", outputs).Set("draft_definition", flow).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": function.ID}).ExecContext(ctx)
 	if err != nil {
 		return domain.CustomFunction{}, fmt.Errorf("save function draft: %w", err)
 	}
@@ -768,14 +841,15 @@ func (s *Store) PublishFunction(ctx context.Context, function domain.CustomFunct
 	}
 	defer func() { _ = tx.Rollback() }()
 	var revision int
-	if err := tx.QueryRowContext(ctx, `SELECT published_revision FROM functions WHERE id = ?`, function.ID).Scan(&revision); err != nil {
+	if err := statements(tx).Select("published_revision").From("functions").Where(squirrel.Eq{"id": function.ID}).QueryRowContext(ctx).Scan(&revision); err != nil {
 		return domain.CustomFunction{}, fmt.Errorf("read function revision: %w", err)
 	}
 	metadata, err := encode(struct {
 		Name, Description, Category, Icon, IconColor, IconBackground string
+		Kind                                                         domain.FunctionKind
 		Mode                                                         domain.NodeExecutionMode
 		Inputs, Outputs                                              []domain.FunctionPin
-	}{function.Name, function.Description, function.Category, function.Icon, function.IconColor, function.IconBackground, function.Mode, function.Inputs, function.Outputs})
+	}{function.Name, function.Description, function.Category, function.Icon, function.IconColor, function.IconBackground, function.Kind, function.Mode, function.Inputs, function.Outputs})
 	if err != nil {
 		return domain.CustomFunction{}, err
 	}
@@ -785,10 +859,10 @@ func (s *Store) PublishFunction(ctx context.Context, function domain.CustomFunct
 	}
 	next := revision + 1
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO function_revisions (function_id, revision, metadata_json, definition, published_at) VALUES (?, ?, ?, ?, ?)`, function.ID, next, metadata, definition, stamp(now)); err != nil {
+	if _, err := statements(tx).Insert("function_revisions").Columns("function_id", "revision", "metadata_json", "definition", "published_at").Values(function.ID, next, metadata, definition, stamp(now)).ExecContext(ctx); err != nil {
 		return domain.CustomFunction{}, fmt.Errorf("save function revision: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE functions SET published_revision = ?, updated_at = ? WHERE id = ?`, next, stamp(now), function.ID); err != nil {
+	if _, err := statements(tx).Update("functions").Set("published_revision", next).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": function.ID}).ExecContext(ctx); err != nil {
 		return domain.CustomFunction{}, fmt.Errorf("activate function revision: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -807,12 +881,13 @@ func (s *Store) GetPublishedFunction(ctx context.Context, id string) (domain.Cus
 		return domain.CustomFunction{}, fmt.Errorf("function %q has not been published", function.Name)
 	}
 	var metadata, definition string
-	err = s.db.QueryRowContext(ctx, `SELECT metadata_json, definition FROM function_revisions WHERE function_id = ? AND revision = ?`, id, function.PublishedRevision).Scan(&metadata, &definition)
+	err = statements(s.db).Select("metadata_json", "definition").From("function_revisions").Where(squirrel.Eq{"function_id": id, "revision": function.PublishedRevision}).QueryRowContext(ctx).Scan(&metadata, &definition)
 	if err != nil {
 		return domain.CustomFunction{}, fmt.Errorf("get function revision: %w", err)
 	}
 	var snapshot struct {
 		Name, Description, Category, Icon, IconColor, IconBackground string
+		Kind                                                         domain.FunctionKind
 		Mode                                                         domain.NodeExecutionMode
 		Inputs, Outputs                                              []domain.FunctionPin
 	}
@@ -822,7 +897,10 @@ func (s *Store) GetPublishedFunction(ctx context.Context, id string) (domain.Cus
 	if err := decode(definition, &function.DraftDefinition); err != nil {
 		return domain.CustomFunction{}, err
 	}
-	function.Name, function.Description, function.Category, function.Icon, function.IconColor, function.IconBackground, function.Mode, function.Inputs, function.Outputs = snapshot.Name, snapshot.Description, snapshot.Category, snapshot.Icon, snapshot.IconColor, snapshot.IconBackground, snapshot.Mode, snapshot.Inputs, snapshot.Outputs
+	function.Name, function.Description, function.Category, function.Icon, function.IconColor, function.IconBackground, function.Kind, function.Mode, function.Inputs, function.Outputs = snapshot.Name, snapshot.Description, snapshot.Category, snapshot.Icon, snapshot.IconColor, snapshot.IconBackground, snapshot.Kind, snapshot.Mode, snapshot.Inputs, snapshot.Outputs
+	if function.Kind == "" {
+		function.Kind = domain.FunctionStandard
+	}
 	return function, nil
 }
 
@@ -849,19 +927,22 @@ func (s *Store) PublishedFunctionDefinitions(ctx context.Context) ([]domain.Node
 // DeleteFunction refuses to break an existing pipeline or composed function.
 func (s *Store) DeleteFunction(ctx context.Context, id string) error {
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipelines WHERE draft_definition LIKE ? OR id IN (SELECT pipeline_id FROM pipeline_revisions WHERE definition LIKE ?)`, "%function:"+id+"%", "%function:"+id+"%").Scan(&count); err != nil {
+	needle := "%function:" + id + "%"
+	pipelineRevisions := sqliteStatements.Select("pipeline_id").From("pipeline_revisions").Where("definition LIKE ?", needle)
+	if err := statements(s.db).Select("COUNT(*)").From("pipelines").Where(squirrel.Or{squirrel.Expr("draft_definition LIKE ?", needle), squirrel.Expr("id IN (?)", pipelineRevisions)}).QueryRowContext(ctx).Scan(&count); err != nil {
 		return fmt.Errorf("check function dependencies: %w", err)
 	}
 	if count > 0 {
 		return fmt.Errorf("function is used by %d pipeline definition(s)", count)
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM functions WHERE (id != ? AND draft_definition LIKE ?) OR id IN (SELECT function_id FROM function_revisions WHERE function_id != ? AND definition LIKE ?)`, id, "%function:"+id+"%", id, "%function:"+id+"%").Scan(&count); err != nil {
+	functionRevisions := sqliteStatements.Select("function_id").From("function_revisions").Where("function_id != ?", id).Where("definition LIKE ?", needle)
+	if err := statements(s.db).Select("COUNT(*)").From("functions").Where(squirrel.Or{squirrel.Expr("id != ? AND draft_definition LIKE ?", id, needle), squirrel.Expr("id IN (?)", functionRevisions)}).QueryRowContext(ctx).Scan(&count); err != nil {
 		return fmt.Errorf("check composed function dependencies: %w", err)
 	}
 	if count > 0 {
 		return fmt.Errorf("function is used by %d custom function definition(s)", count)
 	}
-	result, err := s.db.ExecContext(ctx, `DELETE FROM functions WHERE id = ?`, id)
+	result, err := statements(s.db).Delete("functions").Where(squirrel.Eq{"id": id}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("delete function: %w", err)
 	}
@@ -872,7 +953,7 @@ func (s *Store) DeleteFunction(ctx context.Context, id string) error {
 }
 
 func defaultFunctionDefinition(mode domain.NodeExecutionMode) domain.FlowDefinition {
-	definition := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Viewport: domain.Viewport{Zoom: 1}}
+	definition := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Viewport: domain.Viewport{Zoom: 1}}
 	if mode == domain.NodePure {
 		definition.Nodes = []domain.FlowNode{{ID: "inputs", Type: "function:input", Position: domain.Position{X: 100, Y: 180}, Data: map[string]any{"config": map[string]any{}}}, {ID: "outputs", Type: "function:output", Position: domain.Position{X: 420, Y: 180}, Data: map[string]any{"config": map[string]any{}}}}
 		return definition
@@ -885,30 +966,57 @@ func defaultFunctionDefinition(mode domain.NodeExecutionMode) domain.FlowDefinit
 // FunctionNodeDefinition projects a published function into the generic node
 // catalogue used by validation and React Flow.
 func FunctionNodeDefinition(function domain.CustomFunction) domain.NodeDefinition {
+	if function.Kind == domain.FunctionTool {
+		return domain.NodeDefinition{
+			Type:        "function:" + function.ID,
+			Category:    function.Category,
+			Label:       function.Name,
+			Description: function.Description,
+			Icon:        function.Icon,
+			Color:       "#f472b6",
+			// Tool functions declare an availability contract, not a graph step.
+			// Visual mode prevents a generic Result pin or executable call surface
+			// from being inferred by the catalogue normalizer.
+			Mode:          domain.NodeVisual,
+			Inputs:        []domain.NodePort{},
+			Outputs:       []domain.NodePort{{ID: "tool", Label: "Tools", Kind: domain.PinTool, Direction: domain.PinOutput, Color: "#a78bfa"}},
+			Fields:        []domain.ConfigField{},
+			Capabilities:  []domain.Capability{},
+			DefaultConfig: map[string]any{},
+			Source:        "function",
+		}
+	}
 	inputs, outputs := make([]domain.NodePort, 0, len(function.Inputs)+1), make([]domain.NodePort, 0, len(function.Outputs)+1)
 	if function.Mode == domain.NodeImpure {
 		inputs = append(inputs, domain.NodePort{ID: "in", Label: "Exec", Kind: domain.PinExec, Direction: domain.PinInput, Color: "#fafafa", MaxConnections: 1})
 		outputs = append(outputs, domain.NodePort{ID: "out", Label: "Then", Kind: domain.PinExec, Direction: domain.PinOutput, Color: "#fafafa", MaxConnections: 1})
 	}
 	for _, pin := range function.Inputs {
-		inputs = append(inputs, domain.NodePort{ID: pin.ID, Label: pin.Name, Kind: domain.PinData, Direction: domain.PinInput, DataType: pin.DataType, Required: pin.Required, Default: pin.Default, MaxConnections: 1})
+		typeSpec := pin.Type
+		if typeSpec == nil {
+			resolved := typespec.FromDataType(pin.DataType)
+			typeSpec = &resolved
+		}
+		inputs = append(inputs, domain.NodePort{ID: pin.ID, Label: pin.Name, Kind: domain.PinData, Direction: domain.PinInput, DataType: pin.DataType, Type: typeSpec, Required: pin.Required, Default: pin.Default, MaxConnections: 1})
 	}
 	for _, pin := range function.Outputs {
-		outputs = append(outputs, domain.NodePort{ID: pin.ID, Label: pin.Name, Kind: domain.PinData, Direction: domain.PinOutput, DataType: pin.DataType, MaxConnections: 1})
+		typeSpec := pin.Type
+		if typeSpec == nil {
+			resolved := typespec.FromDataType(pin.DataType)
+			typeSpec = &resolved
+		}
+		outputs = append(outputs, domain.NodePort{ID: pin.ID, Label: pin.Name, Kind: domain.PinData, Direction: domain.PinOutput, DataType: pin.DataType, Type: typeSpec, MaxConnections: 1})
 	}
 	return domain.NodeDefinition{Type: "function:" + function.ID, Category: function.Category, Label: function.Name, Description: function.Description, Icon: function.Icon, Color: "#a78bfa", Mode: function.Mode, Inputs: inputs, Outputs: outputs, Fields: []domain.ConfigField{}, Capabilities: []domain.Capability{}, DefaultConfig: map[string]any{}, Source: "function"}
 }
 
 // ListTriggers returns button or cron bindings for the matching product surface.
 func (s *Store) ListTriggers(ctx context.Context, kind domain.TriggerKind) ([]domain.TriggerBinding, error) {
-	query := `SELECT id, pipeline_id, node_id, revision, kind, label, icon, color, grid_position, hotkey, cron, timezone, enabled, trusted, next_run_at, last_run_at, last_run_status, created_at, updated_at FROM trigger_bindings`
-	args := []any{}
+	query := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings")
 	if kind != "" {
-		query += " WHERE kind = ?"
-		args = append(args, kind)
+		query = query.Where(squirrel.Eq{"kind": kind})
 	}
-	query += " ORDER BY grid_position ASC, label COLLATE NOCASE ASC"
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := query.OrderBy("grid_position ASC", "label COLLATE NOCASE ASC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list triggers: %w", err)
 	}
@@ -927,7 +1035,7 @@ func (s *Store) ListTriggers(ctx context.Context, kind domain.TriggerKind) ([]do
 // ListAllTriggers returns every active trigger binding for the local API and
 // diagnostics surfaces. It deliberately exposes binding metadata only.
 func (s *Store) ListAllTriggers(ctx context.Context) ([]domain.TriggerBinding, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, pipeline_id, node_id, revision, kind, label, icon, color, grid_position, hotkey, cron, timezone, enabled, trusted, next_run_at, last_run_at, last_run_status, created_at, updated_at FROM trigger_bindings ORDER BY updated_at DESC`)
+	rows, err := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings").OrderBy("updated_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list triggers: %w", err)
 	}
@@ -945,13 +1053,13 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]domain.TriggerBinding, e
 
 // GetTrigger returns a selected binding by ID.
 func (s *Store) GetTrigger(ctx context.Context, id string) (domain.TriggerBinding, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, pipeline_id, node_id, revision, kind, label, icon, color, grid_position, hotkey, cron, timezone, enabled, trusted, next_run_at, last_run_at, last_run_status, created_at, updated_at FROM trigger_bindings WHERE id = ?`, id)
+	row := statements(s.db).Select("id", "pipeline_id", "node_id", "revision", "kind", "label", "icon", "color", "grid_position", "hotkey", "cron", "timezone", "enabled", "trusted", "next_run_at", "last_run_at", "last_run_status", "created_at", "updated_at").From("trigger_bindings").Where(squirrel.Eq{"id": id}).QueryRowContext(ctx)
 	return scanBinding(row)
 }
 
 // SetTriggerEnabled changes activation without mutating the pipeline definition.
 func (s *Store) SetTriggerEnabled(ctx context.Context, id string, enabled bool) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE trigger_bindings SET enabled = ?, updated_at = ? WHERE id = ?`, enabled, stamp(time.Now().UTC()), id)
+	result, err := statements(s.db).Update("trigger_bindings").Set("enabled", enabled).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"id": id}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("set trigger enabled: %w", err)
 	}
@@ -963,7 +1071,7 @@ func (s *Store) SetTriggerEnabled(ctx context.Context, id string, enabled bool) 
 
 // SetTriggerNextRun updates scheduler metadata without modifying the workflow definition.
 func (s *Store) SetTriggerNextRun(ctx context.Context, id string, next time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE trigger_bindings SET next_run_at = ?, updated_at = ? WHERE id = ?`, stamp(next), stamp(time.Now().UTC()), id)
+	_, err := statements(s.db).Update("trigger_bindings").Set("next_run_at", stamp(next)).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"id": id}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("set trigger next run: %w", err)
 	}
@@ -972,7 +1080,7 @@ func (s *Store) SetTriggerNextRun(ctx context.Context, id string, next time.Time
 
 // SetTriggerLastRun records a completed trigger execution for the board and schedules view.
 func (s *Store) SetTriggerLastRun(ctx context.Context, id string, status domain.RunStatus, when time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE trigger_bindings SET last_run_at = ?, last_run_status = ?, updated_at = ? WHERE id = ?`, stamp(when), status, stamp(time.Now().UTC()), id)
+	_, err := statements(s.db).Update("trigger_bindings").Set("last_run_at", stamp(when)).Set("last_run_status", status).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"id": id}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("set trigger last run: %w", err)
 	}
@@ -981,18 +1089,18 @@ func (s *Store) SetTriggerLastRun(ctx context.Context, id string, status domain.
 
 // Grant stores trust for a capability scope on the active revision.
 func (s *Store) Grant(ctx context.Context, grant domain.PermissionGrant) error {
-	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO permissions (pipeline_id, revision, capability, scope, granted_at) VALUES (?, ?, ?, ?, ?)`, grant.PipelineID, grant.Revision, grant.Capability, grant.Scope, stamp(time.Now().UTC()))
+	_, err := statements(s.db).Replace("permissions").Columns("pipeline_id", "revision", "capability", "scope", "granted_at").Values(grant.PipelineID, grant.Revision, grant.Capability, grant.Scope, stamp(time.Now().UTC())).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("grant permission: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE trigger_bindings SET trusted = 1, updated_at = ? WHERE pipeline_id = ? AND revision = ?`, stamp(time.Now().UTC()), grant.PipelineID, grant.Revision)
+	_, err = statements(s.db).Update("trigger_bindings").Set("trusted", true).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"pipeline_id": grant.PipelineID, "revision": grant.Revision}).ExecContext(ctx)
 	return err
 }
 
 // TrustRevision explicitly permits unattended trigger execution of a published revision.
 // Capability-specific grants remain required when the graph requests sensitive work.
 func (s *Store) TrustRevision(ctx context.Context, pipelineID string, revision int) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE trigger_bindings SET trusted = 1, updated_at = ? WHERE pipeline_id = ? AND revision = ?`, stamp(time.Now().UTC()), pipelineID, revision)
+	result, err := statements(s.db).Update("trigger_bindings").Set("trusted", true).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"pipeline_id": pipelineID, "revision": revision}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("trust revision: %w", err)
 	}
@@ -1005,7 +1113,8 @@ func (s *Store) TrustRevision(ctx context.Context, pipelineID string, revision i
 // HasGrant reports whether a scope-independent capability was trusted.
 func (s *Store) HasGrant(ctx context.Context, pipelineID string, revision int, capability domain.Capability) (bool, error) {
 	var exists int
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permissions WHERE pipeline_id = ? AND revision = ? AND capability = ?)`, pipelineID, revision, capability).Scan(&exists)
+	permission := sqliteStatements.Select("1").From("permissions").Where(squirrel.Eq{"pipeline_id": pipelineID, "revision": revision, "capability": capability})
+	err := statements(s.db).Select().Column(squirrel.Expr("EXISTS(?)", permission)).QueryRowContext(ctx).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check permission: %w", err)
 	}
@@ -1016,7 +1125,7 @@ func (s *Store) HasGrant(ctx context.Context, pipelineID string, revision int, c
 func (s *Store) StartExecution(ctx context.Context, pipelineID, triggerID string) (domain.Execution, error) {
 	now := time.Now().UTC()
 	execution := domain.Execution{ID: uuid.NewString(), PipelineID: pipelineID, TriggerID: triggerID, Status: domain.RunRunning, StartedAt: now, RunStartedAt: &now}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO executions (id, pipeline_id, trigger_id, status, started_at, run_started_at) VALUES (?, ?, ?, ?, ?, ?)`, execution.ID, execution.PipelineID, execution.TriggerID, execution.Status, stamp(execution.StartedAt), stamp(now))
+	_, err := statements(s.db).Insert("executions").Columns("id", "pipeline_id", "trigger_id", "status", "started_at", "run_started_at").Values(execution.ID, execution.PipelineID, execution.TriggerID, execution.Status, stamp(execution.StartedAt), stamp(now)).ExecContext(ctx)
 	if err != nil {
 		return domain.Execution{}, fmt.Errorf("start execution: %w", err)
 	}
@@ -1027,7 +1136,7 @@ func (s *Store) StartExecution(ctx context.Context, pipelineID, triggerID string
 func (s *Store) QueueExecution(ctx context.Context, pipelineID, triggerID string) (domain.Execution, error) {
 	now := time.Now().UTC()
 	execution := domain.Execution{ID: uuid.NewString(), PipelineID: pipelineID, TriggerID: triggerID, Status: domain.RunPending, StartedAt: now, QueuedAt: &now}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO executions (id, pipeline_id, trigger_id, status, started_at, queued_at) VALUES (?, ?, ?, ?, ?, ?)`, execution.ID, execution.PipelineID, execution.TriggerID, execution.Status, stamp(execution.StartedAt), stamp(now))
+	_, err := statements(s.db).Insert("executions").Columns("id", "pipeline_id", "trigger_id", "status", "started_at", "queued_at").Values(execution.ID, execution.PipelineID, execution.TriggerID, execution.Status, stamp(execution.StartedAt), stamp(now)).ExecContext(ctx)
 	if err != nil {
 		return domain.Execution{}, fmt.Errorf("queue execution: %w", err)
 	}
@@ -1036,7 +1145,7 @@ func (s *Store) QueueExecution(ctx context.Context, pipelineID, triggerID string
 
 // MarkExecutionRunning transitions a queued execution when a worker begins it.
 func (s *Store) MarkExecutionRunning(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE executions SET status = ?, run_started_at = ? WHERE id = ? AND status = ?`, domain.RunRunning, stamp(time.Now().UTC()), id, domain.RunPending)
+	result, err := statements(s.db).Update("executions").Set("status", domain.RunRunning).Set("run_started_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"id": id, "status": domain.RunPending}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("mark execution running: %w", err)
 	}
@@ -1054,7 +1163,7 @@ func (s *Store) CompleteExecution(ctx context.Context, execution domain.Executio
 	}
 	defer func() { _ = tx.Rollback() }()
 	finished := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `UPDATE executions SET status = ?, finished_at = ?, error = ? WHERE id = ?`, execution.Status, stamp(finished), execution.Error, execution.ID); err != nil {
+	if _, err := statements(tx).Update("executions").Set("status", execution.Status).Set("finished_at", stamp(finished)).Set("error", execution.Error).Where(squirrel.Eq{"id": execution.ID}).ExecContext(ctx); err != nil {
 		return fmt.Errorf("complete execution: %w", err)
 	}
 	for ordinal, run := range execution.NodeRuns {
@@ -1066,7 +1175,7 @@ func (s *Store) CompleteExecution(ctx context.Context, execution domain.Executio
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO node_runs (execution_id, ordinal, node_id, node_type, status, input_json, output_json, error, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, execution.ID, ordinal, run.NodeID, run.NodeType, run.Status, input, output, run.Error, stamp(run.StartedAt), stamp(run.FinishedAt)); err != nil {
+		if _, err := statements(tx).Insert("node_runs").Columns("execution_id", "ordinal", "node_id", "node_type", "status", "input_json", "output_json", "error", "started_at", "finished_at").Values(execution.ID, ordinal, run.NodeID, run.NodeType, run.Status, input, output, run.Error, stamp(run.StartedAt), stamp(run.FinishedAt)).ExecContext(ctx); err != nil {
 			return fmt.Errorf("save node run: %w", err)
 		}
 	}
@@ -1081,7 +1190,7 @@ func (s *Store) ListExecutions(ctx context.Context, pipelineID string, limit int
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, pipeline_id, trigger_id, status, started_at, finished_at, queued_at, run_started_at, error FROM executions WHERE pipeline_id = ? ORDER BY started_at DESC LIMIT ?`, pipelineID, limit)
+	rows, err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error").From("executions").Where(squirrel.Eq{"pipeline_id": pipelineID}).OrderBy("started_at DESC").Limit(uint64(limit)).QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list executions: %w", err)
 	}
@@ -1118,7 +1227,7 @@ func (s *Store) ListRecentExecutions(ctx context.Context, limit int) ([]domain.E
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, pipeline_id, trigger_id, status, started_at, finished_at, queued_at, run_started_at, error FROM executions ORDER BY started_at DESC LIMIT ?`, limit)
+	rows, err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error").From("executions").OrderBy("started_at DESC").Limit(uint64(limit)).QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list recent executions: %w", err)
 	}
@@ -1131,7 +1240,7 @@ func (s *Store) GetExecution(ctx context.Context, id string) (domain.Execution, 
 	var execution domain.Execution
 	var status, started string
 	var finished, queued, runStarted sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT id, pipeline_id, trigger_id, status, started_at, finished_at, queued_at, run_started_at, error FROM executions WHERE id = ?`, id).Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error)
+	err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error").From("executions").Where(squirrel.Eq{"id": id}).QueryRowContext(ctx).Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error)
 	if err != nil {
 		return domain.Execution{}, fmt.Errorf("get execution: %w", err)
 	}
@@ -1198,7 +1307,7 @@ func (s *Store) CreateReport(ctx context.Context, report domain.Report) (domain.
 		return domain.Report{}, fmt.Errorf("encode report tags: %w", err)
 	}
 	report.CreatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO reports (id, pipeline_id, execution_id, node_id, title, tags_json, markdown, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, report.ID, report.PipelineID, report.ExecutionID, report.NodeID, report.Title, tags, report.Markdown, stamp(report.CreatedAt))
+	_, err = statements(s.db).Insert("reports").Columns("id", "pipeline_id", "execution_id", "node_id", "title", "tags_json", "markdown", "created_at").Values(report.ID, report.PipelineID, report.ExecutionID, report.NodeID, report.Title, tags, report.Markdown, stamp(report.CreatedAt)).ExecContext(ctx)
 	if err != nil {
 		return domain.Report{}, fmt.Errorf("create report: %w", err)
 	}
@@ -1210,7 +1319,7 @@ func (s *Store) CreateReport(ctx context.Context, report domain.Report) (domain.
 
 // DeleteReport permanently removes one report from the local workspace.
 func (s *Store) DeleteReport(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM reports WHERE id = ?`, strings.TrimSpace(id))
+	result, err := statements(s.db).Delete("reports").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("delete report: %w", err)
 	}
@@ -1225,7 +1334,7 @@ func (s *Store) ListReports(ctx context.Context, limit int) ([]domain.Report, er
 	if limit < 1 || limit > 250 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT reports.id, reports.pipeline_id, pipelines.name, reports.execution_id, reports.node_id, reports.title, reports.tags_json, reports.markdown, reports.created_at, executions.started_at FROM reports JOIN pipelines ON pipelines.id = reports.pipeline_id JOIN executions ON executions.id = reports.execution_id ORDER BY reports.created_at DESC LIMIT ?`, limit)
+	rows, err := statements(s.db).Select("reports.id", "reports.pipeline_id", "pipelines.name", "reports.execution_id", "reports.node_id", "reports.title", "reports.tags_json", "reports.markdown", "reports.created_at", "executions.started_at").From("reports").Join("pipelines ON pipelines.id = reports.pipeline_id").Join("executions ON executions.id = reports.execution_id").OrderBy("reports.created_at DESC").Limit(uint64(limit)).QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list reports: %w", err)
 	}
@@ -1253,7 +1362,7 @@ func (s *Store) ListReports(ctx context.Context, limit int) ([]domain.Report, er
 
 // GetReport returns one local report for assistant tools and report links.
 func (s *Store) GetReport(ctx context.Context, id string) (domain.Report, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT reports.id, reports.pipeline_id, pipelines.name, reports.execution_id, reports.node_id, reports.title, reports.tags_json, reports.markdown, reports.created_at, executions.started_at FROM reports JOIN pipelines ON pipelines.id = reports.pipeline_id JOIN executions ON executions.id = reports.execution_id WHERE reports.id = ?`, strings.TrimSpace(id))
+	row := statements(s.db).Select("reports.id", "reports.pipeline_id", "pipelines.name", "reports.execution_id", "reports.node_id", "reports.title", "reports.tags_json", "reports.markdown", "reports.created_at", "executions.started_at").From("reports").Join("pipelines ON pipelines.id = reports.pipeline_id").Join("executions ON executions.id = reports.execution_id").Where(squirrel.Eq{"reports.id": strings.TrimSpace(id)}).QueryRowContext(ctx)
 	var report domain.Report
 	var created, executionStarted, tags string
 	if err := row.Scan(&report.ID, &report.PipelineID, &report.PipelineName, &report.ExecutionID, &report.NodeID, &report.Title, &tags, &report.Markdown, &created, &executionStarted); err != nil {
@@ -1289,7 +1398,7 @@ func (s *Store) CreateChatConversation(ctx context.Context, conversation domain.
 	}
 	now := time.Now().UTC()
 	conversation.CreatedAt, conversation.UpdatedAt = now, now
-	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_conversations (id, mode, title, pipeline_id, trigger_binding_id, action_policy, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, conversation.ID, conversation.Mode, conversation.Title, conversation.PipelineID, conversation.TriggerBindingID, conversation.ActionPolicy, stamp(now), stamp(now))
+	_, err := statements(s.db).Insert("chat_conversations").Columns("id", "mode", "title", "pipeline_id", "trigger_binding_id", "action_policy", "created_at", "updated_at").Values(conversation.ID, conversation.Mode, conversation.Title, conversation.PipelineID, conversation.TriggerBindingID, conversation.ActionPolicy, stamp(now), stamp(now)).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatConversation{}, fmt.Errorf("create chat conversation: %w", err)
 	}
@@ -1299,7 +1408,7 @@ func (s *Store) CreateChatConversation(ctx context.Context, conversation domain.
 
 // ListChatConversations returns most recently active conversations first.
 func (s *Store) ListChatConversations(ctx context.Context) ([]domain.ChatConversation, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, mode, title, pipeline_id, trigger_binding_id, action_policy, created_at, updated_at FROM chat_conversations ORDER BY updated_at DESC`)
+	rows, err := statements(s.db).Select("id", "mode", "title", "pipeline_id", "trigger_binding_id", "action_policy", "created_at", "updated_at").From("chat_conversations").OrderBy("updated_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat conversations: %w", err)
 	}
@@ -1317,7 +1426,7 @@ func (s *Store) ListChatConversations(ctx context.Context) ([]domain.ChatConvers
 
 // GetChatConversation loads one persisted conversation.
 func (s *Store) GetChatConversation(ctx context.Context, id string) (domain.ChatConversation, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, mode, title, pipeline_id, trigger_binding_id, action_policy, created_at, updated_at FROM chat_conversations WHERE id = ?`, strings.TrimSpace(id))
+	row := statements(s.db).Select("id", "mode", "title", "pipeline_id", "trigger_binding_id", "action_policy", "created_at", "updated_at").From("chat_conversations").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).QueryRowContext(ctx)
 	var item domain.ChatConversation
 	var created, updated string
 	if err := row.Scan(&item.ID, &item.Mode, &item.Title, &item.PipelineID, &item.TriggerBindingID, &item.ActionPolicy, &created, &updated); err != nil {
@@ -1337,7 +1446,7 @@ func (s *Store) SaveChatConversation(ctx context.Context, conversation domain.Ch
 		conversation.ActionPolicy = domain.ChatActionAsk
 	}
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `UPDATE chat_conversations SET title = ?, action_policy = ?, updated_at = ? WHERE id = ?`, conversation.Title, conversation.ActionPolicy, stamp(now), conversation.ID)
+	result, err := statements(s.db).Update("chat_conversations").Set("title", conversation.Title).Set("action_policy", conversation.ActionPolicy).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": conversation.ID}).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatConversation{}, fmt.Errorf("save chat conversation: %w", err)
 	}
@@ -1349,7 +1458,7 @@ func (s *Store) SaveChatConversation(ctx context.Context, conversation domain.Ch
 
 // DeleteChatConversation permanently removes its local transcript and runs.
 func (s *Store) DeleteChatConversation(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM chat_conversations WHERE id = ?`, strings.TrimSpace(id))
+	result, err := statements(s.db).Delete("chat_conversations").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("delete chat conversation: %w", err)
 	}
@@ -1375,11 +1484,11 @@ func (s *Store) CreateChatMessage(ctx context.Context, message domain.ChatMessag
 		return domain.ChatMessage{}, fmt.Errorf("encode chat tool calls: %w", err)
 	}
 	message.CreatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO chat_messages (id, conversation_id, chat_run_id, role, content, tool_call_id, tool_name, tool_calls_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, message.ConversationID, message.ChatRunID, message.Role, message.Content, message.ToolCallID, message.ToolName, toolCalls, stamp(message.CreatedAt))
+	_, err = statements(s.db).Insert("chat_messages").Columns("id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at").Values(message.ID, message.ConversationID, message.ChatRunID, message.Role, message.Content, message.ToolCallID, message.ToolName, toolCalls, stamp(message.CreatedAt)).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatMessage{}, fmt.Errorf("create chat message: %w", err)
 	}
-	_, _ = s.db.ExecContext(ctx, `UPDATE chat_conversations SET updated_at = ? WHERE id = ?`, stamp(message.CreatedAt), message.ConversationID)
+	_, _ = statements(s.db).Update("chat_conversations").Set("updated_at", stamp(message.CreatedAt)).Where(squirrel.Eq{"id": message.ConversationID}).ExecContext(ctx)
 	_ = s.RecordMetricActivity(ctx, domain.MetricActivityEvent{Kind: "chat.message." + string(message.Role), OccurredAt: message.CreatedAt})
 	return message, nil
 }
@@ -1390,7 +1499,8 @@ func (s *Store) ListChatMessages(ctx context.Context, conversationID string, lim
 	if limit < 1 || limit > 500 {
 		limit = 200
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, conversation_id, chat_run_id, role, content, tool_call_id, tool_name, tool_calls_json, created_at FROM (SELECT rowid AS ordinal, id, conversation_id, chat_run_id, role, content, tool_call_id, tool_name, tool_calls_json, created_at FROM chat_messages WHERE conversation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?) ORDER BY created_at ASC, ordinal ASC`, strings.TrimSpace(conversationID), limit)
+	recentMessages := sqliteStatements.Select("rowid AS ordinal", "id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at").From("chat_messages").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID)}).OrderBy("created_at DESC", "rowid DESC").Limit(uint64(limit))
+	rows, err := statements(s.db).Select("id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at").FromSelect(recentMessages, "recent_messages").OrderBy("created_at ASC", "ordinal ASC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat messages: %w", err)
 	}
@@ -1414,7 +1524,7 @@ func (s *Store) ListChatMessages(ctx context.Context, conversationID string, lim
 // CreateChatRun creates a visible unit of work with the default status text.
 func (s *Store) CreateChatRun(ctx context.Context, conversationID string) (domain.ChatRun, error) {
 	run := domain.ChatRun{ID: uuid.NewString(), ConversationID: strings.TrimSpace(conversationID), Status: domain.RunPending, StatusText: "Working", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_runs (id, conversation_id, execution_id, status, status_text, error, created_at, updated_at) VALUES (?, ?, '', ?, ?, '', ?, ?)`, run.ID, run.ConversationID, run.Status, run.StatusText, stamp(run.CreatedAt), stamp(run.UpdatedAt))
+	_, err := statements(s.db).Insert("chat_runs").Columns("id", "conversation_id", "execution_id", "status", "status_text", "error", "created_at", "updated_at").Values(run.ID, run.ConversationID, "", run.Status, run.StatusText, "", stamp(run.CreatedAt), stamp(run.UpdatedAt)).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatRun{}, fmt.Errorf("create chat run: %w", err)
 	}
@@ -1424,7 +1534,7 @@ func (s *Store) CreateChatRun(ctx context.Context, conversationID string) (domai
 
 // GetChatRun returns a visible work item.
 func (s *Store) GetChatRun(ctx context.Context, id string) (domain.ChatRun, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, conversation_id, execution_id, status, status_text, error, created_at, updated_at FROM chat_runs WHERE id = ?`, strings.TrimSpace(id))
+	row := statements(s.db).Select("id", "conversation_id", "execution_id", "status", "status_text", "error", "created_at", "updated_at").From("chat_runs").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).QueryRowContext(ctx)
 	var item domain.ChatRun
 	var created, updated string
 	if err := row.Scan(&item.ID, &item.ConversationID, &item.ExecutionID, &item.Status, &item.StatusText, &item.Error, &created, &updated); err != nil {
@@ -1436,7 +1546,7 @@ func (s *Store) GetChatRun(ctx context.Context, id string) (domain.ChatRun, erro
 
 // ListChatRuns returns recent work in a conversation, newest first.
 func (s *Store) ListChatRuns(ctx context.Context, conversationID string) ([]domain.ChatRun, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, conversation_id, execution_id, status, status_text, error, created_at, updated_at FROM chat_runs WHERE conversation_id = ? ORDER BY created_at DESC`, strings.TrimSpace(conversationID))
+	rows, err := statements(s.db).Select("id", "conversation_id", "execution_id", "status", "status_text", "error", "created_at", "updated_at").From("chat_runs").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID)}).OrderBy("created_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat runs: %w", err)
 	}
@@ -1457,7 +1567,7 @@ func (s *Store) ListChatRuns(ctx context.Context, conversationID string) ([]doma
 // UpdateChatRun changes the status visible in the chat feed.
 func (s *Store) UpdateChatRun(ctx context.Context, runID string, status domain.RunStatus, statusText, executionID, runError string) error {
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `UPDATE chat_runs SET status = ?, status_text = ?, execution_id = CASE WHEN ? = '' THEN execution_id ELSE ? END, error = ?, updated_at = ? WHERE id = ?`, status, strings.TrimSpace(statusText), executionID, executionID, strings.TrimSpace(runError), stamp(now), strings.TrimSpace(runID))
+	result, err := statements(s.db).Update("chat_runs").Set("status", status).Set("status_text", strings.TrimSpace(statusText)).Set("execution_id", squirrel.Expr("CASE WHEN ? = '' THEN execution_id ELSE ? END", executionID, executionID)).Set("error", strings.TrimSpace(runError)).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": strings.TrimSpace(runID)}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("update chat run: %w", err)
 	}
@@ -1475,7 +1585,7 @@ func (s *Store) AddChatRunEvent(ctx context.Context, event domain.ChatRunEvent) 
 		return domain.ChatRunEvent{}, fmt.Errorf("chat activity summary is required")
 	}
 	event.CreatedAt = time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_run_events (id, chat_run_id, kind, summary, detail, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, event.ID, event.ChatRunID, event.Kind, event.Summary, event.Detail, event.Status, stamp(event.CreatedAt))
+	_, err := statements(s.db).Insert("chat_run_events").Columns("id", "chat_run_id", "kind", "summary", "detail", "status", "created_at").Values(event.ID, event.ChatRunID, event.Kind, event.Summary, event.Detail, event.Status, stamp(event.CreatedAt)).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatRunEvent{}, fmt.Errorf("create chat activity: %w", err)
 	}
@@ -1484,7 +1594,7 @@ func (s *Store) AddChatRunEvent(ctx context.Context, event domain.ChatRunEvent) 
 
 // ListChatRunEvents returns activity in execution order.
 func (s *Store) ListChatRunEvents(ctx context.Context, chatRunID string) ([]domain.ChatRunEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, chat_run_id, kind, summary, detail, status, created_at FROM chat_run_events WHERE chat_run_id = ? ORDER BY created_at ASC`, strings.TrimSpace(chatRunID))
+	rows, err := statements(s.db).Select("id", "chat_run_id", "kind", "summary", "detail", "status", "created_at").From("chat_run_events").Where(squirrel.Eq{"chat_run_id": strings.TrimSpace(chatRunID)}).OrderBy("created_at ASC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat activity: %w", err)
 	}
@@ -1512,7 +1622,7 @@ func (s *Store) CreateChatApproval(ctx context.Context, approval domain.ChatAppr
 	if err != nil {
 		return domain.ChatApproval{}, fmt.Errorf("encode chat approval: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO chat_approvals (id, conversation_id, chat_run_id, tool_call_json, status, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`, approval.ID, approval.ConversationID, approval.ChatRunID, encoded, approval.Status, stamp(approval.CreatedAt))
+	_, err = statements(s.db).Insert("chat_approvals").Columns("id", "conversation_id", "chat_run_id", "tool_call_json", "status", "created_at", "resolved_at").Values(approval.ID, approval.ConversationID, approval.ChatRunID, encoded, approval.Status, stamp(approval.CreatedAt), nil).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatApproval{}, fmt.Errorf("create chat approval: %w", err)
 	}
@@ -1521,7 +1631,7 @@ func (s *Store) CreateChatApproval(ctx context.Context, approval domain.ChatAppr
 
 // ListPendingChatApprovals returns unresolved confirmations for one transcript.
 func (s *Store) ListPendingChatApprovals(ctx context.Context, conversationID string) ([]domain.ChatApproval, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, conversation_id, chat_run_id, tool_call_json, status, created_at, resolved_at FROM chat_approvals WHERE conversation_id = ? AND status = 'pending' ORDER BY created_at ASC`, strings.TrimSpace(conversationID))
+	rows, err := statements(s.db).Select("id", "conversation_id", "chat_run_id", "tool_call_json", "status", "created_at", "resolved_at").From("chat_approvals").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID), "status": "pending"}).OrderBy("created_at ASC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat approvals: %w", err)
 	}
@@ -1539,7 +1649,7 @@ func (s *Store) ListPendingChatApprovals(ctx context.Context, conversationID str
 
 // GetChatApproval resolves a single persisted confirmation request.
 func (s *Store) GetChatApproval(ctx context.Context, id string) (domain.ChatApproval, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, conversation_id, chat_run_id, tool_call_json, status, created_at, resolved_at FROM chat_approvals WHERE id = ?`, strings.TrimSpace(id))
+	row := statements(s.db).Select("id", "conversation_id", "chat_run_id", "tool_call_json", "status", "created_at", "resolved_at").From("chat_approvals").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).QueryRowContext(ctx)
 	return scanChatApproval(row)
 }
 
@@ -1550,7 +1660,7 @@ func (s *Store) ResolveChatApproval(ctx context.Context, id string, approved boo
 		status = "approved"
 	}
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `UPDATE chat_approvals SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`, status, stamp(now), strings.TrimSpace(id))
+	result, err := statements(s.db).Update("chat_approvals").Set("status", status).Set("resolved_at", stamp(now)).Where(squirrel.Eq{"id": strings.TrimSpace(id), "status": "pending"}).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatApproval{}, fmt.Errorf("resolve chat approval: %w", err)
 	}
@@ -1564,7 +1674,7 @@ func (s *Store) ResolveChatApproval(ctx context.Context, id string, approved boo
 // stops a turn. A stopped turn must never be resumed by a stale dialog.
 func (s *Store) CancelChatApprovalsForRun(ctx context.Context, chatRunID string) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `UPDATE chat_approvals SET status = 'cancelled', resolved_at = ? WHERE chat_run_id = ? AND status = 'pending'`, stamp(now), strings.TrimSpace(chatRunID))
+	_, err := statements(s.db).Update("chat_approvals").Set("status", "cancelled").Set("resolved_at", stamp(now)).Where(squirrel.Eq{"chat_run_id": strings.TrimSpace(chatRunID), "status": "pending"}).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("cancel chat approvals: %w", err)
 	}
@@ -1575,7 +1685,8 @@ func (s *Store) CancelChatApprovalsForRun(ctx context.Context, chatRunID string)
 // choice still matches the published revision targeted by a pipeline tool.
 func (s *Store) HasChatToolGrant(ctx context.Context, conversationID, toolName, targetID string, revision int) (bool, error) {
 	var found int
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chat_tool_grants WHERE conversation_id = ? AND tool_name = ? AND target_id = ? AND revision = ?)`, strings.TrimSpace(conversationID), strings.TrimSpace(toolName), strings.TrimSpace(targetID), revision).Scan(&found)
+	grant := sqliteStatements.Select("1").From("chat_tool_grants").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID), "tool_name": strings.TrimSpace(toolName), "target_id": strings.TrimSpace(targetID), "revision": revision})
+	err := statements(s.db).Select().Column(squirrel.Expr("EXISTS(?)", grant)).QueryRowContext(ctx).Scan(&found)
 	if err != nil {
 		return false, fmt.Errorf("check chat tool grant: %w", err)
 	}
@@ -1585,7 +1696,7 @@ func (s *Store) HasChatToolGrant(ctx context.Context, conversationID, toolName, 
 // SaveChatToolGrant records the exact published revision accepted by a user.
 // Re-publishing a target naturally invalidates the matching lookup.
 func (s *Store) SaveChatToolGrant(ctx context.Context, conversationID, toolName, targetID string, revision int) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_tool_grants (conversation_id, tool_name, target_id, revision, granted_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(conversation_id, tool_name, target_id) DO UPDATE SET revision = excluded.revision, granted_at = excluded.granted_at`, strings.TrimSpace(conversationID), strings.TrimSpace(toolName), strings.TrimSpace(targetID), revision, stamp(time.Now().UTC()))
+	_, err := statements(s.db).Insert("chat_tool_grants").Columns("conversation_id", "tool_name", "target_id", "revision", "granted_at").Values(strings.TrimSpace(conversationID), strings.TrimSpace(toolName), strings.TrimSpace(targetID), revision, stamp(time.Now().UTC())).Suffix("ON CONFLICT(conversation_id, tool_name, target_id) DO UPDATE SET revision = excluded.revision, granted_at = excluded.granted_at").ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("save chat tool grant: %w", err)
 	}
@@ -1595,7 +1706,7 @@ func (s *Store) SaveChatToolGrant(ctx context.Context, conversationID, toolName,
 // AppendChatReply implements pipeline.ChatWriter for Reply to Chat nodes.
 func (s *Store) AppendChatReply(ctx context.Context, chatRunID, content string) (domain.ChatMessage, error) {
 	var conversationID string
-	if err := s.db.QueryRowContext(ctx, `SELECT conversation_id FROM chat_runs WHERE id = ?`, strings.TrimSpace(chatRunID)).Scan(&conversationID); err != nil {
+	if err := statements(s.db).Select("conversation_id").From("chat_runs").Where(squirrel.Eq{"id": strings.TrimSpace(chatRunID)}).QueryRowContext(ctx).Scan(&conversationID); err != nil {
 		return domain.ChatMessage{}, fmt.Errorf("resolve chat reply target: %w", err)
 	}
 	message, err := s.CreateChatMessage(ctx, domain.ChatMessage{ConversationID: conversationID, ChatRunID: chatRunID, Role: domain.ChatRoleAssistant, Content: content})
@@ -1625,7 +1736,7 @@ func (s *Store) ReadChatHistory(ctx context.Context, chatID string, limit int) (
 
 // ListChatPipelines projects active published chat trigger bindings for the picker.
 func (s *Store) ListChatPipelines(ctx context.Context) ([]domain.ChatPipeline, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT trigger_bindings.id, trigger_bindings.pipeline_id, pipelines.name, trigger_bindings.label, trigger_bindings.icon, trigger_bindings.color, trigger_bindings.revision FROM trigger_bindings JOIN pipelines ON pipelines.id = trigger_bindings.pipeline_id WHERE trigger_bindings.kind = ? AND trigger_bindings.enabled = 1 AND pipelines.status = ? ORDER BY pipelines.name COLLATE NOCASE, trigger_bindings.label COLLATE NOCASE`, domain.TriggerChat, domain.PipelineActive)
+	rows, err := statements(s.db).Select("trigger_bindings.id", "trigger_bindings.pipeline_id", "pipelines.name", "trigger_bindings.label", "trigger_bindings.icon", "trigger_bindings.color", "trigger_bindings.revision").From("trigger_bindings").Join("pipelines ON pipelines.id = trigger_bindings.pipeline_id").Where(squirrel.Eq{"trigger_bindings.kind": domain.TriggerChat, "trigger_bindings.enabled": true, "pipelines.status": domain.PipelineActive}).OrderBy("pipelines.name COLLATE NOCASE", "trigger_bindings.label COLLATE NOCASE").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat pipelines: %w", err)
 	}
@@ -1642,7 +1753,7 @@ func (s *Store) ListChatPipelines(ctx context.Context) ([]domain.ChatPipeline, e
 }
 
 func (s *Store) listNodeRuns(ctx context.Context, executionID string) ([]domain.NodeRun, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT node_id, node_type, status, input_json, output_json, error, started_at, finished_at FROM node_runs WHERE execution_id = ? ORDER BY ordinal`, executionID)
+	rows, err := statements(s.db).Select("node_id", "node_type", "status", "input_json", "output_json", "error", "started_at", "finished_at").From("node_runs").Where(squirrel.Eq{"execution_id": executionID}).OrderBy("ordinal").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list node runs: %w", err)
 	}
@@ -1675,7 +1786,7 @@ func (s *Store) PurgeExecutions(ctx context.Context, retentionDays int) error {
 	if retentionDays < 1 {
 		retentionDays = 30
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM executions WHERE started_at < ?`, stamp(time.Now().UTC().AddDate(0, 0, -retentionDays)))
+	_, err := statements(s.db).Delete("executions").Where("started_at < ?", stamp(time.Now().UTC().AddDate(0, 0, -retentionDays))).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("purge executions: %w", err)
 	}
@@ -1710,7 +1821,7 @@ func (s *Store) LoadSettings(ctx context.Context, pluginDirectory string) (domai
 		}},
 	}
 	var value string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'app'`).Scan(&value)
+	err := statements(s.db).Select("value").From("settings").Where(squirrel.Eq{"key": "app"}).QueryRowContext(ctx).Scan(&value)
 	if err == sql.ErrNoRows {
 		return settings, nil
 	}
@@ -1790,7 +1901,7 @@ func (s *Store) SaveSettings(ctx context.Context, settings domain.Settings) erro
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO settings (key, value) VALUES ('app', ?)`, value)
+	_, err = statements(s.db).Replace("settings").Columns("key", "value").Values("app", value).ExecContext(ctx)
 	if err != nil {
 		return fmt.Errorf("save settings: %w", err)
 	}

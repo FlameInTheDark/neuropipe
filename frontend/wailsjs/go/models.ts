@@ -1,3 +1,26 @@
+export namespace app {
+	
+	export class TrayMenuLabels {
+	    show: string;
+	    settings: string;
+	    hide: string;
+	    close: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TrayMenuLabels(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.show = source["show"];
+	        this.settings = source["settings"];
+	        this.hide = source["hide"];
+	        this.close = source["close"];
+	    }
+	}
+
+}
+
 export namespace domain {
 	
 	export class APISettings {
@@ -369,6 +392,24 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class CreateFunctionRequest {
+	    name: string;
+	    description: string;
+	    kind: string;
+	    mode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateFunctionRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.kind = source["kind"];
+	        this.mode = source["mode"];
+	    }
+	}
 	export class Viewport {
 	    x: number;
 	    y: number;
@@ -493,10 +534,88 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class TypeFieldSpec {
+	    id: string;
+	    name: string;
+	    type: TypeSpec;
+	    optional?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new TypeFieldSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.type = this.convertValues(source["type"], TypeSpec);
+	        this.optional = source["optional"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TypeSpec {
+	    kind: string;
+	    name?: string;
+	    element?: TypeSpec;
+	    key?: TypeSpec;
+	    value?: TypeSpec;
+	    fields?: TypeFieldSpec[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TypeSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.element = this.convertValues(source["element"], TypeSpec);
+	        this.key = this.convertValues(source["key"], TypeSpec);
+	        this.value = this.convertValues(source["value"], TypeSpec);
+	        this.fields = this.convertValues(source["fields"], TypeFieldSpec);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class FunctionPin {
 	    id: string;
 	    name: string;
+	    description?: string;
 	    dataType: string;
+	    type?: TypeSpec;
 	    required?: boolean;
 	    default?: any;
 	
@@ -508,10 +627,30 @@ export namespace domain {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.name = source["name"];
+	        this.description = source["description"];
 	        this.dataType = source["dataType"];
+	        this.type = this.convertValues(source["type"], TypeSpec);
 	        this.required = source["required"];
 	        this.default = source["default"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class CustomFunction {
 	    id: string;
@@ -521,6 +660,7 @@ export namespace domain {
 	    icon: string;
 	    iconColor: string;
 	    iconBackground: string;
+	    kind: string;
 	    mode: string;
 	    inputs: FunctionPin[];
 	    outputs: FunctionPin[];
@@ -544,6 +684,7 @@ export namespace domain {
 	        this.icon = source["icon"];
 	        this.iconColor = source["iconColor"];
 	        this.iconBackground = source["iconBackground"];
+	        this.kind = source["kind"];
 	        this.mode = source["mode"];
 	        this.inputs = this.convertValues(source["inputs"], FunctionPin);
 	        this.outputs = this.convertValues(source["outputs"], FunctionPin);
@@ -803,6 +944,7 @@ export namespace domain {
 	    icon: string;
 	    iconColor: string;
 	    iconBackground: string;
+	    kind: string;
 	    mode: string;
 	    publishedRevision: number;
 	    // Go type: time
@@ -821,6 +963,7 @@ export namespace domain {
 	        this.icon = source["icon"];
 	        this.iconColor = source["iconColor"];
 	        this.iconBackground = source["iconBackground"];
+	        this.kind = source["kind"];
 	        this.mode = source["mode"];
 	        this.publishedRevision = source["publishedRevision"];
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
@@ -1599,6 +1742,7 @@ export namespace domain {
 	    kind: string;
 	    direction: string;
 	    dataType?: string;
+	    type?: TypeSpec;
 	    fields?: DataField[];
 	    color?: string;
 	    required?: boolean;
@@ -1616,6 +1760,7 @@ export namespace domain {
 	        this.kind = source["kind"];
 	        this.direction = source["direction"];
 	        this.dataType = source["dataType"];
+	        this.type = this.convertValues(source["type"], TypeSpec);
 	        this.fields = this.convertValues(source["fields"], DataField);
 	        this.color = source["color"];
 	        this.required = source["required"];
@@ -1950,6 +2095,7 @@ export namespace domain {
 	
 	export class Settings {
 	    language: string;
+	    hideToTrayOnClose: boolean;
 	    defaultProviderId: string;
 	    contentDirectory: string;
 	    retentionDays: number;
@@ -1969,6 +2115,7 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.language = source["language"];
+	        this.hideToTrayOnClose = source["hideToTrayOnClose"];
 	        this.defaultProviderId = source["defaultProviderId"];
 	        this.contentDirectory = source["contentDirectory"];
 	        this.retentionDays = source["retentionDays"];
@@ -2070,6 +2217,8 @@ export namespace domain {
 		    return a;
 		}
 	}
+	
+	
 	export class UpdateAvailability {
 	    available: boolean;
 	    version?: string;

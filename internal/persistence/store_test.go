@@ -12,6 +12,35 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 )
 
+func TestSettingsPersistHideToTrayOnClose(t *testing.T) {
+	t.Parallel()
+	store, err := New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	settings, err := store.LoadSettings(context.Background(), filepath.Join(t.TempDir(), "plugins"))
+	if err != nil {
+		t.Fatalf("LoadSettings() error = %v", err)
+	}
+	if settings.HideToTrayOnClose {
+		t.Fatal("HideToTrayOnClose = true for a new profile, want false")
+	}
+	settings.HideToTrayOnClose = true
+	if err := store.SaveSettings(context.Background(), settings); err != nil {
+		t.Fatalf("SaveSettings() error = %v", err)
+	}
+
+	loaded, err := store.LoadSettings(context.Background(), filepath.Join(t.TempDir(), "plugins"))
+	if err != nil {
+		t.Fatalf("LoadSettings() after save error = %v", err)
+	}
+	if !loaded.HideToTrayOnClose {
+		t.Fatal("HideToTrayOnClose = false after save, want true")
+	}
+}
+
 func TestPublishCreatesImmutableRevisionAndBindings(t *testing.T) {
 	store, err := New(filepath.Join(t.TempDir(), "data"))
 	if err != nil {
@@ -43,6 +72,29 @@ func TestPublishCreatesImmutableRevisionAndBindings(t *testing.T) {
 	}
 }
 
+func TestPublishEnablesGlobalHotkeyBinding(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	pipeline, err := store.CreatePipeline(ctx, "Hotkey", domain.FlowDefinition{})
+	if err != nil {
+		t.Fatalf("CreatePipeline() error = %v", err)
+	}
+	if _, err := store.Publish(ctx, pipeline, []domain.TriggerBinding{{NodeID: "hotkey", Kind: domain.TriggerHotkey, Label: "Launch", Hotkey: "Ctrl+Alt+N"}}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	bindings, err := store.ListTriggers(ctx, domain.TriggerHotkey)
+	if err != nil || len(bindings) != 1 {
+		t.Fatalf("ListTriggers() = %#v, %v", bindings, err)
+	}
+	if !bindings[0].Enabled || bindings[0].Trusted {
+		t.Fatalf("hotkey binding = %#v, want enabled and untrusted", bindings[0])
+	}
+}
+
 func TestBlueprintCatalogMigrationConvertsSafeNodesAndFlagsAmbiguity(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "data")
 	store, err := New(root)
@@ -58,7 +110,7 @@ func TestBlueprintCatalogMigrationConvertsSafeNodesAndFlagsAmbiguity(t *testing.
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, blueprintCatalogMigrationKey); err != nil {
+	if _, err := statements(store.db).Delete("settings").Where("key = ?", blueprintCatalogMigrationKey).ExecContext(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.migrateBlueprintCatalog(ctx); err != nil {
@@ -80,6 +132,133 @@ func TestBlueprintCatalogMigrationConvertsSafeNodesAndFlagsAmbiguity(t *testing.
 	backups, err := filepath.Glob(filepath.Join(root, "neuropipe-pre-blueprint-catalog-v3-*.db"))
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("backup files = %v, %v", backups, err)
+	}
+}
+
+func TestBlueprintV3MigrationBacksUpAndPausesPublishedDrafts(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "data")
+	store, err := New(root)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	definition := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		{ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Run"}}},
+		{ID: "notice", Type: "action:notification", Data: map[string]any{"config": map[string]any{"title": "Done", "message": "Done"}}},
+	}, Edges: []domain.FlowEdge{{ID: "run", Source: "button", SourceHandle: "out", Target: "notice", TargetHandle: "in", Kind: domain.PinExec}}}
+	pipeline, err := store.CreatePipeline(ctx, "V3 migration", definition)
+	if err != nil {
+		t.Fatalf("CreatePipeline() error = %v", err)
+	}
+	if _, err := store.Publish(ctx, pipeline, []domain.TriggerBinding{{NodeID: "button", Kind: domain.TriggerButton, Label: "Run"}}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if _, err := statements(store.db).Delete("settings").Where("key = ?", blueprintV3MigrationKey).ExecContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.migrateBlueprintV3(ctx); err != nil {
+		t.Fatalf("migrateBlueprintV3() error = %v", err)
+	}
+	updated, err := store.GetPipeline(ctx, pipeline.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.DraftDefinition.SchemaVersion != domain.GraphSchemaV3 || updated.Status != domain.PipelineDraft {
+		t.Fatalf("migrated pipeline = %#v", updated)
+	}
+	bindings, err := store.ListTriggers(ctx, domain.TriggerButton)
+	if err != nil || len(bindings) != 1 || bindings[0].Enabled || bindings[0].Trusted {
+		t.Fatalf("bindings = %#v, %v", bindings, err)
+	}
+	backups, err := filepath.Glob(filepath.Join(root, "neuropipe-pre-blueprint-v3-*.db"))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("backup files = %v, %v", backups, err)
+	}
+}
+
+func TestBlueprintV3MigrationUnpublishesV2Functions(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	function, err := store.CreateFunction(ctx, "Legacy function", domain.NodePure)
+	if err != nil {
+		t.Fatalf("CreateFunction() error = %v", err)
+	}
+	function.DraftDefinition.SchemaVersion = domain.GraphSchemaV2
+	function, err = store.PublishFunction(ctx, function)
+	if err != nil || function.PublishedRevision != 1 {
+		t.Fatalf("PublishFunction() = %#v, %v", function, err)
+	}
+	if _, err := statements(store.db).Delete("settings").Where("key = ?", blueprintV3MigrationKey).ExecContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.migrateBlueprintV3(ctx); err != nil {
+		t.Fatalf("migrateBlueprintV3() error = %v", err)
+	}
+	updated, err := store.GetFunction(ctx, function.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.DraftDefinition.SchemaVersion != domain.GraphSchemaV3 || updated.PublishedRevision != 0 {
+		t.Fatalf("migrated function = %#v", updated)
+	}
+}
+
+func TestCreateLLMToolFunctionPersistsDedicatedToolContract(t *testing.T) {
+	ctx := context.Background()
+	store, err := New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	created, err := store.CreateFunctionWithRequest(ctx, domain.CreateFunctionRequest{
+		Name:        "Search weather",
+		Description: "Looks up a local weather forecast.",
+		Kind:        domain.FunctionTool,
+		Mode:        domain.NodePure,
+	})
+	if err != nil {
+		t.Fatalf("CreateFunctionWithRequest() error = %v", err)
+	}
+	if created.Kind != domain.FunctionTool || created.Mode != domain.NodeImpure {
+		t.Fatalf("created function = %#v", created)
+	}
+	reloaded, err := store.GetFunction(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Kind != domain.FunctionTool || reloaded.Description != created.Description {
+		t.Fatalf("reloaded function = %#v", reloaded)
+	}
+	definition := FunctionNodeDefinition(reloaded)
+	if definition.Mode != domain.NodeVisual || len(definition.Inputs) != 0 || len(definition.Outputs) != 1 || definition.Outputs[0].Kind != domain.PinTool || definition.Outputs[0].MaxConnections != 0 {
+		t.Fatalf("tool node definition = %#v", definition)
+	}
+}
+
+func TestBlueprintV3MigrationCanonicalizesSafeConfigurationValues(t *testing.T) {
+	definition := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		{ID: "number", Type: "data:constant", Data: map[string]any{"config": map[string]any{"type": "number", "value": "7.5"}}},
+		{ID: "boolean", Type: "data:constant", Data: map[string]any{"config": map[string]any{"type": "boolean", "value": "true"}}},
+		{ID: "bad", Type: "data:constant", Data: map[string]any{"config": map[string]any{"type": "number", "value": "not a number"}}},
+		{ID: "date", Type: "date:create", Data: map[string]any{"config": map[string]any{"year": "2026"}}},
+	}}
+	issues := migrateV2ConfigurationValues(&definition)
+	configs := []map[string]any{
+		definition.Nodes[0].Data["config"].(map[string]any),
+		definition.Nodes[1].Data["config"].(map[string]any),
+		definition.Nodes[3].Data["config"].(map[string]any),
+	}
+	if configs[0]["value"] != 7.5 || configs[1]["value"] != true || configs[2]["year"] != 2026.0 {
+		t.Fatalf("canonical configs = %#v", configs)
+	}
+	if len(issues) != 1 || !strings.Contains(issues[0], "bad") {
+		t.Fatalf("migration issues = %#v", issues)
 	}
 }
 
@@ -217,6 +396,51 @@ func TestLegacyGraphsAreBackedUpPausedAndMarkedReadOnly(t *testing.T) {
 	backups, err := filepath.Glob(filepath.Join(root, "neuropipe-pre-blueprint-v2-*.db"))
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("backup files = %v, %v; want one", backups, err)
+	}
+}
+
+func TestV3PipelineIsNotMarkedLegacyAndRepairsOldMarker(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "data")
+	store, err := New(root)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ctx := context.Background()
+	pipeline, err := store.CreatePipeline(ctx, "Current", domain.FlowDefinition{
+		SchemaVersion: domain.GraphSchemaV3,
+		Nodes:         []domain.FlowNode{{ID: "button", Type: "trigger:button"}},
+	})
+	if err != nil {
+		t.Fatalf("CreatePipeline() error = %v", err)
+	}
+	if _, err := statements(store.db).Insert("legacy_graphs").Columns("pipeline_id", "detected_at", "reason").Values(pipeline.ID, "now", "Blueprint v2 rebuild required").ExecContext(ctx); err != nil {
+		t.Fatalf("insert invalid legacy marker: %v", err)
+	}
+	if _, err := statements(store.db).Update("pipelines").Set("status", domain.PipelineLegacy).Where("id = ?", pipeline.ID).ExecContext(ctx); err != nil {
+		t.Fatalf("mark pipeline legacy: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	store, err = New(root)
+	if err != nil {
+		t.Fatalf("reopen New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	loaded, err := store.GetPipeline(ctx, pipeline.ID)
+	if err != nil {
+		t.Fatalf("GetPipeline() error = %v", err)
+	}
+	if loaded.Status != domain.PipelineDraft {
+		t.Fatalf("pipeline status = %q, want %q", loaded.Status, domain.PipelineDraft)
+	}
+	var markers int
+	if err := statements(store.db).Select("COUNT(*)").From("legacy_graphs").Where("pipeline_id = ?", pipeline.ID).QueryRowContext(ctx).Scan(&markers); err != nil {
+		t.Fatalf("count legacy markers: %v", err)
+	}
+	if markers != 0 {
+		t.Fatalf("legacy markers = %d, want 0", markers)
 	}
 }
 

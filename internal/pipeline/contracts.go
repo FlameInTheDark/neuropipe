@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes"
 )
 
 // Packet is the JSON data unit routed through a pipeline execution.
@@ -42,6 +43,13 @@ type ChatResponse struct {
 // LLMRunner lets the engine invoke an app-configured provider without importing it.
 type LLMRunner interface {
 	Chat(ctx context.Context, request ChatRequest) (ChatResponse, error)
+}
+
+// AssistantRunner is the optional native-tool extension to LLMRunner. The
+// graph host only needs this narrow conversation contract when an Agent has
+// one or more LLM tool functions connected to its Tools pin.
+type AssistantRunner interface {
+	Converse(ctx context.Context, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error)
 }
 
 // NotificationSender delivers an operating-system notification without
@@ -102,6 +110,13 @@ func WithNotificationSender(sender NotificationSender) EngineOption {
 // WithChatWriter enables Chat-specific Blueprint nodes for an execution.
 func WithChatWriter(writer ChatWriter) EngineOption {
 	return func(engine *Engine) { engine.chat = writer }
+}
+
+// WithJavaScriptHost makes the explicit np host API available to JavaScript
+// nodes for one engine execution. A nil host keeps the engine useful in
+// headless tests and makes JavaScript system calls fail explicitly.
+func WithJavaScriptHost(host nodes.JavaScriptHost) EngineOption {
+	return func(engine *Engine) { engine.javascript = host }
 }
 
 // ValidationError explains why a definition cannot be published.

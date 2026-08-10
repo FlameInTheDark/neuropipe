@@ -72,26 +72,20 @@ export function TitleBar() {
             <span>{t('titlebar.updateAvailable', { version: update.version })}</span>
           </button>
         </Tooltip> : null}
-        <Tooltip content={t('titlebar.minimise')} side="bottom">
-          <button type="button" className="window-control" onClick={WindowMinimise} aria-label={t('titlebar.minimise')}>
-            <Minus className="size-4" strokeWidth={2} />
-          </button>
-        </Tooltip>
-        <Tooltip content={maximised ? t('titlebar.restore') : t('titlebar.maximise')} side="bottom">
-          <button
-            type="button"
-            className="window-control"
-            onClick={toggleMaximise}
-            aria-label={maximised ? t('titlebar.restore') : t('titlebar.maximise')}
-          >
-            {maximised ? <Square className="size-3" /> : <Maximize2 className="size-3.5" />}
-          </button>
-        </Tooltip>
-        <Tooltip content={t('titlebar.close')} side="bottom">
-          <button type="button" className="window-control window-control-close" onClick={Quit} aria-label={t('titlebar.close')}>
-            <X className="size-4" />
-          </button>
-        </Tooltip>
+        <button type="button" className="window-control" onClick={WindowMinimise} aria-label={t('titlebar.minimise')}>
+          <Minus className="size-4" strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          className="window-control"
+          onClick={toggleMaximise}
+          aria-label={maximised ? t('titlebar.restore') : t('titlebar.maximise')}
+        >
+          {maximised ? <Square className="size-3" /> : <Maximize2 className="size-3.5" />}
+        </button>
+        <button type="button" className="window-control window-control-close" onClick={Quit} aria-label={t('titlebar.close')}>
+          <X className="size-4" />
+        </button>
       </div>
     </header>
   );

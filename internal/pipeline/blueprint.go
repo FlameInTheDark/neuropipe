@@ -7,10 +7,11 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes"
+	"github.com/FlameInTheDark/neuropipe/internal/typespec"
 )
 
 const maxBlueprintLoopIterations = 10_000
@@ -18,8 +19,8 @@ const maxBlueprintLoopIterations = 10_000
 // Execute runs only the versioned Blueprint graph format. Legacy graphs are
 // preserved by persistence but intentionally cannot reach this interpreter.
 func (e *Engine) Execute(ctx context.Context, definition domain.FlowDefinition, triggerNodeID string, initial Packet) (RunResult, error) {
-	if definition.SchemaVersion != domain.GraphSchemaV2 {
-		return RunResult{}, ValidationError{Message: "this is a legacy pipeline. Rebuild it as a Blueprint v2 graph before running."}
+	if definition.SchemaVersion != domain.GraphSchemaV2 && definition.SchemaVersion != domain.GraphSchemaV3 {
+		return RunResult{}, ValidationError{Message: "this is a legacy pipeline. Rebuild it as a Blueprint v3 graph before running."}
 	}
 	if err := Validate(definition, e.registry); err != nil {
 		return RunResult{}, err
@@ -172,7 +173,7 @@ func (s *blueprintState) runExec(nodeID, execInput string, frame *blueprintFrame
 	if !exists {
 		return fmt.Errorf("node %q uses unavailable type %q", node.ID, node.Type)
 	}
-	definition, err := definitionForNode(definition, node)
+	definition, err := definitionForRegisteredNode(s.engine.registry, definition, node)
 	if err != nil {
 		return fmt.Errorf("node %q has invalid configuration: %w", node.ID, err)
 	}
@@ -196,21 +197,14 @@ func (s *blueprintState) runExec(nodeID, execInput string, frame *blueprintFrame
 		}
 	}
 
-	if node.Type == "flow:for_each" {
-		return s.runForEach(node, definition, inputs, frame)
-	}
-	if node.Type == "flow:for_loop" {
-		return s.runForLoop(node, definition, inputs, frame)
-	}
-	if node.Type == "flow:while" {
-		return s.runWhile(node, definition, frame)
-	}
-
 	started := time.Now().UTC()
-	outputs, ports, err := s.executeImpure(node, definition, inputs, frame, execInput)
+	outputs, ports, loop, err := s.executeImpure(node, definition, inputs, frame, execInput)
 	finished := time.Now().UTC()
 	if err != nil {
 		return s.recordFailureAt(node, inputs, err, started, finished)
+	}
+	if loop != nil {
+		return s.runLoopPlan(node, definition, inputs, frame, loop, started)
 	}
 	frame.values[node.ID] = outputs
 	s.result.NodeRuns = append(s.result.NodeRuns, domain.NodeRun{NodeID: node.ID, NodeType: node.Type, Status: domain.RunCompleted, Input: inputs, Output: outputs, StartedAt: started, FinishedAt: finished})
@@ -241,219 +235,105 @@ func startsNewActivation(nodeType string) bool {
 	}
 }
 
-func (s *blueprintState) runForEach(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame) error {
-	items, ok := asSlice(inputs["items"])
-	if !ok {
-		return s.recordFailure(node, inputs, fmt.Errorf("for-each loop expects Array to be a list"))
-	}
-	started := time.Now().UTC()
+// runLoopPlan owns graph traversal, frame isolation, cancellation, and loop
+// safety. The node module supplies only its iterations or Boolean condition
+// contract through nodes.LoopPlan.
+func (s *blueprintState) runLoopPlan(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame, plan *nodes.LoopPlan, started time.Time) error {
 	s.loopDepth++
 	defer func() { s.loopDepth-- }()
-	for index, item := range items {
-		if index >= maxBlueprintLoopIterations {
-			return s.recordFailureAt(node, inputs, fmt.Errorf("for-each loop exceeded the %d iteration limit", maxBlueprintLoopIterations), started, time.Now().UTC())
+	count := 0
+	runIteration := func(values map[string]any) error {
+		count++
+		if count > maxBlueprintLoopIterations {
+			return fmt.Errorf("loop exceeded the %d iteration limit", maxBlueprintLoopIterations)
 		}
 		child := frame.loopChild()
-		child.values[node.ID] = map[string]any{"item": item, "index": float64(index), "result": map[string]any{"item": item, "index": float64(index)}}
+		child.values[node.ID] = cloneValues(values)
 		if err := s.follow(node.ID, "loop", child); err != nil {
 			return err
 		}
-		if s.result.Returned {
-			return nil
+		if s.result.Returned || s.consumeBreak() {
+			return errLoopStopped
 		}
-		if s.consumeBreak() {
-			break
+		return nil
+	}
+
+	if plan.Continue != nil {
+		for {
+			child := frame.loopChild()
+			iterationInputs, err := s.resolveInputs(node, definition, child)
+			if err != nil {
+				return s.recordFailureAt(node, nil, err, started, time.Now().UTC())
+			}
+			continueLoop, err := plan.Continue(iterationInputs)
+			if err != nil {
+				return s.recordFailureAt(node, iterationInputs, err, started, time.Now().UTC())
+			}
+			if !continueLoop {
+				break
+			}
+			values := map[string]any{"result": map[string]any{"iteration": count + 1}}
+			if err := runIteration(values); err != nil {
+				if err == errLoopStopped {
+					break
+				}
+				return s.recordFailureAt(node, iterationInputs, err, started, time.Now().UTC())
+			}
+		}
+	} else {
+		for _, values := range plan.Iterations {
+			if err := runIteration(values); err != nil {
+				if err == errLoopStopped {
+					break
+				}
+				return s.recordFailureAt(node, inputs, err, started, time.Now().UTC())
+			}
 		}
 	}
-	outputs := map[string]any{"result": map[string]any{"count": len(items)}}
+
+	reportedCount := count
+	if plan.ReportedCount >= 0 {
+		reportedCount = plan.ReportedCount
+	}
+	outputs := map[string]any{"result": map[string]any{"count": reportedCount}}
 	frame.values[node.ID] = outputs
 	finished := time.Now().UTC()
 	s.result.NodeRuns = append(s.result.NodeRuns, domain.NodeRun{NodeID: node.ID, NodeType: node.Type, Status: domain.RunCompleted, Input: inputs, Output: outputs, StartedAt: started, FinishedAt: finished})
 	return s.follow(node.ID, "completed", frame)
 }
 
-func (s *blueprintState) runForLoop(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame) error {
-	first, firstOK := asInteger(inputs["first"])
-	last, lastOK := asInteger(inputs["last"])
-	if !firstOK || !lastOK {
-		return s.recordFailure(node, inputs, fmt.Errorf("for loop expects numeric First Index and Last Index"))
-	}
-	started := time.Now().UTC()
-	s.loopDepth++
-	defer func() { s.loopDepth-- }()
-	count := 0
-	for index := first; index <= last; index++ {
-		count++
-		if count > maxBlueprintLoopIterations {
-			return s.recordFailureAt(node, inputs, fmt.Errorf("for loop exceeded the %d iteration limit", maxBlueprintLoopIterations), started, time.Now().UTC())
-		}
-		child := frame.loopChild()
-		child.values[node.ID] = map[string]any{"index": float64(index), "result": map[string]any{"index": float64(index)}}
-		if err := s.follow(node.ID, "loop", child); err != nil {
-			return err
-		}
-		if s.result.Returned {
-			return nil
-		}
-		if s.consumeBreak() {
-			break
-		}
-	}
-	outputs := map[string]any{"result": map[string]any{"count": count}}
-	frame.values[node.ID] = outputs
-	finished := time.Now().UTC()
-	s.result.NodeRuns = append(s.result.NodeRuns, domain.NodeRun{NodeID: node.ID, NodeType: node.Type, Status: domain.RunCompleted, Input: inputs, Output: outputs, StartedAt: started, FinishedAt: finished})
-	return s.follow(node.ID, "completed", frame)
-}
+var errLoopStopped = fmt.Errorf("loop stopped")
 
-func (s *blueprintState) runWhile(node domain.FlowNode, definition domain.NodeDefinition, frame *blueprintFrame) error {
-	started := time.Now().UTC()
-	s.loopDepth++
-	defer func() { s.loopDepth-- }()
-	count := 0
-	for {
-		child := frame.loopChild()
-		inputs, err := s.resolveInputs(node, definition, child)
-		if err != nil {
-			return s.recordFailureAt(node, nil, err, started, time.Now().UTC())
-		}
-		condition, ok := inputs["condition"].(bool)
-		if !ok {
-			return s.recordFailureAt(node, inputs, fmt.Errorf("while expects Condition to be Boolean"), started, time.Now().UTC())
-		}
-		if !condition {
-			break
-		}
-		count++
-		if count > maxBlueprintLoopIterations {
-			return s.recordFailureAt(node, inputs, fmt.Errorf("while exceeded the %d iteration limit", maxBlueprintLoopIterations), started, time.Now().UTC())
-		}
-		child.values[node.ID] = map[string]any{"result": map[string]any{"iteration": count}}
-		if err := s.follow(node.ID, "loop", child); err != nil {
-			return err
-		}
-		if s.result.Returned {
-			return nil
-		}
-		if s.consumeBreak() {
-			break
-		}
-	}
-	outputs := map[string]any{"result": map[string]any{"count": count}}
-	frame.values[node.ID] = outputs
-	finished := time.Now().UTC()
-	s.result.NodeRuns = append(s.result.NodeRuns, domain.NodeRun{NodeID: node.ID, NodeType: node.Type, Status: domain.RunCompleted, Input: map[string]any{}, Output: outputs, StartedAt: started, FinishedAt: finished})
-	return s.follow(node.ID, "completed", frame)
-}
-
-func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame, execInput string) (map[string]any, []string, error) {
+func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame, execInput string) (map[string]any, []string, *nodes.LoopPlan, error) {
 	if strings.HasPrefix(node.Type, "function:") && node.Type != "function:return" && node.Type != "function:entry" {
 		outputs, err := s.runFunction(node, inputs, frame)
-		return outputs, []string{"out"}, err
+		return outputs, []string{"out"}, nil, err
+	}
+	if node.Type == "llm:agent" || node.Type == "llm:coding_agent" {
+		outputs, err := s.executeConnectedToolAgent(node, configFor(node), inputs)
+		if err != nil || outputs != nil {
+			if outputs == nil {
+				return nil, nil, nil, err
+			}
+			return map[string]any{"result": outputs}, []string{"out"}, nil, err
+		}
+	}
+	if module, exists := s.engine.registry.Node(node.Type); exists {
+		result, err := module.Execute(s.ctx, nodes.Invocation{
+			Node:          node,
+			Definition:    definition,
+			SchemaVersion: s.definition.SchemaVersion,
+			ExecInput:     execInput,
+			Config:        configFor(node),
+			Inputs:        inputs,
+		}, s)
+		return result.Outputs, result.Ports, result.Loop, err
 	}
 	switch node.Type {
-	case "flow:reroute":
-		return map[string]any{"result": map[string]any{}}, []string{"out"}, nil
-	case "flow:branch":
-		condition, ok := inputs["condition"].(bool)
-		if !ok {
-			return nil, nil, fmt.Errorf("branch expects Condition to be Boolean")
-		}
-		if condition {
-			return map[string]any{"result": map[string]any{"condition": true}}, []string{"true"}, nil
-		}
-		return map[string]any{"result": map[string]any{"condition": false}}, []string{"false"}, nil
-	case "flow:sequence":
-		return map[string]any{"result": map[string]any{}}, []string{"then_0", "then_1"}, nil
-	case "flow:switch":
-		configuration, err := switchConfigurationFor(node, definition.DefaultConfig)
-		if err != nil {
-			return nil, nil, err
-		}
-		value := inputs["selection"]
-		result := map[string]any{"value": value, "comparator": string(configuration.Comparator), "matchedCase": nil}
-		for _, item := range configuration.Cases {
-			matched, err := matchSwitchCase(value, configuration, item)
-			if err != nil {
-				return nil, nil, err
-			}
-			if matched {
-				result["matchedCase"] = map[string]any{"id": item.ID, "label": item.Label}
-				return map[string]any{"result": result}, []string{item.ID}, nil
-			}
-		}
-		return map[string]any{"result": result}, []string{"default"}, nil
-	case "flow:do_once":
-		if execInput == "reset" {
-			delete(s.once, node.ID)
-			return map[string]any{"result": map[string]any{"reset": true}}, nil, nil
-		}
-		if s.once[node.ID] {
-			return map[string]any{"result": map[string]any{"alreadyDone": true}}, nil, nil
-		}
-		s.once[node.ID] = true
-		return map[string]any{"result": map[string]any{"first": true}}, []string{"out"}, nil
-	case "flow:gate":
-		open, exists := s.gates[node.ID]
-		if !exists {
-			open = boolConfig(node, "startOpen", true)
-		}
-		switch execInput {
-		case "open":
-			s.gates[node.ID] = true
-			return map[string]any{"result": map[string]any{"open": true}}, nil, nil
-		case "close":
-			s.gates[node.ID] = false
-			return map[string]any{"result": map[string]any{"open": false}}, nil, nil
-		case "toggle":
-			s.gates[node.ID] = !open
-			return map[string]any{"result": map[string]any{"open": !open}}, nil, nil
-		default:
-			s.gates[node.ID] = open
-			if open {
-				return map[string]any{"result": map[string]any{"open": true}}, []string{"out"}, nil
-			}
-			return map[string]any{"result": map[string]any{"open": false}}, nil, nil
-		}
-	case "flow:flip_flop":
-		nextA := !s.flipFlops[node.ID]
-		s.flipFlops[node.ID] = nextA
-		if nextA {
-			return map[string]any{"result": map[string]any{"output": "a"}}, []string{"a"}, nil
-		}
-		return map[string]any{"result": map[string]any{"output": "b"}}, []string{"b"}, nil
-	case "flow:multi_gate":
-		if execInput == "reset" {
-			s.multiGates[node.ID] = 0
-			return map[string]any{"result": map[string]any{"reset": true}}, nil, nil
-		}
-		index := s.multiGates[node.ID]
-		ports := []string{"a", "b", "c"}
-		if index >= len(ports) {
-			if !boolConfig(node, "loop", false) {
-				return map[string]any{"result": map[string]any{"complete": true}}, nil, nil
-			}
-			index = 0
-		}
-		s.multiGates[node.ID] = index + 1
-		return map[string]any{"result": map[string]any{"index": index}}, []string{ports[index]}, nil
-	case "flow:break":
-		if s.loopDepth == 0 {
-			return nil, nil, fmt.Errorf("break can only run inside a loop body")
-		}
-		s.breakRequested = true
-		return map[string]any{"result": map[string]any{"break": true}}, nil, nil
-	case "flow:set_variable":
-		name := strings.TrimSpace(configText(node, "name"))
-		if !variableName.MatchString(name) {
-			return nil, nil, fmt.Errorf("variable name must start with a letter or underscore and contain only letters, numbers, or underscores")
-		}
-		s.variables[name] = inputs["value"]
-		return map[string]any{"result": inputs["value"]}, []string{"out"}, nil
-	case "flow:return", "function:return":
+	case "function:return":
 		s.result.Returned = true
 		s.result.Value = Packet(cloneValues(inputs))
-		return map[string]any{"result": cloneValues(inputs)}, nil, nil
+		return map[string]any{"result": cloneValues(inputs)}, nil, nil, nil
 	}
 
 	// Existing impure nodes retain their hardened implementation. Data-pin values
@@ -469,7 +349,7 @@ func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.N
 	copyNode.Data = map[string]any{"config": config}
 	legacyResult, err := s.engine.executeNode(s.ctx, copyNode, Packet(inputs))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	outputs := map[string]any{"result": map[string]any{}}
 	ports := make([]string, 0, len(legacyResult))
@@ -485,7 +365,7 @@ func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.N
 	if len(ports) == 0 && hasExecOutput(definition, "out") {
 		ports = append(ports, "out")
 	}
-	return outputs, ports, nil
+	return outputs, ports, nil, nil
 }
 
 func (s *blueprintState) consumeBreak() bool {
@@ -516,7 +396,11 @@ func (s *blueprintState) resolveInputs(node domain.FlowNode, definition domain.N
 		if !found && pin.Required {
 			return result, fmt.Errorf("node %q requires data pin %q", node.ID, pin.Label)
 		}
-		if found && !matchesDataType(value, pin.DataType) {
+		if found && s.definition.SchemaVersion >= domain.GraphSchemaV3 && pin.Type != nil {
+			if err := typespec.ValidateValue(value, *pin.Type); err != nil {
+				return result, fmt.Errorf("node %q pin %q: %w", node.ID, pin.Label, err)
+			}
+		} else if found && !matchesDataType(value, pin.DataType) {
 			return result, fmt.Errorf("node %q pin %q requires %s data", node.ID, pin.Label, pin.DataType)
 		}
 		if found {
@@ -546,7 +430,7 @@ func (s *blueprintState) resolveData(nodeID, pinID string, frame *blueprintFrame
 	if !exists {
 		return nil, fmt.Errorf("data source %q uses unavailable type %q", nodeID, node.Type)
 	}
-	definition, err := definitionForNode(definition, node)
+	definition, err := definitionForRegisteredNode(s.engine.registry, definition, node)
 	if err != nil {
 		return nil, fmt.Errorf("node %q has invalid configuration: %w", node.ID, err)
 	}
@@ -568,7 +452,7 @@ func (s *blueprintState) resolveData(nodeID, pinID string, frame *blueprintFrame
 		return nil, err
 	}
 	started := time.Now().UTC()
-	outputs, err := s.evaluatePure(node, inputs, frame)
+	outputs, err := s.evaluatePure(node, definition, inputs, frame)
 	if err != nil {
 		finished := time.Now().UTC()
 		s.result.NodeRuns = append(s.result.NodeRuns, domain.NodeRun{NodeID: node.ID, NodeType: node.Type, Status: domain.RunFailed, Input: inputs, Error: err.Error(), StartedAt: started, FinishedAt: finished})
@@ -585,113 +469,25 @@ func (s *blueprintState) resolveData(nodeID, pinID string, frame *blueprintFrame
 	return value, nil
 }
 
-func (s *blueprintState) evaluatePure(node domain.FlowNode, inputs map[string]any, frame *blueprintFrame) (map[string]any, error) {
+func (s *blueprintState) evaluatePure(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame) (map[string]any, error) {
 	config := configFor(node)
+	if module, exists := s.engine.registry.Node(node.Type); exists {
+		result, err := module.Execute(s.ctx, nodes.Invocation{
+			Node:          node,
+			Definition:    definition,
+			SchemaVersion: s.definition.SchemaVersion,
+			Config:        config,
+			Inputs:        inputs,
+		}, s)
+		if err != nil {
+			return nil, err
+		}
+		if len(result.Ports) != 0 || result.Loop != nil {
+			return nil, fmt.Errorf("pure node type %q attempted to control execution", node.Type)
+		}
+		return result.Outputs, nil
+	}
 	switch node.Type {
-	case "data:constant":
-		value, exists := inputs["value"]
-		if !exists {
-			value = config["value"]
-		}
-		return map[string]any{"value": value}, nil
-	case "data:format_text":
-		text, err := renderTemplate(configText(node, "format"), inputs)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"text": text}, nil
-	case "data:get_field", "data:break_object":
-		definition, _ := s.engine.registry.Get(node.Type)
-		configuredOutputs, err := getFieldOutputs(config, definition.DefaultConfig)
-		if err != nil {
-			return nil, err
-		}
-		outputs := make(map[string]any, len(configuredOutputs))
-		for _, output := range configuredOutputs {
-			value := valueAtAny(inputs["source"], output.Path)
-			if !matchesDataType(value, output.DataType) {
-				return nil, fmt.Errorf("%s output %q is declared %s, but %q contains %T", strings.ReplaceAll(node.Type, ":", " "), output.Label, output.DataType, output.Path, value)
-			}
-			outputs[output.ID] = value
-		}
-		return outputs, nil
-	case "data:build_object":
-		if _, legacy := config["fields"]; !legacy {
-			key, ok := inputs["key"].(string)
-			if !ok || strings.TrimSpace(key) == "" {
-				return nil, fmt.Errorf("build object requires a non-empty Key")
-			}
-			return map[string]any{"object": map[string]any{key: inputs["value"]}}, nil
-		}
-		definition, _ := s.engine.registry.Get(node.Type)
-		fields, err := objectFields(config, definition.DefaultConfig)
-		if err != nil {
-			return nil, err
-		}
-		object := make(map[string]any, len(fields))
-		for _, field := range fields {
-			if err := setObjectPath(object, field.Key, inputs[field.ID]); err != nil {
-				return nil, fmt.Errorf("build object field %q: %w", field.Label, err)
-			}
-		}
-		return map[string]any{"object": object}, nil
-	case "data:cast":
-		value, err := castValue(inputs["value"], configText(node, "target"))
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"value": value}, nil
-	case "data:json_query":
-		return map[string]any{"value": valueAtAny(inputs["source"], configText(node, "path"))}, nil
-	case "data:equals":
-		return map[string]any{"value": fmt.Sprint(inputs["left"]) == fmt.Sprint(inputs["right"])}, nil
-	case "data:greater_than":
-		left, leftOK := asNumber(inputs["left"])
-		right, rightOK := asNumber(inputs["right"])
-		if !leftOK || !rightOK {
-			return nil, fmt.Errorf("greater than requires numeric inputs")
-		}
-		return map[string]any{"value": left > right}, nil
-	case "data:json_parse":
-		var value any
-		if err := json.Unmarshal([]byte(fmt.Sprint(inputs["text"])), &value); err != nil {
-			return nil, fmt.Errorf("parse JSON: %w", err)
-		}
-		return map[string]any{"value": value}, nil
-	case "data:get_variable":
-		name := configText(node, "name")
-		value, exists := s.variables[name]
-		if !exists {
-			return nil, fmt.Errorf("variable %q has not been set in this execution", name)
-		}
-		return map[string]any{"value": value}, nil
-	case "data:chat_history":
-		if s.engine.chat == nil {
-			return nil, fmt.Errorf("chat history is unavailable for this execution")
-		}
-		chatID := strings.TrimSpace(fmt.Sprint(inputs["chatId"]))
-		if chatID == "" {
-			return nil, fmt.Errorf("read chat history requires a chat ID")
-		}
-		limit := 50
-		if value, ok := asNumber(inputs["limit"]); ok {
-			limit = int(value)
-		}
-		messages, err := s.engine.chat.ReadChatHistory(s.ctx, chatID, limit)
-		if err != nil {
-			return nil, fmt.Errorf("read chat history: %w", err)
-		}
-		values := make([]any, 0, len(messages))
-		for _, message := range messages {
-			values = append(values, map[string]any{"id": message.ID, "role": string(message.Role), "content": message.Content, "createdAt": message.CreatedAt.Format(time.RFC3339)})
-		}
-		return map[string]any{"messages": values}, nil
-	case "data:reroute":
-		return map[string]any{"value": inputs["value"]}, nil
-	case "math:add", "math:subtract", "math:multiply", "math:divide":
-		return evaluateMath(node.Type, inputs)
-	case "date:now", "date:create", "date:extract", "date:format", "date:parse", "date:compare", "date:add", "date:subtract", "date:to_unix", "date:to_unix_ms":
-		return evaluateDate(node.Type, inputs, config)
 	}
 	if strings.HasPrefix(node.Type, "function:") {
 		return s.evaluateFunction(node, inputs, frame)
@@ -701,6 +497,81 @@ func (s *blueprintState) evaluatePure(node domain.FlowNode, inputs map[string]an
 
 func (s *blueprintState) evaluateFunction(node domain.FlowNode, inputs map[string]any, frame *blueprintFrame) (map[string]any, error) {
 	return s.runFunction(node, inputs, frame)
+}
+
+// LookupVariable implements nodes.VariableReader without exposing the graph
+// interpreter's mutable packet to node modules.
+func (s *blueprintState) LookupVariable(name string) (any, bool) {
+	value, exists := s.variables[name]
+	return value, exists
+}
+
+// ReadChatHistory implements nodes.ChatHistoryReader through the engine's
+// application-provided chat service.
+func (s *blueprintState) ReadChatHistory(ctx context.Context, chatID string, limit int) ([]domain.ChatMessage, error) {
+	if s.engine.chat == nil {
+		return nil, fmt.Errorf("chat history is unavailable for this execution")
+	}
+	return s.engine.chat.ReadChatHistory(ctx, chatID, limit)
+}
+
+// ClaimOnce implements nodes.OnceStore.
+func (s *blueprintState) ClaimOnce(nodeID string) bool {
+	if s.once[nodeID] {
+		return false
+	}
+	s.once[nodeID] = true
+	return true
+}
+
+// ResetOnce implements nodes.OnceStore.
+func (s *blueprintState) ResetOnce(nodeID string) { delete(s.once, nodeID) }
+
+// GateOpen implements nodes.GateStore.
+func (s *blueprintState) GateOpen(nodeID string) (bool, bool) {
+	value, exists := s.gates[nodeID]
+	return value, exists
+}
+
+// SetGateOpen implements nodes.GateStore.
+func (s *blueprintState) SetGateOpen(nodeID string, open bool) { s.gates[nodeID] = open }
+
+// NextFlipFlop implements nodes.FlipFlopStore.
+func (s *blueprintState) NextFlipFlop(nodeID string) bool {
+	next := !s.flipFlops[nodeID]
+	s.flipFlops[nodeID] = next
+	return next
+}
+
+// MultiGateIndex implements nodes.MultiGateStore.
+func (s *blueprintState) MultiGateIndex(nodeID string) int { return s.multiGates[nodeID] }
+
+// SetMultiGateIndex implements nodes.MultiGateStore.
+func (s *blueprintState) SetMultiGateIndex(nodeID string, index int) { s.multiGates[nodeID] = index }
+
+// InLoop implements nodes.LoopController.
+func (s *blueprintState) InLoop() bool { return s.loopDepth > 0 }
+
+// RequestBreak implements nodes.LoopController.
+func (s *blueprintState) RequestBreak() { s.breakRequested = true }
+
+// StoreVariable implements nodes.VariableWriter.
+func (s *blueprintState) StoreVariable(name string, value any) { s.variables[name] = value }
+
+// DeleteVariable implements nodes.VariableStore for JavaScript's scoped
+// variable API. This only affects the active Blueprint execution.
+func (s *blueprintState) DeleteVariable(name string) { delete(s.variables, name) }
+
+// JavaScriptHost implements nodes.JavaScriptHostProvider without exposing the
+// concrete graph interpreter to node modules.
+func (s *blueprintState) JavaScriptHost() nodes.JavaScriptHost {
+	return s.engine.javascript
+}
+
+// Return implements nodes.ReturnSignaler.
+func (s *blueprintState) Return(value map[string]any) {
+	s.result.Returned = true
+	s.result.Value = Packet(cloneValues(value))
 }
 
 func (s *blueprintState) runFunction(node domain.FlowNode, inputs map[string]any, frame *blueprintFrame) (map[string]any, error) {
@@ -724,8 +595,12 @@ func (s *blueprintState) runFunction(node domain.FlowNode, inputs map[string]any
 	if !exists {
 		return nil, fmt.Errorf("custom function %q is not registered", function.Name)
 	}
-	if function.Mode != definition.Mode {
+	if function.Kind != domain.FunctionTool && function.Mode != definition.Mode {
 		return nil, fmt.Errorf("function %q changed execution mode; repair this call node", function.Name)
+	}
+	inputs, err = functionCallInputs(function, inputs)
+	if err != nil {
+		return nil, err
 	}
 	child := newBlueprintState(s.engine, s.ctx, function.DraftDefinition)
 	child.variables, child.engine.variables = s.variables, s.variables
@@ -799,7 +674,11 @@ func (s *blueprintState) resolveFunctionOutputs(node domain.FlowNode, frame *blu
 		if !found {
 			return result, fmt.Errorf("function return is missing output pin %q", pin.Name)
 		}
-		if !matchesDataType(value, pin.DataType) {
+		if s.definition.SchemaVersion >= domain.GraphSchemaV3 {
+			if err := typespec.ValidateValue(value, functionPinType(pin)); err != nil {
+				return result, fmt.Errorf("function return pin %q: %w", pin.Name, err)
+			}
+		} else if !matchesDataType(value, pin.DataType) {
 			return result, fmt.Errorf("function return pin %q requires %s data", pin.Name, pin.DataType)
 		}
 		result[pin.ID] = value
@@ -846,7 +725,6 @@ func outputIsExec(definition domain.NodeDefinition, id string) bool {
 func hasExecOutput(definition domain.NodeDefinition, id string) bool {
 	return outputIsExec(definition, id)
 }
-func asSlice(value any) ([]any, bool) { values, ok := value.([]any); return values, ok }
 func asNumber(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
@@ -860,49 +738,9 @@ func asNumber(value any) (float64, bool) {
 	case json.Number:
 		value, err := typed.Float64()
 		return value, err == nil
-	case string:
-		value, err := strconv.ParseFloat(typed, 64)
-		return value, err == nil
 	default:
 		return 0, false
 	}
-}
-func asInteger(value any) (int, bool) {
-	number, ok := asNumber(value)
-	return int(number), ok && number == float64(int(number))
-}
-func castValue(value any, target string) (any, error) {
-	switch target {
-	case "text":
-		return fmt.Sprint(value), nil
-	case "number":
-		number, ok := asNumber(value)
-		if !ok {
-			return nil, fmt.Errorf("cannot cast %T to number", value)
-		}
-		return number, nil
-	case "boolean":
-		if result, ok := value.(bool); ok {
-			return result, nil
-		}
-		if result, err := strconv.ParseBool(strings.TrimSpace(fmt.Sprint(value))); err == nil {
-			return result, nil
-		}
-		return nil, fmt.Errorf("cannot cast %T to Boolean", value)
-	default:
-		return nil, fmt.Errorf("unknown cast target %q", target)
-	}
-}
-func boolConfig(node domain.FlowNode, key string, fallback bool) bool {
-	value, exists := configFor(node)[key]
-	if !exists {
-		return fallback
-	}
-	if boolean, ok := value.(bool); ok {
-		return boolean
-	}
-	boolean, err := strconv.ParseBool(strings.TrimSpace(fmt.Sprint(value)))
-	return err == nil && boolean
 }
 func matchesDataType(value any, dataType domain.DataType) bool {
 	if value == nil || dataType == "" || dataType == domain.DataAny {
@@ -927,25 +765,6 @@ func matchesDataType(value any, dataType domain.DataType) bool {
 		return true
 	}
 }
-func configText(node domain.FlowNode, key string) string {
-	value, _ := configFor(node)[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func renderTemplate(format string, data any) (string, error) {
-	tmpl, err := template.New("format").Parse(format)
-	if err != nil {
-		return "", fmt.Errorf("incorrect format template: %w", err)
-	}
-
-	var out strings.Builder
-	if err := tmpl.Execute(&out, data); err != nil {
-		return "", fmt.Errorf("unable to execute template: %w", err)
-	}
-
-	return out.String(), nil
-}
-
 func valueAtAny(value any, path string) any {
 	if strings.TrimSpace(path) == "" {
 		return value
@@ -1040,28 +859,4 @@ func dereferenceValue(value reflect.Value) reflect.Value {
 		value = value.Elem()
 	}
 	return value
-}
-
-func setObjectPath(object map[string]any, path string, value any) error {
-	parts := strings.Split(path, ".")
-	current := object
-	for index, part := range parts {
-		if index == len(parts)-1 {
-			current[part] = value
-			return nil
-		}
-		next, exists := current[part]
-		if !exists {
-			child := make(map[string]any)
-			current[part] = child
-			current = child
-			continue
-		}
-		child, ok := next.(map[string]any)
-		if !ok {
-			return fmt.Errorf("key path conflicts at %q", strings.Join(parts[:index+1], "."))
-		}
-		current = child
-	}
-	return nil
 }

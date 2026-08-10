@@ -22,5 +22,7 @@ export function dataPinColor(dataType?: DataType): string {
 export function nodePinColor(
   pin: Pick<NodePort, "kind" | "dataType" | "color">,
 ): string {
-  return pin.kind === "exec" ? "#fafafa" : dataPinColor(pin.dataType);
+  if (pin.kind === "exec") return "#fafafa";
+  if (pin.kind === "tool") return "#a78bfa";
+  return dataPinColor(pin.dataType);
 }

@@ -196,6 +196,7 @@ function normalizeSettings(settings: Settings): Settings {
   return {
     ...settings,
     language: ["de", "fr", "ru"].includes(settings.language) ? settings.language : "en",
+    hideToTrayOnClose: settings.hideToTrayOnClose ?? false,
     contentDirectory: settings.contentDirectory ?? "",
     pluginDirectory: settings.pluginDirectory ?? "",
     defaultProviderId: provider.id,
@@ -538,7 +539,7 @@ function installedModelSubtitle(model: LocalModel) {
   return model.quantization ? `${source} · ${model.quantization}` : source;
 }
 
-function GeneralPanel({ language, onLanguageChange }: { language: AppLanguage; onLanguageChange: (language: AppLanguage) => void }) {
+function GeneralPanel({ language, hideToTrayOnClose, onLanguageChange, onHideToTrayOnCloseChange }: { language: AppLanguage; hideToTrayOnClose: boolean; onLanguageChange: (language: AppLanguage) => void; onHideToTrayOnCloseChange: (enabled: boolean) => void }) {
   const { t } = useTranslation();
   return <div className="mx-auto max-w-2xl space-y-5">
     <section className="surface rounded-xl p-5">
@@ -548,6 +549,13 @@ function GeneralPanel({ language, onLanguageChange }: { language: AppLanguage; o
         {t("common.language")}
         <Select className="mt-2 w-full" value={language} onValueChange={(value) => onLanguageChange(value as AppLanguage)} options={languages.map((item) => ({ value: item.value, label: t(item.labelKey) }))} ariaLabel={t("common.language")} />
       </label>
+    </section>
+    <section className="surface flex items-center justify-between gap-5 rounded-xl p-5">
+      <div className="min-w-0">
+        <h2 className="text-sm font-semibold text-zinc-100">{t("settings.hideToTrayOnCloseTitle")}</h2>
+        <p className="mt-1.5 max-w-xl text-xs leading-5 text-zinc-500">{t("settings.hideToTrayOnCloseDescription")}</p>
+      </div>
+      <Switch label={t("settings.hideToTrayOnCloseTitle")} checked={hideToTrayOnClose} onCheckedChange={onHideToTrayOnCloseChange} />
     </section>
   </div>;
 }
@@ -1041,7 +1049,7 @@ export function SettingsView({
           })}
         </aside>
         <main className="muted-scroll min-w-0 flex-1 overflow-y-auto p-6 lg:p-8">
-          {category === "general" ? <GeneralPanel language={draft.language} onLanguageChange={(language) => { setDraft((current) => ({ ...current, language })); void i18n.changeLanguage(language); }} /> : null}
+          {category === "general" ? <GeneralPanel language={draft.language} hideToTrayOnClose={draft.hideToTrayOnClose} onLanguageChange={(language) => { setDraft((current) => ({ ...current, language })); void i18n.changeLanguage(language); }} onHideToTrayOnCloseChange={(hideToTrayOnClose) => setDraft((current) => ({ ...current, hideToTrayOnClose }))} /> : null}
           {category === "provider" ? (
             <ProviderPanel
               provider={activeProvider}

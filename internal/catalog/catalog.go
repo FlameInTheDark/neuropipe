@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/builtin"
 )
 
 // Registry keeps node metadata shared by graph validation and the React palette.
@@ -14,17 +16,30 @@ type Registry struct {
 	mu          sync.RWMutex
 	definitions map[string]domain.NodeDefinition
 	builtins    map[string]struct{}
+	modules     *nodes.Registry
 }
 
 // New creates a registry containing Neuropipe's built-in node catalog.
 func New() *Registry {
 	definitions := make(map[string]domain.NodeDefinition)
 	builtinTypes := make(map[string]struct{})
+	modules := nodes.New()
+	if err := builtin.RegisterAll(modules); err != nil {
+		panic("register built-in Blueprint nodes: " + err.Error())
+	}
 	for _, definition := range builtins() {
+		definitions[definition.Type] = normalizeDefinition(definition)
+		builtinTypes[definition.Type] = struct{}{}
+	}
+	for _, module := range modules.All() {
+		definition := normalizeDefinition(module.Definition())
+		if _, exists := definitions[definition.Type]; exists {
+			panic("register built-in Blueprint nodes: duplicate " + definition.Type)
+		}
 		definitions[definition.Type] = definition
 		builtinTypes[definition.Type] = struct{}{}
 	}
-	return &Registry{definitions: definitions, builtins: builtinTypes}
+	return &Registry{definitions: definitions, builtins: builtinTypes, modules: modules}
 }
 
 // Get returns a node definition by its stable type identifier.
@@ -33,6 +48,15 @@ func (r *Registry) Get(nodeType string) (domain.NodeDefinition, bool) {
 	defer r.mu.RUnlock()
 	definition, ok := r.definitions[nodeType]
 	return definition, ok
+}
+
+// Node returns the behavior registered by a first-party node module. Plugin
+// and custom-function definitions deliberately have no host implementation.
+func (r *Registry) Node(nodeType string) (nodes.Node, bool) {
+	if r.modules == nil {
+		return nil, false
+	}
+	return r.modules.Get(nodeType)
 }
 
 // All returns the current catalog in display order.
@@ -83,6 +107,22 @@ func (r *Registry) ReplaceDynamic(definitions []domain.NodeDefinition) {
 
 func builtins() []domain.NodeDefinition {
 	triggerOutput := []domain.NodePort{port("out", "Start", "flow", "#fafafa")}
+	buttonTriggerOutput := []domain.NodePort{
+		port("out", "Start", "flow", "#fafafa"),
+		{
+			ID:        "payload",
+			Label:     "Payload",
+			Kind:      domain.PinData,
+			Direction: domain.PinOutput,
+			DataType:  domain.DataObject,
+			Type: &domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{
+				{ID: "trigger", Name: "trigger", Type: domain.TypeSpec{Kind: domain.TypeString}},
+			}},
+			Fields:         []domain.DataField{{Path: "trigger", DataType: domain.DataText}},
+			Color:          "#60a5fa",
+			MaxConnections: 1,
+		},
+	}
 	chatTriggerOutput := []domain.NodePort{
 		port("out", "Start", "flow", "#fafafa"),
 		{ID: "text", Label: "Text", Kind: domain.PinData, DataType: domain.DataText, Color: dataColor(domain.DataText), MaxConnections: 1},
@@ -91,8 +131,9 @@ func builtins() []domain.NodeDefinition {
 	}
 	flowInput := []domain.NodePort{port("in", "Input", "flow", "#a1a1aa")}
 	flowOutput := []domain.NodePort{port("out", "Output", "flow", "#fafafa")}
+	llmToolInput := domain.NodePort{ID: "tools", Label: "Tools", Kind: domain.PinTool, Direction: domain.PinInput, Color: "#a78bfa"}
 	definitions := []domain.NodeDefinition{
-		node("trigger:button", "Triggers", "Button Trigger", "Launch this published pipeline from the Trigger board.", "play", "#fafafa", nil, triggerOutput,
+		node("trigger:button", "Triggers", "Button Trigger", "Launch this published pipeline from the Trigger board.", "play", "#fafafa", nil, buttonTriggerOutput,
 			[]domain.ConfigField{field("label", "Button label", "string", "Daily briefing", true), field("hotkey", "Global hotkey", "string", "Ctrl+Alt+B", false)}, map[string]any{"label": "Run pipeline", "icon": "play", "color": "#fafafa", "gridPosition": 0}),
 		node("trigger:cron", "Triggers", "Cron Trigger", "Run on a five-field cron schedule in an IANA timezone.", "clock-3", "#a1a1aa", nil, triggerOutput,
 			[]domain.ConfigField{field("cron", "Cron expression", "string", "0 9 * * 1-5", true), field("timezone", "Timezone", "string", "Local", false)}, map[string]any{"cron": "0 9 * * 1-5", "timezone": "Local"}),
@@ -114,10 +155,6 @@ func builtins() []domain.NodeDefinition {
 				customUserAgentToggleField(),
 				visibleWhen(field("userAgent", "User-Agent", "http-user-agent", "Neuropipe/0.1", true), "useCustomUserAgent"),
 			}, map[string]any{"method": "GET", "headers": []any{}, "useCustomUserAgent": false, "userAgent": ""}, domain.CapabilityNetwork),
-		node("action:file_read", "Local", "Read File", "Read text, JSON, or CSV from an approved local path.", "file-down", "#c4b5fd", flowInput, flowOutput,
-			[]domain.ConfigField{field("path", "Path", "string", "C:\\Work\\input.json", true)}, map[string]any{}, domain.CapabilityFileRead),
-		node("action:file_write", "Local", "Write File", "Write text or JSON to an approved local path.", "file-up", "#c4b5fd", flowInput, flowOutput,
-			[]domain.ConfigField{field("path", "Path", "string", "C:\\Work\\output.json", true), field("content", "Content", "textarea", "", true)}, map[string]any{}, domain.CapabilityFileWrite),
 		node("action:terminal", "Local", "Run Terminal Command", "Run PowerShell, Windows PowerShell, or cmd in an approved workspace.", "terminal", "#c4b5fd", flowInput, flowOutput,
 			[]domain.ConfigField{selectField("shell", "Shell", []string{"PowerShell", "Windows PowerShell", "cmd"}), field("command", "Command", "textarea", "Get-Date", true), field("workingDirectory", "Working directory", "string", "C:\\Work", false)}, map[string]any{"shell": "PowerShell"}, domain.CapabilityTerminal),
 		node("action:notification", "Local", "Desktop Notification", "Show a Windows toast-style desktop notification.", "bell", "#c4b5fd", flowInput, flowOutput,
@@ -139,10 +176,10 @@ func builtins() []domain.NodeDefinition {
 			[]domain.ConfigField{field("prompt", "Question", "textarea", "Choose the best option.", true), routeOptionsField("options", "Options")}, map[string]any{"options": routeOptions("option-a", "Option A", "option-b", "Option B")}),
 		node("llm:summarize", "AI", "Summarize", "Create a concise summary of input data.", "align-left", "#f472b6", flowInput, flowOutput,
 			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Summarise the input for a busy reader.", true)}, map[string]any{}),
-		node("llm:agent", "AI", "Agent", "A tool-using agent with only explicitly connected tools.", "bot", "#f472b6", flowInput, []domain.NodePort{port("out", "Output", "flow", "#fafafa"), port("tool", "Tools", "tool", "#a78bfa")},
-			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Complete the task using the connected tools.", true), field("maxTurns", "Maximum turns", "number", "8", true)}, map[string]any{"maxTurns": 8}),
-		node("llm:coding_agent", "AI", "Coding Agent", "An agent preset for scoped file, Git, and terminal workspaces.", "code-2", "#f472b6", flowInput, flowOutput,
-			[]domain.ConfigField{field("task", "Task", "textarea", "", true), field("workspace", "Workspace", "string", "C:\\Work\\repo", true), field("maxTurns", "Maximum turns", "number", "12", true)}, map[string]any{"maxTurns": 12}, domain.CapabilityFileRead, domain.CapabilityFileWrite, domain.CapabilityTerminal, domain.CapabilityGit),
+		node("llm:agent", "AI", "Agent", "A tool-using agent with only explicitly connected tools.", "bot", "#f472b6", append(append([]domain.NodePort{}, flowInput...), llmToolInput), flowOutput,
+			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Complete the task using the connected tools.", true), field("maxTurns", "Maximum turns", "number", "8", true)}, map[string]any{"maxTurns": 8.0}),
+		node("llm:coding_agent", "AI", "Coding Agent", "An agent preset for scoped file, Git, and terminal workspaces.", "code-2", "#f472b6", append(append([]domain.NodePort{}, flowInput...), llmToolInput), flowOutput,
+			[]domain.ConfigField{field("task", "Task", "textarea", "", true), field("workspace", "Workspace", "string", "C:\\Work\\repo", true), field("maxTurns", "Maximum turns", "number", "12", true)}, map[string]any{"maxTurns": 12.0}, domain.CapabilityFileRead, domain.CapabilityFileWrite, domain.CapabilityTerminal, domain.CapabilityGit),
 		node("visual:comment", "Canvas", "Comment", "A canvas-only note for documenting a Blueprint-style graph.", "message-square-text", "#71717a", nil, nil,
 			[]domain.ConfigField{field("title", "Title", "string", "New comment", true), field("body", "Body", "textarea", "Describe this section of the pipeline.", false)}, map[string]any{"title": "New comment", "body": ""}),
 	}
@@ -184,8 +221,11 @@ func normalizeDefinition(definition domain.NodeDefinition) domain.NodeDefinition
 
 func port(id, label, kind, color string) domain.NodePort {
 	pinKind := domain.PinData
-	if kind == "flow" || kind == "tool" {
+	if kind == "flow" {
 		pinKind = domain.PinExec
+	}
+	if kind == "tool" {
+		pinKind = domain.PinTool
 	}
 	return domain.NodePort{ID: id, Label: label, Kind: pinKind, Color: color}
 }
@@ -198,9 +238,12 @@ func normalizePin(pin *domain.NodePort) {
 		pin.DataType = domain.DataAny
 	}
 	if pin.Kind == domain.PinData {
+		if pin.Type == nil {
+			pin.Type = typeSpecForDataType(pin.DataType)
+		}
 		pin.Color = dataColor(pin.DataType)
 	}
-	if pin.MaxConnections == 0 {
+	if pin.Kind != domain.PinTool && pin.MaxConnections == 0 {
 		pin.MaxConnections = 1
 	}
 }
@@ -238,14 +281,14 @@ func addFieldPins(definition domain.NodeDefinition) domain.NodeDefinition {
 		if definition.Type == "data:constant" && field.Name == "value" {
 			dataType = domain.DataAny
 		}
-		pin := domain.NodePort{ID: field.Name, Label: field.Label, Kind: domain.PinData, Direction: domain.PinInput, DataType: dataType, Required: field.Required, MaxConnections: 1}
+		pin := domain.NodePort{ID: field.Name, Label: field.Label, Kind: domain.PinData, Direction: domain.PinInput, DataType: dataType, Type: typeSpecForDataType(dataType), Required: field.Required, MaxConnections: 1}
 		if hasDefault {
 			pin.Default = defaultValue
 		}
 		definition.Inputs = append(definition.Inputs, pin)
 	}
-	if definition.Mode == domain.NodeEvent && definition.Type != "trigger:chat" {
-		definition.Outputs = append(definition.Outputs, domain.NodePort{ID: "payload", Label: "Payload", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataObject, Color: "#60a5fa"})
+	if definition.Mode == domain.NodeEvent && definition.Type != "trigger:chat" && !hasOutputPin(definition.Outputs, "payload", domain.PinData) {
+		definition.Outputs = append(definition.Outputs, domain.NodePort{ID: "payload", Label: "Payload", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataObject, Type: typeSpecForDataType(domain.DataObject), Color: "#60a5fa"})
 	}
 	if definition.Mode == domain.NodeImpure {
 		found := false
@@ -255,10 +298,19 @@ func addFieldPins(definition domain.NodeDefinition) domain.NodeDefinition {
 			}
 		}
 		if !found {
-			definition.Outputs = append(definition.Outputs, domain.NodePort{ID: "result", Label: "Result", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataObject, Color: "#60a5fa"})
+			definition.Outputs = append(definition.Outputs, domain.NodePort{ID: "result", Label: "Result", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataObject, Type: typeSpecForDataType(domain.DataObject), Color: "#60a5fa"})
 		}
 	}
 	return definition
+}
+
+func hasOutputPin(outputs []domain.NodePort, id string, kind domain.PinKind) bool {
+	for _, output := range outputs {
+		if output.ID == id && output.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func fieldDataType(kind string) domain.DataType {
@@ -275,7 +327,7 @@ func fieldDataType(kind string) domain.DataType {
 }
 
 func isConfigurationOnlyField(kind string) bool {
-	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent"
+	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "type-spec" || kind == "wire-representation" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent" || kind == "javascript-editor"
 }
 
 func field(name, label, kind, placeholder string, required bool) domain.ConfigField {
@@ -292,10 +344,6 @@ func selectField(name, label string, options []string) domain.ConfigField {
 
 func routeOptionsField(name, label string) domain.ConfigField {
 	return domain.ConfigField{Name: name, Label: label, Kind: "route-options", Required: true}
-}
-
-func switchCasesField(name, label string) domain.ConfigField {
-	return domain.ConfigField{Name: name, Label: label, Kind: "switch-cases", Required: true}
 }
 
 func schemaField(name, label string) domain.ConfigField {
@@ -321,16 +369,6 @@ func routeOptions(values ...string) []any {
 		options = append(options, map[string]any{"id": values[index], "label": values[index+1]})
 	}
 	return options
-}
-
-func switchCasesConfig() map[string]any {
-	return map[string]any{
-		"comparator": "equals",
-		"cases": []any{
-			map[string]any{"id": "case-a", "label": "Case A", "valueType": "text", "value": "case-a"},
-			map[string]any{"id": "case-b", "label": "Case B", "valueType": "text", "value": "case-b"},
-		},
-	}
 }
 
 func objectSchema() map[string]any {

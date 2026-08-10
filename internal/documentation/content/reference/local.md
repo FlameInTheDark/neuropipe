@@ -2,13 +2,19 @@
 
 Local action nodes use scoped capability approval. Configure only roots and repositories you expect the published revision to access.
 
+## List Directory
+
+**Purpose:** list direct files, folders, and symbolic links in one approved directory. **Pins:** Exec input/output, Path input, Files list output. **Produces:** `name`, `path`, `size` in bytes, `type` (`file`, `directory`, or `symlink`), `updatedAt`, and `createdAt` when the platform provides it. **Capability:** file read. **Failure:** nonexistent, unreadable, or unapproved directories fail. **Example:** Button Trigger → List Directory → For Each Loop.
+
 ## Read File
 
-**Purpose:** read text, JSON, or CSV. **Pins:** Exec input/output, Path input, Result object. **Configure:** path. **Produces:** file path, content, and parsed JSON when available. **Capability:** file read. **Failure:** nonexistent or unapproved paths fail. **Example:** File Watch → Read File → Parse JSON.
+**Purpose:** read a local file without changing its bytes. **Pins:** Exec input/output, Path input, one Result output. **Configure:** select Bytes or Text for Result. **Produces:** the selected representation; choosing Text for non-UTF-8 content fails safely. **Capability:** file read. **Failure:** nonexistent or unapproved paths fail. **Example:** File Watch → Read File → Base64 Encode.
+
+Use **Base64 Encode** and **Base64 Decode** to explicitly select text or byte-slice input and output representations. No local node performs this conversion implicitly.
 
 ## Write File
 
-**Purpose:** write text or JSON. **Pins:** Exec input/output, Path/Content inputs, Result object. **Configure:** path and content. **Produces:** written path and Boolean. **Capability:** file write. **Failure:** parent access and write errors are logged. **Example:** LLM Prompt → Write File.
+**Purpose:** write text or raw bytes. **Pins:** Exec input/output, Path/Content inputs, Result object. **Configure:** path, Content type, and text content when Text is selected. **Produces:** written path and Boolean. Bytes must arrive through a connected Bytes pin; they are never parsed from text. **Capability:** file write. **Failure:** parent access and write errors are logged. **Example:** Read File (Bytes) → Write File (Bytes).
 
 ## Run Terminal Command
 

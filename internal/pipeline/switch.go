@@ -192,7 +192,7 @@ func matchSwitchCase(input any, configuration switchConfiguration, item switchCa
 	case switchContains, switchStartsWith, switchEndsWith:
 		text, ok := input.(string)
 		if !ok {
-			return false, fmt.Errorf("Switch %s comparator requires a Text value, received %T", configuration.Comparator, input)
+			return false, fmt.Errorf("switch %s comparator requires a Text value, received %T", configuration.Comparator, input)
 		}
 		needle := item.Value.(string)
 		switch configuration.Comparator {
@@ -206,7 +206,7 @@ func matchSwitchCase(input any, configuration switchConfiguration, item switchCa
 	case switchGreaterThan, switchGreaterThanOrEqual, switchLessThan, switchLessThanOrEqual:
 		number, ok := strictNumber(input)
 		if !ok {
-			return false, fmt.Errorf("Switch %s comparator requires a Number value, received %T", configuration.Comparator, input)
+			return false, fmt.Errorf("switch %s comparator requires a Number value, received %T", configuration.Comparator, input)
 		}
 		caseNumber := item.Value.(float64)
 		switch configuration.Comparator {

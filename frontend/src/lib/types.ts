@@ -18,11 +18,28 @@ export type Capability =
   | "git"
   | "docker"
   | "plugin";
-export type PinKind = "exec" | "data";
+export type PinKind = "exec" | "data" | "tool";
 export type PinDirection = "input" | "output";
 export type DataType =
   "any" | "text" | "number" | "boolean" | "object" | "list";
+export type TypeKind =
+  | "any" | "bool" | "string" | "int" | "float" | "bytes" | "list" | "map" | "record";
+export interface TypeSpec {
+  kind: TypeKind;
+  name?: string;
+  element?: TypeSpec;
+  key?: TypeSpec;
+  value?: TypeSpec;
+  fields?: TypeFieldSpec[];
+}
+export interface TypeFieldSpec {
+  id: string;
+  name: string;
+  type: TypeSpec;
+  optional?: boolean;
+}
 export type NodeExecutionMode = "event" | "impure" | "pure" | "visual";
+export type FunctionKind = "function" | "tool";
 
 export type FlowNode = Node<{
   type?: string;
@@ -100,6 +117,7 @@ export interface NodePort {
   kind: PinKind;
   direction: PinDirection;
   dataType?: DataType;
+  type?: TypeSpec;
   fields?: DataField[];
   color?: string;
   required?: boolean;
@@ -156,7 +174,9 @@ export interface DocumentationReference {
 export interface FunctionPin {
   id: string;
   name: string;
+  description?: string;
   dataType: DataType;
+  type?: TypeSpec;
   required?: boolean;
   default?: unknown;
 }
@@ -168,6 +188,7 @@ export interface CustomFunction {
   icon: string;
   iconColor: string;
   iconBackground: string;
+  kind: FunctionKind;
   mode: Extract<NodeExecutionMode, "pure" | "impure">;
   inputs: FunctionPin[];
   outputs: FunctionPin[];
@@ -184,9 +205,16 @@ export interface FunctionSummary {
   icon: string;
   iconColor: string;
   iconBackground: string;
+  kind: FunctionKind;
   mode: Extract<NodeExecutionMode, "pure" | "impure">;
   publishedRevision: number;
   updatedAt: string;
+}
+export interface CreateFunctionRequest {
+  name: string;
+  description: string;
+  kind: FunctionKind;
+  mode: Extract<NodeExecutionMode, "pure" | "impure">;
 }
 
 export interface ProviderConfig {
@@ -329,6 +357,7 @@ export interface APIStatus {
 export interface Settings {
 
   language: "en" | "de" | "fr" | "ru";
+  hideToTrayOnClose: boolean;
   defaultProviderId: string;
   contentDirectory: string;
   retentionDays: number;
@@ -340,6 +369,12 @@ export interface Settings {
   llamaRuntime: LlamaRuntimeSettings;
   api: APISettings;
   metrics: MetricsSettings;
+}
+export interface TrayMenuLabels {
+  show: string;
+  settings: string;
+  hide: string;
+  close: string;
 }
 export interface ModelPriceRate {
   providerId: string;

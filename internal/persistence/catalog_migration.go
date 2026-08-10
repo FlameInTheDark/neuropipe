@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	squirrel "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 )
 
@@ -19,7 +20,7 @@ const blueprintCatalogMigrationKey = "migration.blueprint-catalog-v3"
 // remain untouched. Every affected pipeline is paused for user review.
 func (s *Store) migrateBlueprintCatalog(ctx context.Context) error {
 	var completed string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, blueprintCatalogMigrationKey).Scan(&completed)
+	err := statements(s.db).Select("value").From("settings").Where(squirrel.Eq{"key": blueprintCatalogMigrationKey}).QueryRowContext(ctx).Scan(&completed)
 	if err == nil {
 		return nil
 	}
@@ -27,7 +28,7 @@ func (s *Store) migrateBlueprintCatalog(ctx context.Context) error {
 		return fmt.Errorf("read Blueprint catalog migration marker: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id, draft_definition FROM pipelines WHERE draft_definition LIKE '%logic:%'`)
+	rows, err := statements(s.db).Select("id", "draft_definition").From("pipelines").Where("draft_definition LIKE ?", "%logic:%").QueryContext(ctx)
 	if err != nil {
 		return fmt.Errorf("scan packet-era drafts: %w", err)
 	}
@@ -52,7 +53,7 @@ func (s *Store) migrateBlueprintCatalog(ctx context.Context) error {
 		return fmt.Errorf("scan packet-era drafts: %w", err)
 	}
 	if len(candidates) == 0 {
-		_, err := s.db.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)`, blueprintCatalogMigrationKey, stamp(time.Now().UTC()))
+		_, err := statements(s.db).Insert("settings").Columns("key", "value").Values(blueprintCatalogMigrationKey, stamp(time.Now().UTC())).ExecContext(ctx)
 		return err
 	}
 	if err := s.backupDatabase(ctx, "pre-blueprint-catalog-v3"); err != nil {
@@ -74,22 +75,22 @@ func (s *Store) migrateBlueprintCatalog(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("encode migrated draft %q: %w", candidate.id, err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE pipelines SET draft_definition = ?, status = ?, updated_at = ? WHERE id = ?`, encoded, domain.PipelineDraft, stamp(now), candidate.id); err != nil {
+		if _, err := statements(tx).Update("pipelines").Set("draft_definition", encoded).Set("status", domain.PipelineDraft).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": candidate.id}).ExecContext(ctx); err != nil {
 			return fmt.Errorf("save migrated draft %q: %w", candidate.id, err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE trigger_bindings SET enabled = 0, trusted = 0, updated_at = ? WHERE pipeline_id = ?`, stamp(now), candidate.id); err != nil {
+		if _, err := statements(tx).Update("trigger_bindings").Set("enabled", false).Set("trusted", false).Set("updated_at", stamp(now)).Where(squirrel.Eq{"pipeline_id": candidate.id}).ExecContext(ctx); err != nil {
 			return fmt.Errorf("pause migrated triggers %q: %w", candidate.id, err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM permissions WHERE pipeline_id = ?`, candidate.id); err != nil {
+		if _, err := statements(tx).Delete("permissions").Where(squirrel.Eq{"pipeline_id": candidate.id}).ExecContext(ctx); err != nil {
 			return fmt.Errorf("revoke migrated trust %q: %w", candidate.id, err)
 		}
 		for _, issue := range issues {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO blueprint_migration_issues (id, pipeline_id, issue, detected_at) VALUES (?, ?, ?, ?)`, uuid.NewString(), candidate.id, issue, stamp(now)); err != nil {
+			if _, err := statements(tx).Insert("blueprint_migration_issues").Columns("id", "pipeline_id", "issue", "detected_at").Values(uuid.NewString(), candidate.id, issue, stamp(now)).ExecContext(ctx); err != nil {
 				return fmt.Errorf("record migration issue for %q: %w", candidate.id, err)
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)`, blueprintCatalogMigrationKey, stamp(now)); err != nil {
+	if _, err := statements(tx).Insert("settings").Columns("key", "value").Values(blueprintCatalogMigrationKey, stamp(now)).ExecContext(ctx); err != nil {
 		return fmt.Errorf("save Blueprint catalog migration marker: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

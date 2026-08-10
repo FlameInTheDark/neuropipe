@@ -1,6 +1,10 @@
 package catalog
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/FlameInTheDark/neuropipe/internal/domain"
+)
 
 func TestActionFieldsBecomeTypedPinsWithoutGenericInput(t *testing.T) {
 	definition, ok := New().Get("action:notification")
@@ -33,6 +37,24 @@ func TestStructuredConfigurationDoesNotBecomeDataPins(t *testing.T) {
 				t.Fatalf("%s exposes structured configuration %q as a data pin", nodeType, pin.ID)
 			}
 		}
+	}
+}
+
+func TestJavaScriptEditorConfigurationDoesNotBecomeDataPin(t *testing.T) {
+	definition, ok := New().Get("action:javascript")
+	if !ok {
+		t.Fatal("JavaScript definition is missing")
+	}
+	if _, ok := New().Node("action:javascript"); !ok {
+		t.Fatal("JavaScript module is missing")
+	}
+	for _, input := range definition.Inputs {
+		if input.ID == "code" {
+			t.Fatalf("JavaScript exposes editor configuration as a data pin: %#v", definition.Inputs)
+		}
+	}
+	if len(definition.Fields) != 1 || definition.Fields[0].Kind != "javascript-editor" {
+		t.Fatalf("JavaScript fields = %#v", definition.Fields)
 	}
 }
 
@@ -90,6 +112,102 @@ func TestChatTriggerHasOnlyItsExplicitBlueprintPins(t *testing.T) {
 	}
 	if pins["payload"] || len(pins) != 4 {
 		t.Fatalf("Chat Trigger outputs = %#v, want only its explicit contract", definition.Outputs)
+	}
+}
+
+func TestButtonTriggerHasOneStructuredPayload(t *testing.T) {
+	definition, ok := New().Get("trigger:button")
+	if !ok {
+		t.Fatal("Button Trigger definition is missing")
+	}
+	payloads := make([]domain.NodePort, 0, 1)
+	for _, output := range definition.Outputs {
+		if output.ID == "payload" && output.Kind == domain.PinData {
+			payloads = append(payloads, output)
+		}
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("Button Trigger payload outputs = %#v, want exactly one", payloads)
+	}
+	payload := payloads[0]
+	if payload.Type == nil || payload.Type.Kind != domain.TypeRecord || len(payload.Type.Fields) != 1 {
+		t.Fatalf("Button Trigger payload type = %#v, want one-field record", payload.Type)
+	}
+	field := payload.Type.Fields[0]
+	if field.ID != "trigger" || field.Name != "trigger" || field.Type.Kind != domain.TypeString {
+		t.Fatalf("Button Trigger payload field = %#v, want trigger string", field)
+	}
+	if len(payload.Fields) != 1 || payload.Fields[0].Path != "trigger" || payload.Fields[0].DataType != domain.DataText {
+		t.Fatalf("Button Trigger payload display fields = %#v, want trigger text", payload.Fields)
+	}
+}
+
+func TestAgentToolPinsAcceptMultipleToolFunctions(t *testing.T) {
+	registry := New()
+	for _, nodeType := range []string{"llm:agent", "llm:coding_agent"} {
+		definition, ok := registry.Get(nodeType)
+		if !ok {
+			t.Fatalf("%s definition is missing", nodeType)
+		}
+		found := false
+		for _, input := range definition.Inputs {
+			if input.ID != "tools" {
+				continue
+			}
+			found = true
+			if input.Kind != domain.PinTool || input.Direction != domain.PinInput || input.MaxConnections != 0 {
+				t.Fatalf("%s Tools input = %#v, want unlimited tool input", nodeType, input)
+			}
+			break
+		}
+		if !found {
+			t.Fatalf("%s has no Tools input", nodeType)
+		}
+	}
+}
+
+func TestLocalFileModulesPublishStrictContracts(t *testing.T) {
+	registry := New()
+	list, ok := registry.Get("action:list_directory")
+	if !ok {
+		t.Fatal("List Directory definition is missing")
+	}
+	if list.Mode != domain.NodeImpure || len(list.Capabilities) != 1 || list.Capabilities[0] != domain.CapabilityFileRead {
+		t.Fatalf("List Directory definition = %#v", list)
+	}
+	var files domain.NodePort
+	for _, output := range list.Outputs {
+		if output.ID == "result" {
+			files = output
+		}
+	}
+	if files.Label != "Files" || files.Type == nil || files.Type.Kind != domain.TypeList || files.Type.Element == nil || files.Type.Element.Kind != domain.TypeRecord {
+		t.Fatalf("List Directory Files output = %#v", files)
+	}
+
+	read, ok := registry.Get("action:file_read")
+	if !ok {
+		t.Fatal("Read File definition is missing")
+	}
+	outputs := make(map[string]domain.NodePort, len(read.Outputs))
+	for _, output := range read.Outputs {
+		outputs[output.ID] = output
+	}
+	if outputs["result"].Type == nil || outputs["result"].Type.Kind != domain.TypeBytes {
+		t.Fatalf("Read File outputs = %#v", outputs)
+	}
+	write, ok := registry.Get("action:file_write")
+	if !ok {
+		t.Fatal("Write File definition is missing")
+	}
+	if len(write.Inputs) != 3 || write.Inputs[2].Type == nil || write.Inputs[2].Type.Kind != domain.TypeString {
+		t.Fatalf("Write File inputs = %#v", write.Inputs)
+	}
+
+	for _, nodeType := range []string{"data:base64_encode", "data:base64_decode"} {
+		if _, ok := registry.Node(nodeType); !ok {
+			t.Fatalf("%s module is missing", nodeType)
+		}
 	}
 }
 

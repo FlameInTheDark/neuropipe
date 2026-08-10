@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -10,6 +11,15 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/persistence"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
 )
+
+type reportWriterStub struct {
+	report domain.Report
+	err    error
+}
+
+func (s reportWriterStub) CreateReport(context.Context, domain.Report) (domain.Report, error) {
+	return s.report, s.err
+}
 
 func TestLimiterQueuesUntilContextIsCancelled(t *testing.T) {
 	queue := newLimiter(1)
@@ -71,5 +81,38 @@ func TestRunDraftExecutesAndPersistsConnectedNodes(t *testing.T) {
 	}
 	if len(history) != 1 || len(history[0].NodeRuns) != 2 {
 		t.Fatalf("execution history = %#v, want persisted node results", history)
+	}
+}
+
+func TestEmittingReportWriterNotifiesOnlyAfterPersisting(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		writerErr error
+		wantEvent bool
+	}{
+		{name: "created", wantEvent: true},
+		{name: "writer failed", writerErr: errors.New("disk unavailable")},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var events []string
+			writer := emittingReportWriter{
+				writer: reportWriterStub{report: domain.Report{ID: "report-1"}, err: test.writerErr},
+				emit:   func(event string, _ any) { events = append(events, event) },
+			}
+
+			created, err := writer.CreateReport(context.Background(), domain.Report{Title: "Daily update"})
+			if !errors.Is(err, test.writerErr) {
+				t.Fatalf("CreateReport() error = %v, want %v", err, test.writerErr)
+			}
+			if created.ID != "report-1" {
+				t.Fatalf("CreateReport() report ID = %q, want report-1", created.ID)
+			}
+			if got := len(events) == 1 && events[0] == "reports.updated"; got != test.wantEvent {
+				t.Fatalf("events = %#v, want reports.updated emitted: %v", events, test.wantEvent)
+			}
+		})
 	}
 }

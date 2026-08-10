@@ -91,6 +91,61 @@ func TestSwitchDocumentationDescribesTypedOrderedControlFlow(t *testing.T) {
 	}
 }
 
+func TestRegexNodeDocumentationUsesEmbeddedTranslations(t *testing.T) {
+	t.Parallel()
+	service, err := New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		nodeType  string
+		english   string
+		localized map[string]string
+	}{
+		{
+			nodeType: "data:regex_match",
+			english:  "RegexMatch",
+			localized: map[string]string{
+				"de": "Regex-Abgleich", "fr": "Correspondance regex", "ru": "Поиск по регулярному выражению",
+			},
+		},
+		{
+			nodeType: "data:regex_replace",
+			english:  "ReplaceAllString",
+			localized: map[string]string{
+				"de": "Regex-Ersetzen", "fr": "Remplacement regex", "ru": "Замена по регулярному выражению",
+			},
+		},
+		{
+			nodeType: "data:regex_split",
+			english:  "list[string]",
+			localized: map[string]string{
+				"de": "Regex-Aufteilen", "fr": "Découpage regex", "ru": "Разделение по регулярному выражению",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.nodeType, func(t *testing.T) {
+			document, err := service.Get("en", "node:"+test.nodeType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(document.Markdown, test.english) {
+				t.Fatalf("English documentation is missing %q", test.english)
+			}
+			for language, marker := range test.localized {
+				localized, err := service.Get(language, "node:"+test.nodeType)
+				if err != nil {
+					t.Fatalf("Get(%q) error = %v", language, err)
+				}
+				if !strings.Contains(localized.Markdown, marker) {
+					t.Fatalf("%s documentation did not use its translation", language)
+				}
+			}
+		})
+	}
+}
+
 func TestLocalizedDocumentationUsesEmbeddedTranslationAndEnglishFallback(t *testing.T) {
 	t.Parallel()
 	service, err := New(nil)
@@ -116,6 +171,37 @@ func TestLocalizedDocumentationUsesEmbeddedTranslationAndEnglishFallback(t *test
 	}
 	if !strings.Contains(fallback.Markdown, "# Chat") {
 		t.Fatalf("missing translations must fall back to English, got %q", fallback.Markdown)
+	}
+}
+
+func TestLLMToolFunctionGuideDocumentsTypedContractsInEveryLocale(t *testing.T) {
+	t.Parallel()
+	service, err := New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	english, err := service.Get("en", "guides/llm-tool-functions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"Get city forecast", "Base64 string", "anonymous structural record", "Tool connections are unlimited"} {
+		if !strings.Contains(english.Markdown, value) {
+			t.Fatalf("English LLM tool guide is missing %q", value)
+		}
+	}
+	localizedMarkers := map[string]string{
+		"de": "LLM-Werkzeugfunktionen",
+		"fr": "Fonctions outil LLM",
+		"ru": "Инструментальные функции LLM",
+	}
+	for language, marker := range localizedMarkers {
+		document, err := service.Get(language, "guides/llm-tool-functions")
+		if err != nil {
+			t.Fatalf("Get(%q) error = %v", language, err)
+		}
+		if !strings.Contains(document.Markdown, marker) {
+			t.Fatalf("%s LLM tool guide did not use its embedded translation", language)
+		}
 	}
 }
 

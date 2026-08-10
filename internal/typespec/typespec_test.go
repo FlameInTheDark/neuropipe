@@ -1,0 +1,69 @@
+package typespec
+
+import (
+	"testing"
+
+	"github.com/FlameInTheDark/neuropipe/internal/domain"
+)
+
+func TestAssignableUsesExplicitGoStyleConversions(t *testing.T) {
+	if Assignable(Int(), String()) || Assignable(Int(), Float()) || Assignable(Any(), Int()) {
+		t.Fatal("implicit conversion or any narrowing was accepted")
+	}
+	if !Assignable(Int(), Any()) || !Assignable(Int(), Int()) {
+		t.Fatal("valid assignment was rejected")
+	}
+}
+
+func TestStructuralRecordAssignability(t *testing.T) {
+	person := domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{{Name: "name", Type: String()}, {Name: "age", Type: Int()}}}
+	nameOnly := domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{{Name: "name", Type: String()}}}
+	if !Assignable(person, nameOnly) {
+		t.Fatal("a record with required fields should satisfy a smaller structural contract")
+	}
+	if Assignable(nameOnly, person) {
+		t.Fatal("a record missing age should not satisfy person")
+	}
+}
+
+func TestValidateValueChecksNestedRecords(t *testing.T) {
+	type profile struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+	contract := domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{{Name: "name", Type: String()}, {Name: "age", Type: Int()}}}
+	if err := ValidateValue(profile{Name: "Ada", Age: 37}, contract); err != nil {
+		t.Fatalf("ValidateValue() error = %v", err)
+	}
+	if err := ValidateValue("not an object", contract); err == nil {
+		t.Fatal("ValidateValue() accepted text for a record")
+	}
+	if err := ValidateValue(map[string]any{"name": "Ada", "age": "37"}, contract); err == nil {
+		t.Fatal("ValidateValue() accepted string for int")
+	}
+}
+
+func TestNamedRecordRequiresItsNamedGoValue(t *testing.T) {
+	type User struct{ Name string }
+	type Account struct{ Name string }
+	contract := domain.TypeSpec{Kind: domain.TypeRecord, Name: "User", Fields: []domain.TypeFieldSpec{{Name: "Name", Type: String()}}}
+	if err := ValidateValue(User{Name: "Ada"}, contract); err != nil {
+		t.Fatalf("named User was rejected: %v", err)
+	}
+	if err := ValidateValue(Account{Name: "Ada"}, contract); err == nil {
+		t.Fatal("different named record was accepted")
+	}
+}
+
+func TestValidateSpec(t *testing.T) {
+	text := String()
+	if err := ValidateSpec(domain.TypeSpec{Kind: domain.TypeList, Element: &text}); err != nil {
+		t.Fatalf("list contract: %v", err)
+	}
+	if err := ValidateSpec(domain.TypeSpec{Kind: domain.TypeMap, Key: &domain.TypeSpec{Kind: domain.TypeList}, Value: &text}); err == nil {
+		t.Fatal("list map key should be rejected")
+	}
+	if err := ValidateSpec(domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{{Name: "value", Type: text}, {Name: "value", Type: text}}}); err == nil {
+		t.Fatal("duplicate record field should be rejected")
+	}
+}

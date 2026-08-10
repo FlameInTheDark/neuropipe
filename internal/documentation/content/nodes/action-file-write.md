@@ -1,7 +1,10 @@
 # Write File
 
 ## Purpose
-Writes text or JSON to an approved local path.
+Writes a selected **Text** or **Bytes** value to an approved local path. The
+Content type selector changes the exact input-pin contract; Bytes must arrive
+through a connected Bytes wire rather than being parsed from the text editor.
 
 ## Example
-`LLM Prompt → Write File` after a visible exec pulse reaches the write node.
+`Read File (Bytes) → Write File (Bytes)` after a visible exec pulse reaches
+the write node.

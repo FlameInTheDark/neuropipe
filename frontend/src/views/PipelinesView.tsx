@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, Copy, Loader2, MoreHorizontal, Plus, Search, Trash2, Workflow } from 'lucide-react'
+import { ContextMenu, contextMenuPointFromElement, contextMenuPosition, type ContextMenuPoint, type ContextMenuPosition } from '@/components/ContextMenu'
 import { EmptyState } from '@/components/EmptyState'
 import { LucideIcon } from '@/components/LucideIconPicker'
 import { PageHeader } from '@/components/PageHeader'
@@ -15,8 +16,7 @@ import { useTranslation } from 'react-i18next'
 
 interface PipelineMenu {
   pipeline: PipelineSummary
-  x: number
-  y: number
+  position: ContextMenuPosition
 }
 
 export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSummary[]; onRefresh: () => Promise<void> }) {
@@ -27,7 +27,6 @@ export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSum
   const [name, setName] = useState('')
   const [menu, setMenu] = useState<PipelineMenu>()
   const [actionID, setActionID] = useState('')
-  const menuRef = useRef<HTMLDivElement>(null)
   const requestConfirmation = useConfirmationStore((state) => state.ask)
   const filtered = useMemo(() => pipelines.filter((pipeline) => `${pipeline.name} ${pipeline.description}`.toLowerCase().includes(query.toLowerCase())), [pipelines, query])
 
@@ -44,27 +43,10 @@ export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSum
     }
   }
 
-  useEffect(() => {
-    if (!menu) return
-    const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setMenu(undefined) }
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(undefined) }
-    window.addEventListener('pointerdown', close)
-    window.addEventListener('keydown', escape)
-    return () => {
-      window.removeEventListener('pointerdown', close)
-      window.removeEventListener('keydown', escape)
-    }
-  }, [menu])
-
-  const openMenu = (event: { clientX: number; clientY: number; preventDefault: () => void }, pipeline: PipelineSummary) => {
-    event.preventDefault()
-    const width = 192
-    const height = 128
-    const gutter = 8
+  const openMenu = (point: ContextMenuPoint, pipeline: PipelineSummary) => {
     setMenu({
       pipeline,
-      x: Math.max(gutter, Math.min(event.clientX, window.innerWidth - width - gutter)),
-      y: Math.max(gutter, Math.min(event.clientY, window.innerHeight - height - gutter)),
+      position: contextMenuPosition(point, { width: 192, height: 128 }),
     })
   }
 
@@ -118,35 +100,49 @@ export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSum
         <div className="grid grid-cols-[minmax(0,1fr)_130px_110px_42px] border-b border-zinc-800 bg-zinc-900/50 px-4 py-2 text-xs font-medium text-zinc-500">
           <span>{t('pipelines.pipeline')}</span><span>{t('pipelines.status')}</span><span>{t('pipelines.updated')}</span><span />
         </div>
-        {filtered.map((pipeline) => <button
+        {filtered.map((pipeline) => <div
           key={pipeline.id}
-          onClick={() => setScreen('editor', pipeline.id)}
-          onContextMenu={(event) => openMenu(event, pipeline)}
-          onKeyDown={(event) => {
-            if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
-            const bounds = event.currentTarget.getBoundingClientRect()
-            openMenu({ clientX: bounds.left + 24, clientY: bounds.top + 24, preventDefault: () => event.preventDefault() }, pipeline)
-          }}
-          className="grid w-full grid-cols-[minmax(0,1fr)_130px_110px_42px] items-center border-b border-zinc-800 px-4 py-4 text-left transition-colors last:border-0 hover:bg-zinc-900"
+          onContextMenu={(event) => { event.preventDefault(); openMenu(event, pipeline) }}
+          className="group grid grid-cols-[minmax(0,1fr)_130px_110px_42px] items-center border-b border-zinc-800 px-4 py-4 transition-colors last:border-0 hover:bg-zinc-900"
         >
-          <span className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setScreen('editor', pipeline.id)}
+            onKeyDown={(event) => {
+              if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+              event.preventDefault()
+              openMenu(contextMenuPointFromElement(event.currentTarget), pipeline)
+            }}
+            className="flex min-w-0 items-center gap-3 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+          >
             <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-zinc-800" style={{ color: pipeline.iconColor, backgroundColor: pipeline.iconBackground }}><LucideIcon name={pipeline.icon} className="size-4" /></span>
             <span className="min-w-0"><span className="block truncate text-sm font-medium text-zinc-100">{pipeline.name}</span>
             <span className="mt-1 block truncate text-xs text-zinc-500">{pipeline.description || t('pipelines.triggerCount', { count: pipeline.triggerCount })}</span>
             {pipeline.migrationIssue ? <Tooltip content={pipeline.migrationIssue} side="bottom" align="start"><span className="mt-1 flex items-center gap-1 text-[11px] text-amber-300"><AlertTriangle className="size-3" />{t('pipelines.migrationRequired')}</span></Tooltip> : null}</span>
-          </span>
+          </button>
           <span><span className={pipeline.status === 'active' ? 'rounded bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300' : pipeline.status === 'legacy' ? 'rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-300' : 'rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400'}>{pipeline.status === 'active' ? t('pipelines.published', { version: pipeline.publishedRevision }) : pipeline.status === 'legacy' ? t('pipelines.legacy') : t('pipelines.draft')}</span></span>
           <span className="text-xs text-zinc-500">{formatDate(pipeline.updatedAt)}</span>
-          <MoreHorizontal className="size-4 text-zinc-600" />
-        </button>)}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="size-7 p-0 text-zinc-500 hover:text-zinc-100 focus-visible:text-zinc-100"
+            onClick={(event) => openMenu(contextMenuPointFromElement(event.currentTarget), pipeline)}
+            aria-label={t('pipelines.options', { name: pipeline.name })}
+            aria-haspopup="menu"
+            aria-expanded={menu?.pipeline.id === pipeline.id}
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </div>)}
       </div>}
       {pipelines.length > 0 && filtered.length === 0 && <div className="py-16 text-center text-sm text-zinc-500"><Copy className="mx-auto mb-3 size-5" />{t('pipelines.noMatches', { query })}</div>}
-      {menu ? <div ref={menuRef} role="menu" aria-label={t('pipelines.options', { name: menu.pipeline.name })} className="fixed z-50 w-48 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl shadow-black/60" style={{ left: menu.x, top: menu.y }}>
-        <button autoFocus role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500" onClick={() => { setMenu(undefined); setScreen('editor', menu.pipeline.id) }}><ArrowRight className="size-3.5" />{t('pipelines.open')}</button>
+      {menu ? <ContextMenu position={menu.position} ariaLabel={t('pipelines.options', { name: menu.pipeline.name })} className="w-48" onClose={() => setMenu(undefined)}>
+        <button role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500" onClick={() => { setMenu(undefined); setScreen('editor', menu.pipeline.id) }}><ArrowRight className="size-3.5" />{t('pipelines.open')}</button>
         <button role="menuitem" disabled={actionID !== '' || menu.pipeline.status === 'legacy'} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void duplicate(menu.pipeline)}>{actionID === menu.pipeline.id ? <Loader2 className="size-3.5 animate-spin" /> : <Copy className="size-3.5" />}{t('pipelines.duplicate')}</button>
         <div className="my-1 border-t border-zinc-800" />
         <button role="menuitem" disabled={actionID !== ''} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => { void remove(menu.pipeline); setMenu(undefined) }}><Trash2 className="size-3.5" />{t('common.delete')}</button>
-      </div> : null}
+      </ContextMenu> : null}
     </div>
   </section>
 }

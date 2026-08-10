@@ -60,6 +60,15 @@ func RequiredCapabilities(definition domain.FlowDefinition, registry *catalog.Re
 		if !exists {
 			continue
 		}
+		// First-party modules may derive their sensitive capabilities from a
+		// validated configuration (for example JavaScript's explicit np access
+		// switches). Keep trust prompts and runtime authorization aligned with
+		// the exact node definition the Blueprint engine will execute.
+		if module, moduleExists := registry.Node(node.Type); moduleExists {
+			if resolved, err := module.Resolve(node); err == nil {
+				metadata = resolved
+			}
+		}
 		for _, capability := range metadata.Capabilities {
 			if _, exists := seen[capability]; exists {
 				continue

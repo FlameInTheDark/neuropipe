@@ -26,6 +26,10 @@
   and preserve focus appropriately after dialogs and menus close.
 - Reuse shared UI components instead of recreating menus, dropdowns, tooltips,
   confirmation flows, Markdown renderers, or date controls in a view.
+- Use `frontend/src/components/ContextMenu.tsx` for every product context menu.
+  Do not reimplement cursor placement, viewport clamping, outside-click/Escape
+  dismissal, or focus restoration in an individual view; supply only that
+  view's menu actions through the shared component.
 
 ## Architecture and quality
 

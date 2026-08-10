@@ -6,15 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes"
 )
 
 const maxNodeVisits = 10_000
@@ -35,6 +34,7 @@ type Engine struct {
 	functions     FunctionResolver
 	notifications NotificationSender
 	chat          ChatWriter
+	javascript    nodes.JavaScriptHost
 	variables     Packet
 }
 
@@ -61,10 +61,6 @@ func (e *Engine) executeNode(ctx context.Context, node domain.FlowNode, input Pa
 		return Result{}, nil
 	case "action:http":
 		return e.executeHTTP(ctx, config, input)
-	case "action:file_read":
-		return executeFileRead(config, input)
-	case "action:file_write":
-		return executeFileWrite(config, input)
 	case "action:terminal":
 		return executeTerminal(ctx, config, input)
 	case "action:notification":
@@ -143,8 +139,6 @@ func (e *Engine) executeNotification(ctx context.Context, config map[string]any,
 	}
 	return Result{"out": {Packet{"notification": map[string]any{"title": title, "message": message}}}}, nil
 }
-
-var variableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (e *Engine) executeReport(ctx context.Context, nodeID string, config map[string]any, input Packet) (Result, error) {
 	if e.reports == nil || e.reportContext.PipelineID == "" || e.reportContext.ExecutionID == "" {
@@ -264,38 +258,6 @@ func boolValue(value any) bool {
 	default:
 		return false
 	}
-}
-
-func executeFileRead(config map[string]any, input Packet) (Result, error) {
-	path := text(config, "path")
-	if path == "" {
-		return nil, fmt.Errorf("file path is required")
-	}
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
-	}
-	output := Packet{"file": map[string]any{"path": path, "content": string(data)}}
-	var decoded any
-	if json.Unmarshal(data, &decoded) == nil {
-		output["file"].(map[string]any)["json"] = decoded
-	}
-	return Result{"out": {mergePacket(input, output)}}, nil
-}
-
-func executeFileWrite(config map[string]any, input Packet) (Result, error) {
-	path := text(config, "path")
-	if path == "" {
-		return nil, fmt.Errorf("file path is required")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create file directory: %w", err)
-	}
-	content := text(config, "content")
-	if err := os.WriteFile(filepath.Clean(path), []byte(content), 0o600); err != nil {
-		return nil, fmt.Errorf("write file: %w", err)
-	}
-	return Result{"out": {mergePacket(input, Packet{"file": map[string]any{"path": path, "written": true}})}}, nil
 }
 
 func executeTerminal(ctx context.Context, config map[string]any, input Packet) (Result, error) {

@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BlueprintContextMenu } from "@/components/BlueprintContextMenu";
+import { contextMenuPosition } from "@/components/ContextMenu";
 import {
   FieldOutputsEditor,
   ObjectFieldsEditor,
@@ -59,7 +60,9 @@ import {
 import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEditor";
 import { BlueprintNodeLibrary } from "@/components/BlueprintNodeLibrary";
 import { BlueprintPinTooltip } from "@/components/BlueprintPinTooltip";
+import { JavaScriptCodeControl } from "@/components/JavaScriptCodeControl";
 import { IconAppearancePicker, LucideIconPicker } from "@/components/LucideIconPicker";
+import { ShortcutRecorder } from "@/components/ShortcutRecorder";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -87,6 +90,7 @@ import type {
   Pipeline,
   DocumentationReference,
 } from "@/lib/types";
+import { isTypeAssignable } from "@/lib/type-spec";
 import { useUIStore } from "@/stores/ui";
 import i18n from "@/i18n";
 import { useTranslation } from "react-i18next";
@@ -154,11 +158,13 @@ function normalizeDefinition(definition: NodeDefinition): NodeDefinition {
 }
 
 function compatiblePins(source: NodePort, target: NodePort) {
+  if (source.kind === "data" && source.type && target.type) {
+    return isTypeAssignable(source.type, target.type);
+  }
   return (
     source.kind === target.kind &&
     (source.kind === "exec" ||
       source.dataType === "any" ||
-      target.dataType === "any" ||
       source.dataType === target.dataType)
   );
 }
@@ -744,7 +750,7 @@ function EditorContents({
     try {
       setBusy("save");
       const draftDefinition = {
-        schemaVersion: 2,
+        schemaVersion: pipeline.draftDefinition.schemaVersion,
         nodes: dehydrateNodes(nodes),
         edges,
         viewport: flow?.getViewport() ?? pipeline.draftDefinition.viewport,
@@ -780,7 +786,7 @@ function EditorContents({
     try {
       setBusy("rename");
       const draftDefinition = {
-        schemaVersion: 2,
+        schemaVersion: pipeline.draftDefinition.schemaVersion,
         nodes: dehydrateNodes(nodes),
         edges,
         viewport: flow?.getViewport() ?? pipeline.draftDefinition.viewport,
@@ -809,7 +815,7 @@ function EditorContents({
     try {
       setBusy("appearance");
       const draftDefinition = {
-        schemaVersion: 2,
+        schemaVersion: pipeline.draftDefinition.schemaVersion,
         nodes: dehydrateNodes(nodes),
         edges,
         viewport: flow?.getViewport() ?? pipeline.draftDefinition.viewport,
@@ -835,7 +841,7 @@ function EditorContents({
     try {
       setBusy("publish");
       const draftDefinition = {
-        schemaVersion: 2,
+        schemaVersion: pipeline.draftDefinition.schemaVersion,
         nodes: dehydrateNodes(nodes),
         edges,
         viewport: flow?.getViewport() ?? pipeline.draftDefinition.viewport,
@@ -869,7 +875,7 @@ function EditorContents({
       setBusy("run");
       setRunLogKey((current) => current + 1);
       const draftDefinition = {
-        schemaVersion: 2,
+        schemaVersion: pipeline.draftDefinition.schemaVersion,
         nodes: dehydrateNodes(nodes),
         edges,
         viewport: flow?.getViewport() ?? pipeline.draftDefinition.viewport,
@@ -904,14 +910,14 @@ function EditorContents({
       setBusy("");
     }
   };
-  const updateConfig = (field: ConfigField, value: unknown) => {
+  const updateConfigValues = (values: Record<string, unknown>) => {
     if (!selectedID) return;
     const selectedNode = nodes.find((node) => node.id === selectedID);
     const nextConfig = selectedNode
-      ? {
+      ? normalizeNodeConfig(selectedNode.data.type, {
           ...selectedNode.data.config,
-          [field.name]: parseFieldValue(field, value),
-        }
+          ...values,
+        })
       : undefined;
     const removedOutputIDs = nextConfig
       ? (selectedNode!.data.outputs ?? [])
@@ -925,10 +931,10 @@ function EditorContents({
     setNodes((current) =>
       current.map((node) => {
         if (node.id !== selectedID) return node;
-        const config = {
+        const config = normalizeNodeConfig(node.data.type, {
           ...node.data.config,
-          [field.name]: parseFieldValue(field, value),
-        };
+          ...values,
+        });
         return {
           ...node,
           data: {
@@ -950,6 +956,9 @@ function EditorContents({
       );
     }
     setDirty(true);
+  };
+  const updateConfig = (field: ConfigField, value: unknown) => {
+    updateConfigValues({ [field.name]: parseFieldValue(field, value) });
   };
   const removeSelected = () => {
     if (!selectedID) return;
@@ -1019,30 +1028,14 @@ function EditorContents({
     const bounds = canvasRef.current?.getBoundingClientRect();
     const menuWidth = 320;
     const menuHeight = edgeID ? 92 : 468;
-    const gutter = 8;
-    const relativeX = bounds ? event.clientX - bounds.left : event.clientX;
-    const relativeY = bounds ? event.clientY - bounds.top : event.clientY;
-    const x = bounds
-      ? Math.max(
-          gutter,
-          Math.min(
-            relativeX,
-            Math.max(gutter, bounds.width - menuWidth - gutter),
-          ),
-        )
-      : relativeX;
-    const y = bounds
-      ? Math.max(
-          gutter,
-          Math.min(
-            relativeY,
-            Math.max(gutter, bounds.height - menuHeight - gutter),
-          ),
-        )
-      : relativeY;
+    const menuPosition = contextMenuPosition(
+      event,
+      { width: menuWidth, height: menuHeight },
+      bounds,
+    );
     setMenu({
-      x,
-      y,
+      x: menuPosition.x,
+      y: menuPosition.y,
       position,
       nodeID,
       edgeID,
@@ -1163,7 +1156,7 @@ function EditorContents({
         {t("editor.loading")}
       </div>
     );
-  if (pipeline.draftDefinition.schemaVersion !== 2)
+  if (pipeline.draftDefinition.schemaVersion !== 3)
     return (
       <section className="flex h-full items-center justify-center p-8">
         <div className="surface max-w-lg rounded-xl p-6">
@@ -1266,7 +1259,7 @@ function EditorContents({
             )}
             {t("editor.save")}
           </Button>
-          <Tooltip content={t("editor.runTitle")} side="bottom">
+          <Tooltip content={t("editor.runTitle")} side="bottom" size="body" className="max-w-72 px-3 py-2 text-zinc-300">
             <Button size="sm" variant="outline" onClick={() => void run()} disabled={busy !== ""}>
               {busy === "run" ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
               {t("editor.runDraft")}
@@ -1366,27 +1359,30 @@ function EditorContents({
                 position="top-left"
                 className="!m-3 flex gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1"
               >
-                <Button size="sm" variant="ghost" onClick={autoLayout}>
-                  <LayoutGrid className="size-3.5" />
-                  {t("editor.layout")}
-                </Button>
-                <Tooltip content={snapToGrid ? t("editor.snapOff") : t("editor.snapOn")} side="bottom">
-                  <Button size="sm" variant={snapToGrid ? "secondary" : "ghost"} aria-pressed={snapToGrid} onClick={() => setGridSnapMode(snapToGrid ? "off" : "on")}>
-                    <Magnet className="size-3.5" />
-                    {t("editorActions.snap")}
+                <Tooltip content={t("editor.layout")} side="bottom">
+                  <Button size="sm" variant="ghost" className="size-7 p-0" onClick={autoLayout} aria-label={t("editor.layout")}>
+                    <LayoutGrid className="size-3.5" />
                   </Button>
                 </Tooltip>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={duplicateSelected}
-                  disabled={!selected}
-                >
-                  <Copy className="size-3.5" />
-                  {t("editorActions.duplicate")}
-                </Button>
+                <Tooltip content={snapToGrid ? t("editor.snapOff") : t("editor.snapOn")} side="bottom">
+                  <Button size="sm" variant={snapToGrid ? "secondary" : "ghost"} className="size-7 p-0" aria-label={snapToGrid ? t("editor.snapOff") : t("editor.snapOn")} aria-pressed={snapToGrid} onClick={() => setGridSnapMode(snapToGrid ? "off" : "on")}>
+                    <Magnet className="size-3.5" />
+                  </Button>
+                </Tooltip>
+                <Tooltip content={t("editorActions.duplicate")} side="bottom">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="size-7 p-0"
+                    aria-label={t("editorActions.duplicate")}
+                    onClick={duplicateSelected}
+                    disabled={!selected}
+                  >
+                    <Copy className="size-3.5" />
+                  </Button>
+                </Tooltip>
                 <Tooltip content={t("editorActions.delete")} side="bottom">
-                  <Button size="sm" variant="ghost" onClick={removeSelected} disabled={!selected} aria-label={t("editorActions.delete")}>
+                  <Button size="sm" variant="ghost" className="size-7 p-0" onClick={removeSelected} disabled={!selected} aria-label={t("editorActions.delete")}>
                     <Trash2 className="size-3.5 text-red-300" />
                   </Button>
                 </Tooltip>
@@ -1416,6 +1412,7 @@ function EditorContents({
             definition={selectedDefinition}
             sourceFields={selectedSourceFields}
             onUpdate={updateConfig}
+            onUpdateConfig={updateConfigValues}
             history={history}
             runLogKey={runLogKey}
           />
@@ -1601,6 +1598,7 @@ function Inspector({
   definition,
   sourceFields,
   onUpdate,
+  onUpdateConfig,
   history,
   runLogKey,
 }: {
@@ -1608,6 +1606,7 @@ function Inspector({
   definition?: NodeDefinition;
   sourceFields: DataField[];
   onUpdate: (field: ConfigField, value: unknown) => void;
+  onUpdateConfig: (values: Record<string, unknown>) => void;
   history: Execution[];
   runLogKey: number;
 }) {
@@ -1739,6 +1738,7 @@ function Inspector({
                 sourceFields={sourceFields}
                 nodeConfig={node.data.config}
                 onChange={(value) => onUpdate(field, value)}
+                onConfigChange={onUpdateConfig}
               />
             ))}
           </div>
@@ -1773,6 +1773,7 @@ function ConfigControl({
   sourceFields,
   nodeConfig,
   onChange,
+  onConfigChange,
 }: {
   field: ConfigField;
   value: unknown;
@@ -1781,13 +1782,14 @@ function ConfigControl({
   sourceFields: readonly DataField[];
   nodeConfig: Record<string, unknown>;
   onChange: (value: unknown) => void;
+  onConfigChange: (values: Record<string, unknown>) => void;
 }) {
   const { t } = useTranslation();
   const displayLabel =
     field.kind === "switch-cases" ? t("switchCases.cases") : field.label;
   const resolvedValue = value ?? defaultValue;
   const stringValue =
-    field.kind === "json" && typeof resolvedValue !== "string"
+    (field.kind === "json" || field.kind === "type-spec") && typeof resolvedValue !== "string"
       ? JSON.stringify(resolvedValue ?? {}, null, 2)
       : String(resolvedValue ?? "");
   return (
@@ -1796,7 +1798,12 @@ function ConfigControl({
         {displayLabel}
         {field.required && <span className="text-zinc-600">*</span>}
       </span>
-      {field.kind === "select" ? (
+      {field.kind === "javascript-editor" ? (
+        <JavaScriptCodeControl
+          config={{ ...nodeConfig, [field.name]: resolvedValue }}
+          onChange={(config) => onConfigChange(config as unknown as Record<string, unknown>)}
+        />
+      ) : field.kind === "select" || field.kind === "wire-representation" ? (
         <Select
           value={stringValue}
           onValueChange={onChange}
@@ -1808,6 +1815,12 @@ function ConfigControl({
             field.placeholder || `Select ${field.label.toLowerCase()}`
           }
           ariaLabel={field.label}
+        />
+      ) : field.name === "hotkey" ? (
+        <ShortcutRecorder
+          value={stringValue}
+          ariaLabel={field.label}
+          onValueChange={onChange}
         />
       ) : field.kind === "http-headers" ? (
         <HTTPHeadersEditor value={resolvedValue} onChange={onChange} />
@@ -1854,7 +1867,7 @@ function ConfigControl({
         />
       ) : field.kind === "tags" ? (
         <TagsEditor value={stringValue} onChange={onChange} />
-      ) : field.kind === "textarea" || field.kind === "json" ? (
+      ) : field.kind === "textarea" || field.kind === "json" || field.kind === "type-spec" ? (
         <textarea
           value={stringValue}
           onChange={(event) => onChange(event.target.value)}
@@ -2475,7 +2488,7 @@ function dehydrateNodes(nodes: EditorNode[]): FlowNode[] {
 
 function parseFieldValue(field: ConfigField, value: unknown): unknown {
   if (field.kind === "number") return Number(value);
-  if (field.kind === "json" && typeof value === "string") {
+  if ((field.kind === "json" || field.kind === "type-spec") && typeof value === "string") {
     try {
       return JSON.parse(value);
     } catch {
@@ -2483,4 +2496,22 @@ function parseFieldValue(field: ConfigField, value: unknown): unknown {
     }
   }
   return value;
+}
+
+// Inspector edits are the explicit conversion boundary for the Constant node:
+// persisted V3 configuration stores canonical JSON values, never number or
+// Boolean text that the runtime has to silently parse.
+function normalizeNodeConfig(type: string, config: Record<string, unknown>) {
+  if (type !== "data:constant") return config;
+  const target = config.type;
+  const value = config.value;
+  if (target === "number" && typeof value === "string") {
+    const number = Number(value);
+    return Number.isFinite(number) ? { ...config, value: number } : config;
+  }
+  if (target === "boolean" && typeof value === "string") {
+    if (value.trim().toLowerCase() === "true") return { ...config, value: true };
+    if (value.trim().toLowerCase() === "false") return { ...config, value: false };
+  }
+  return config;
 }

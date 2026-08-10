@@ -400,11 +400,14 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		s.emitEvent("chat.run.updated", map[string]string{"chatRunId": job.chatRunID})
 	}
 	s.emitEvent("execution:started", execution)
+	reportWriter := emittingReportWriter{writer: s.store, emit: s.emit}
+	chatWriter := emittingChatWriter{writer: s.store, emit: s.emit}
 	engine := pipeline.NewEngine(s.registry, s.llm, job.gate,
-		pipeline.WithReportWriter(s.store, pipeline.ReportContext{PipelineID: execution.PipelineID, ExecutionID: execution.ID}),
+		pipeline.WithReportWriter(reportWriter, pipeline.ReportContext{PipelineID: execution.PipelineID, ExecutionID: execution.ID}),
 		pipeline.WithFunctionResolver(s.store),
 		pipeline.WithNotificationSender(s.notifier),
-		pipeline.WithChatWriter(emittingChatWriter{writer: s.store, emit: s.emit}),
+		pipeline.WithChatWriter(chatWriter),
+		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, execution.PipelineID, execution.ID)),
 	)
 	result, runErr := engine.Execute(runCtx, job.definition, job.triggerNodeID, job.input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
@@ -478,11 +481,14 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 	}
 	s.emitEvent("execution:started", execution)
 
+	reportWriter := emittingReportWriter{writer: s.store, emit: s.emit}
+	chatWriter := emittingChatWriter{writer: s.store, emit: s.emit}
 	engine := pipeline.NewEngine(s.registry, s.llm, gate,
-		pipeline.WithReportWriter(s.store, pipeline.ReportContext{PipelineID: pipelineID, ExecutionID: execution.ID}),
+		pipeline.WithReportWriter(reportWriter, pipeline.ReportContext{PipelineID: pipelineID, ExecutionID: execution.ID}),
 		pipeline.WithFunctionResolver(s.store),
 		pipeline.WithNotificationSender(s.notifier),
-		pipeline.WithChatWriter(emittingChatWriter{writer: s.store, emit: s.emit}),
+		pipeline.WithChatWriter(chatWriter),
+		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, pipelineID, execution.ID)),
 	)
 	result, runErr := engine.Execute(ctx, definition, triggerNodeID, input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
@@ -603,6 +609,21 @@ func redactNodeRuns(runs []domain.NodeRun) []domain.NodeRun {
 		result[index].Output = security.Redact(run.Output)
 	}
 	return result
+}
+
+// emittingReportWriter keeps report creation decoupled from the renderer while
+// notifying an open Reports view only after the report is safely persisted.
+type emittingReportWriter struct {
+	writer pipeline.ReportWriter
+	emit   EventSink
+}
+
+func (w emittingReportWriter) CreateReport(ctx context.Context, report domain.Report) (domain.Report, error) {
+	created, err := w.writer.CreateReport(ctx, report)
+	if err == nil && w.emit != nil {
+		w.emit("reports.updated", nil)
+	}
+	return created, err
 }
 
 // emittingChatWriter keeps Blueprint chat nodes decoupled from Wails while

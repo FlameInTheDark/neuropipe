@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { Sidebar } from '@/components/Sidebar'
 import { TitleBar } from '@/components/TitleBar'
@@ -16,6 +16,7 @@ import { TriggersView } from '@/views/TriggersView'
 import { FunctionsView } from '@/views/FunctionsView'
 import { FunctionEditor } from '@/views/FunctionEditor'
 import { DocumentationDialog } from '@/components/DocumentationWorkspace'
+import { EventsOn } from '../wailsjs/runtime/runtime'
 
 const PipelineEditor = lazy(() => import('@/views/PipelineEditor').then((module) => ({ default: module.PipelineEditor })))
 const ReportsView = lazy(() => import('@/views/ReportsView').then((module) => ({ default: module.ReportsView })))
@@ -37,7 +38,7 @@ function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
 }
 
 export function App() {
-  const { screen, pipelineID, functionID, error, sidebarCollapsed, documentationDialog, closeDocumentation, setError } = useUIStore()
+  const { screen, pipelineID, functionID, error, sidebarCollapsed, documentationDialog, closeDocumentation, setError, setScreen } = useUIStore()
   const { t } = useTranslation()
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([])
   const [buttons, setButtons] = useState<TriggerBinding[]>([])
@@ -47,6 +48,7 @@ export function App() {
   const [functions, setFunctions] = useState<FunctionSummary[]>([])
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
+  const reportRefreshSequence = useRef(0)
 
   const refresh = useCallback(async () => {
     try {
@@ -61,7 +63,31 @@ export function App() {
     } finally { setLoading(false) }
   }, [setError])
 
+  const refreshReports = useCallback(async () => {
+    const sequence = ++reportRefreshSequence.current
+    try {
+      const nextReports = await withTimeout(desktop.listReports(), workspaceLoadTimeoutMs)
+      if (sequence !== reportRefreshSequence.current) return
+      setReports(nextReports)
+      setError()
+    } catch (reason) {
+      if (sequence !== reportRefreshSequence.current) return
+      setError(reason instanceof Error ? reason.message : i18n.t('app.unavailable'))
+    }
+  }, [setError])
+
   useEffect(() => { void refresh() }, [refresh])
+
+  useEffect(() => EventsOn('app.open.settings', () => setScreen('settings')), [setScreen])
+
+  useEffect(() => {
+    void desktop.configureTrayMenu({
+      show: t('tray.show'),
+      settings: t('tray.settings'),
+      hide: t('tray.hide'),
+      close: t('tray.close'),
+    }).catch(() => undefined)
+  }, [t])
 
   const content = () => {
     if (loading && screen !== 'editor') return <div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.opening')}</div>
@@ -69,7 +95,7 @@ export function App() {
       case 'pipelines': return <PipelinesView pipelines={pipelines} onRefresh={refresh} />
       case 'functions': return <FunctionsView functions={functions} onRefresh={refresh} />
       case 'function-editor': return functionID && <FunctionEditor functionID={functionID} definitions={nodes} onRefresh={refresh} />
-      case 'reports': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingReports')}</div>}><ReportsView reports={reports} onRefresh={refresh} /></Suspense>
+      case 'reports': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingReports')}</div>}><ReportsView reports={reports} onRefresh={refreshReports} /></Suspense>
       case 'metrics': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingMetrics')}</div>}><MetricsView pipelines={pipelines} /></Suspense>
       case 'schedules': return <SchedulesView schedules={schedules} onRefresh={refresh} />
       case 'settings': return settings && <SettingsView settings={settings} onSettingsChange={setSettings} onRefresh={refresh} />

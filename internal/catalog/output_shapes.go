@@ -13,15 +13,6 @@ var knownResultFields = map[string][]domain.DataField{
 		{Path: "headers", Label: "Headers", DataType: domain.DataObject, Description: "Response headers."},
 		{Path: "json", Label: "JSON", DataType: domain.DataAny, Description: "Parsed JSON response, when the body is JSON.", Optional: true},
 	},
-	"action:file_read": {
-		{Path: "file.path", Label: "Path", DataType: domain.DataText, Description: "Read file path."},
-		{Path: "file.content", Label: "Content", DataType: domain.DataText, Description: "File content as text."},
-		{Path: "file.json", Label: "JSON", DataType: domain.DataAny, Description: "Parsed JSON content, when available.", Optional: true},
-	},
-	"action:file_write": {
-		{Path: "file.path", Label: "Path", DataType: domain.DataText, Description: "Written file path."},
-		{Path: "file.written", Label: "Written", DataType: domain.DataBoolean, Description: "Whether the write completed."},
-	},
 	"action:terminal": {
 		{Path: "terminal.command", Label: "Command", DataType: domain.DataText, Description: "Command that was run."},
 		{Path: "terminal.output", Label: "Output", DataType: domain.DataText, Description: "Combined standard output and error."},

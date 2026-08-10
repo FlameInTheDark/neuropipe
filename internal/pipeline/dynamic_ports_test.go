@@ -103,8 +103,25 @@ func TestDefinitionForNodeBuildsTypedGetFieldOutputs(t *testing.T) {
 	if got, want := len(resolved.Outputs), 2; got != want {
 		t.Fatalf("output count = %d, want %d", got, want)
 	}
-	if got, want := resolved.Outputs[1], (domain.NodePort{ID: "output", Label: "Output", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataText, Color: "#e879f9", MaxConnections: 1}); !reflect.DeepEqual(got, want) {
+	if got, want := resolved.Outputs[1], (domain.NodePort{ID: "output", Label: "Output", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataText, Type: &domain.TypeSpec{Kind: domain.TypeString}, Color: "#e879f9", MaxConnections: 1}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("second output = %#v, want %#v", got, want)
+	}
+}
+
+func TestDefinitionForNodeBuildsTypeAssertContract(t *testing.T) {
+	definition, ok := catalog.New().Get("data:type_assert")
+	if !ok {
+		t.Fatal("Type Assert definition is missing")
+	}
+	resolved, err := definitionForNode(definition, domain.FlowNode{ID: "assert", Type: "data:type_assert", Data: map[string]any{"config": map[string]any{
+		"typeSpec": map[string]any{"kind": "record", "fields": []any{map[string]any{"id": "name", "name": "name", "type": map[string]any{"kind": "string"}}}},
+	}}})
+	if err != nil {
+		t.Fatalf("definitionForNode() error = %v", err)
+	}
+	got := resolved.Outputs[0].Type
+	if got == nil || got.Kind != domain.TypeRecord || len(got.Fields) != 1 || got.Fields[0].Type.Kind != domain.TypeString {
+		t.Fatalf("resolved Type Assert contract = %#v", got)
 	}
 }
 

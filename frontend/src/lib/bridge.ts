@@ -1,4 +1,4 @@
-import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CustomFunction, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, NodeExecutionMode, Pipeline, PipelineSummary, PluginStatus, Report, SecretMetadata, Settings, TriggerBinding, UpdateAvailability } from '@/lib/types'
+import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SecretMetadata, Settings, TrayMenuLabels, TriggerBinding, UpdateAvailability } from '@/lib/types'
 import i18n from '@/i18n'
 
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
@@ -20,12 +20,13 @@ export const desktop = {
   savePipeline: (pipeline: Pipeline) => call<Pipeline>('SavePipeline', pipeline),
   publishPipeline: (pipeline: Pipeline) => call<Pipeline>('PublishPipeline', pipeline),
   listNodes: () => call<NodeDefinition[]>('ListNodeDefinitions'),
+  validateJavaScript: (code: string) => call<void>('ValidateJavaScript', code),
   listDocumentation: (language: string) => call<DocumentationEntry[]>('ListDocumentation', language),
   getDocumentation: (language: string, id: string) => call<DocumentationDocument>('GetDocumentation', language, id),
   searchDocumentation: (language: string, query: string) => call<DocumentationSearchResult[]>('SearchDocumentation', language, query),
   getDocumentationForNode: (nodeType: string) => call<DocumentationReference>('GetDocumentationForNode', nodeType),
   listFunctions: () => call<FunctionSummary[]>('ListFunctions'),
-  createFunction: (name: string, mode: NodeExecutionMode) => call<CustomFunction>('CreateFunction', name, mode),
+  createFunction: (request: CreateFunctionRequest) => call<CustomFunction>('CreateFunction', request),
   getFunction: (id: string) => call<CustomFunction>('GetFunction', id),
   saveFunction: (item: CustomFunction) => call<CustomFunction>('SaveFunction', item),
   publishFunction: (item: CustomFunction) => call<CustomFunction>('PublishFunction', item),
@@ -57,6 +58,7 @@ export const desktop = {
   trustRevision: (pipelineId: string, revision: number) => call<void>('TrustPipelineRevision', pipelineId, revision),
   getSettings: () => call<Settings>('GetSettings'),
   saveSettings: (settings: Settings) => call<void>('SaveSettings', settings),
+	configureTrayMenu: (labels: TrayMenuLabels) => call<void>('ConfigureTrayMenu', labels),
   chooseContentDirectory: () => call<string>('ChooseContentDirectory'),
   getLlamaRuntimeStatus: () => call<LlamaRuntimeStatus>('GetLlamaRuntimeStatus'),
   startLlamaRuntime: () => call<LlamaRuntimeStatus>('StartLlamaRuntime'),

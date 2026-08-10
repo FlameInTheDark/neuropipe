@@ -14,12 +14,16 @@ export function ClearMetrics() {
   return window['go']['app']['Desktop']['ClearMetrics']();
 }
 
+export function ConfigureTrayMenu(arg1) {
+  return window['go']['app']['Desktop']['ConfigureTrayMenu'](arg1);
+}
+
 export function CreateChatConversation(arg1, arg2) {
   return window['go']['app']['Desktop']['CreateChatConversation'](arg1, arg2);
 }
 
-export function CreateFunction(arg1, arg2) {
-  return window['go']['app']['Desktop']['CreateFunction'](arg1, arg2);
+export function CreateFunction(arg1) {
+  return window['go']['app']['Desktop']['CreateFunction'](arg1);
 }
 
 export function CreatePipeline(arg1) {
@@ -290,6 +294,14 @@ export function SetScheduleEnabled(arg1, arg2) {
   return window['go']['app']['Desktop']['SetScheduleEnabled'](arg1, arg2);
 }
 
+export function ShouldHideToTrayOnClose() {
+  return window['go']['app']['Desktop']['ShouldHideToTrayOnClose']();
+}
+
+export function Shutdown(arg1) {
+  return window['go']['app']['Desktop']['Shutdown'](arg1);
+}
+
 export function StartLlamaRuntime() {
   return window['go']['app']['Desktop']['StartLlamaRuntime']();
 }
@@ -298,10 +310,18 @@ export function StartPublishedPipeline(arg1, arg2, arg3) {
   return window['go']['app']['Desktop']['StartPublishedPipeline'](arg1, arg2, arg3);
 }
 
+export function Startup(arg1) {
+  return window['go']['app']['Desktop']['Startup'](arg1);
+}
+
 export function StopLlamaRuntime() {
   return window['go']['app']['Desktop']['StopLlamaRuntime']();
 }
 
 export function TrustPipelineRevision(arg1, arg2) {
   return window['go']['app']['Desktop']['TrustPipelineRevision'](arg1, arg2);
+}
+
+export function ValidateJavaScript(arg1) {
+  return window['go']['app']['Desktop']['ValidateJavaScript'](arg1);
 }

@@ -15,9 +15,13 @@ const (
 	PipelineLegacy   PipelineStatus = "legacy"
 )
 
-// GraphSchemaV2 is the Blueprint-style graph format. V1 definitions are kept
-// as read-only migration references and are never executed by the desktop app.
+// GraphSchemaV2 is retained only so persisted v2 graphs can be identified and
+// migrated. New Blueprint graphs use GraphSchemaV3.
 const GraphSchemaV2 = 2
+
+// GraphSchemaV3 adds explicit recursive wire contracts. V2's DataType values
+// were display hints, while V3 types are enforced before and during execution.
+const GraphSchemaV3 = 3
 
 // PinKind separates control flow from values. Only exec pins can execute a
 // node; data pins are resolved by the active execution frame on demand.
@@ -26,6 +30,9 @@ type PinKind string
 const (
 	PinExec PinKind = "exec"
 	PinData PinKind = "data"
+	// PinTool connects a published LLM tool function to an AI node. It is
+	// declarative: unlike an Exec pin it never participates in graph traversal.
+	PinTool PinKind = "tool"
 )
 
 // PinDirection identifies which side of a node owns a pin.
@@ -47,6 +54,43 @@ const (
 	DataObject  DataType = "object"
 	DataList    DataType = "list"
 )
+
+// TypeKind is the JSON-safe subset of Go types available on Blueprint data
+// pins. Conversion is never implicit: an int is not a float or string merely
+// because the runtime could represent it that way.
+type TypeKind string
+
+const (
+	TypeAny    TypeKind = "any"
+	TypeBool   TypeKind = "bool"
+	TypeString TypeKind = "string"
+	TypeInt    TypeKind = "int"
+	TypeFloat  TypeKind = "float"
+	TypeBytes  TypeKind = "bytes"
+	TypeList   TypeKind = "list"
+	TypeMap    TypeKind = "map"
+	TypeRecord TypeKind = "record"
+)
+
+// TypeSpec declares the complete contract of a data pin. Name makes a record
+// nominal (like a named Go struct); unnamed records are structural contracts.
+// Element, Key, Value, and Fields are used only by their matching Kind.
+type TypeSpec struct {
+	Kind    TypeKind        `json:"kind"`
+	Name    string          `json:"name,omitempty"`
+	Element *TypeSpec       `json:"element,omitempty"`
+	Key     *TypeSpec       `json:"key,omitempty"`
+	Value   *TypeSpec       `json:"value,omitempty"`
+	Fields  []TypeFieldSpec `json:"fields,omitempty"`
+}
+
+// TypeFieldSpec is one field within a structural or named record contract.
+type TypeFieldSpec struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Type     TypeSpec `json:"type"`
+	Optional bool     `json:"optional,omitempty"`
+}
 
 // NodeExecutionMode determines how a node participates in a Blueprint graph.
 type NodeExecutionMode string
@@ -416,6 +460,7 @@ type NodePort struct {
 	Kind           PinKind      `json:"kind"`
 	Direction      PinDirection `json:"direction"`
 	DataType       DataType     `json:"dataType,omitempty"`
+	Type           *TypeSpec    `json:"type,omitempty"`
 	Fields         []DataField  `json:"fields,omitempty"`
 	Color          string       `json:"color,omitempty"`
 	Required       bool         `json:"required,omitempty"`
@@ -435,12 +480,36 @@ type DataField struct {
 }
 
 // FunctionPin describes a stable public data contract for a custom function.
+// Description is model-facing guidance when the function is exposed as an LLM
+// tool. It explains the meaning and constraints of the value without changing
+// its strict TypeSpec.
 type FunctionPin struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	DataType DataType `json:"dataType"`
-	Required bool     `json:"required,omitempty"`
-	Default  any      `json:"default,omitempty"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	DataType    DataType  `json:"dataType"`
+	Type        *TypeSpec `json:"type,omitempty"`
+	Required    bool      `json:"required,omitempty"`
+	Default     any       `json:"default,omitempty"`
+}
+
+// FunctionKind determines how a published function is exposed in the node
+// catalogue. Standard functions are callable Blueprint nodes; tool functions
+// can only be connected to an LLM node's Tools pin.
+type FunctionKind string
+
+const (
+	FunctionStandard FunctionKind = "function"
+	FunctionTool     FunctionKind = "tool"
+)
+
+// CreateFunctionRequest contains the metadata selected before opening a new
+// function canvas. Tool functions always execute as an impure subgraph.
+type CreateFunctionRequest struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Kind        FunctionKind      `json:"kind"`
+	Mode        NodeExecutionMode `json:"mode"`
 }
 
 // CustomFunction is a globally reusable, versioned Blueprint function.
@@ -452,6 +521,7 @@ type CustomFunction struct {
 	Icon              string            `json:"icon"`
 	IconColor         string            `json:"iconColor"`
 	IconBackground    string            `json:"iconBackground"`
+	Kind              FunctionKind      `json:"kind"`
 	Mode              NodeExecutionMode `json:"mode"`
 	Inputs            []FunctionPin     `json:"inputs"`
 	Outputs           []FunctionPin     `json:"outputs"`
@@ -470,6 +540,7 @@ type FunctionSummary struct {
 	Icon              string            `json:"icon"`
 	IconColor         string            `json:"iconColor"`
 	IconBackground    string            `json:"iconBackground"`
+	Kind              FunctionKind      `json:"kind"`
 	Mode              NodeExecutionMode `json:"mode"`
 	PublishedRevision int               `json:"publishedRevision"`
 	UpdatedAt         time.Time         `json:"updatedAt"`
@@ -521,6 +592,7 @@ type MetricsSettings struct {
 
 type Settings struct {
 	Language          string `json:"language"`
+	HideToTrayOnClose bool   `json:"hideToTrayOnClose"`
 	DefaultProviderID string `json:"defaultProviderId"`
 	ContentDirectory  string `json:"contentDirectory"`
 	RetentionDays     int    `json:"retentionDays"`

@@ -1,11 +1,24 @@
 package pipeline
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/typespec"
 )
+
+// definitionForRegisteredNode asks a first-party module to resolve its own
+// dynamic ports. The legacy fallback remains only for plugin and custom
+// function definitions that do not carry a registered module handler.
+func definitionForRegisteredNode(registry *catalog.Registry, definition domain.NodeDefinition, node domain.FlowNode) (domain.NodeDefinition, error) {
+	if module, exists := registry.Node(node.Type); exists {
+		return module.Resolve(node)
+	}
+	return definitionForNode(definition, node)
+}
 
 // definitionForNode expands configuration-driven pins. Keeping this in the
 // runtime layer makes the editor, validator, and interpreter agree on the
@@ -35,6 +48,43 @@ func definitionForNode(definition domain.NodeDefinition, node domain.FlowNode) (
 			return definition, err
 		}
 		definition.Outputs = ports
+	case "data:constant":
+		if dataType, ok := constantOutputType(config, definition.DefaultConfig); ok {
+			outputs := make([]domain.NodePort, len(definition.Outputs))
+			copy(outputs, definition.Outputs)
+			for index := range outputs {
+				outputs[index].DataType = dataType
+				typeSpec := typespec.FromDataType(dataType)
+				outputs[index].Type = &typeSpec
+				outputs[index].Color = dataTypeColor(dataType)
+			}
+			definition.Outputs = outputs
+		}
+	case "data:cast":
+		if dataType, ok := castOutputType(config); ok {
+			outputs := make([]domain.NodePort, len(definition.Outputs))
+			copy(outputs, definition.Outputs)
+			for index := range outputs {
+				outputs[index].DataType = dataType
+				typeSpec := typespec.FromDataType(dataType)
+				outputs[index].Type = &typeSpec
+				outputs[index].Color = dataTypeColor(dataType)
+			}
+			definition.Outputs = outputs
+		}
+	case "data:type_assert":
+		typeSpec, err := typeAssertOutputSpec(config, definition.DefaultConfig)
+		if err != nil {
+			return definition, err
+		}
+		outputs := make([]domain.NodePort, len(definition.Outputs))
+		copy(outputs, definition.Outputs)
+		for index := range outputs {
+			outputs[index].DataType = dataTypeForSpec(typeSpec)
+			outputs[index].Type = &typeSpec
+			outputs[index].Color = dataTypeColor(outputs[index].DataType)
+		}
+		definition.Outputs = outputs
 	case "data:build_object":
 		// Graphs saved before configurable Build Object inputs retain their
 		// explicit Key/Value pins until a user upgrades the node in the editor.
@@ -48,6 +98,55 @@ func definitionForNode(definition domain.NodeDefinition, node domain.FlowNode) (
 		definition.Inputs = ports
 	}
 	return definition, nil
+}
+
+func typeAssertOutputSpec(config, defaults map[string]any) (domain.TypeSpec, error) {
+	raw, exists := config["typeSpec"]
+	if !exists {
+		raw = defaults["typeSpec"]
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return domain.TypeSpec{}, fmt.Errorf("type contract must be JSON data: %w", err)
+	}
+	var typeSpec domain.TypeSpec
+	if err := json.Unmarshal(encoded, &typeSpec); err != nil {
+		return domain.TypeSpec{}, fmt.Errorf("type contract is invalid: %w", err)
+	}
+	if err := typespec.ValidateSpec(typeSpec); err != nil {
+		return domain.TypeSpec{}, fmt.Errorf("type contract is invalid: %w", err)
+	}
+	return typeSpec, nil
+}
+
+func dataTypeForSpec(typeSpec domain.TypeSpec) domain.DataType {
+	switch typeSpec.Kind {
+	case domain.TypeString:
+		return domain.DataText
+	case domain.TypeInt, domain.TypeFloat:
+		return domain.DataNumber
+	case domain.TypeBool:
+		return domain.DataBoolean
+	case domain.TypeList:
+		return domain.DataList
+	case domain.TypeMap, domain.TypeRecord:
+		return domain.DataObject
+	default:
+		return domain.DataAny
+	}
+}
+
+func castOutputType(config map[string]any) (domain.DataType, bool) {
+	switch target := strings.TrimSpace(fmt.Sprint(config["target"])); target {
+	case "text":
+		return domain.DataText, true
+	case "number":
+		return domain.DataNumber, true
+	case "boolean":
+		return domain.DataBoolean, true
+	default:
+		return "", false
+	}
 }
 
 type fieldOutput struct {
@@ -117,7 +216,8 @@ func getFieldOutputPorts(config, defaults map[string]any) ([]domain.NodePort, er
 	}
 	ports := make([]domain.NodePort, 0, len(outputs))
 	for _, output := range outputs {
-		ports = append(ports, domain.NodePort{ID: output.ID, Label: output.Label, Kind: domain.PinData, Direction: domain.PinOutput, DataType: output.DataType, Color: dataTypeColor(output.DataType), MaxConnections: 1})
+		typeSpec := typespec.FromDataType(output.DataType)
+		ports = append(ports, domain.NodePort{ID: output.ID, Label: output.Label, Kind: domain.PinData, Direction: domain.PinOutput, DataType: output.DataType, Type: &typeSpec, Color: dataTypeColor(output.DataType), MaxConnections: 1})
 	}
 	return ports, nil
 }
@@ -188,7 +288,8 @@ func objectFieldInputPorts(config, defaults map[string]any) ([]domain.NodePort, 
 	}
 	ports := make([]domain.NodePort, 0, len(fields))
 	for _, field := range fields {
-		ports = append(ports, domain.NodePort{ID: field.ID, Label: field.Label, Kind: domain.PinData, Direction: domain.PinInput, DataType: field.DataType, Color: dataTypeColor(field.DataType), MaxConnections: 1})
+		typeSpec := typespec.FromDataType(field.DataType)
+		ports = append(ports, domain.NodePort{ID: field.ID, Label: field.Label, Kind: domain.PinData, Direction: domain.PinInput, DataType: field.DataType, Type: &typeSpec, Color: dataTypeColor(field.DataType), MaxConnections: 1})
 	}
 	return ports, nil
 }
@@ -220,6 +321,23 @@ func dataTypeColor(dataType domain.DataType) string {
 	default:
 		return "#a1a1aa"
 	}
+}
+
+// constantOutputType maps the Constant node's inspector Type to the output pin
+// DataType. Only an explicit node-level type is honoured: legacy nodes without
+// a Type keep their untyped pin so existing graphs stay valid.
+func constantOutputType(config, defaults map[string]any) (domain.DataType, bool) {
+	target, exists := config["type"]
+	if !exists {
+		return "", false
+	}
+	if typed, ok := target.(string); ok {
+		switch domain.DataType(typed) {
+		case domain.DataText, domain.DataNumber, domain.DataBoolean:
+			return domain.DataType(typed), true
+		}
+	}
+	return "", false
 }
 
 func validDataType(dataType domain.DataType) bool {

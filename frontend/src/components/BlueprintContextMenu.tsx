@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Copy, Plus, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ContextMenu } from "@/components/ContextMenu";
 import { Tooltip } from "@/components/ui/tooltip";
 import { usePersistedCollapsedSections } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
@@ -61,11 +62,12 @@ export function BlueprintContextMenu({
 
   if (menu.edgeID && onRemoveEdge) {
     return (
-      <div
-        role="menu"
-        aria-label={t("canvas.connectionOptions")}
-        className="absolute z-30 w-52 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl"
-        style={{ left: menu.x, top: menu.y }}
+      <ContextMenu
+        position={{ x: menu.x, y: menu.y }}
+        ariaLabel={t("canvas.connectionOptions")}
+        className="w-52"
+        positionMode="absolute"
+        onClose={onClose}
       >
         {onInsertReroute ? (
           <button
@@ -93,21 +95,23 @@ export function BlueprintContextMenu({
           {t("canvas.removeConnection")}
         </button>
         {onInsertReroute ? <p className="border-t border-zinc-800 px-2.5 py-2 text-[10px] leading-4 text-zinc-600">{t("canvas.reconnectHint")}</p> : null}
-      </div>
+      </ContextMenu>
     );
   }
 
   return (
-    <div
-      role="menu"
-      aria-label={t("canvas.options")}
-      className="absolute z-30 w-80 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl"
-      style={{ left: menu.x, top: menu.y }}
+    <ContextMenu
+      position={{ x: menu.x, y: menu.y }}
+      ariaLabel={t("canvas.options")}
+      className="w-80 p-0"
+      positionMode="absolute"
+      onClose={onClose}
     >
       <div className="flex items-center border-b border-zinc-800 px-2 py-2">
         <Search className="mr-2 size-3.5 text-zinc-600" />
         <input
           autoFocus
+          data-context-menu-initial-focus
           value={search}
           onChange={(event) => onSearch(event.target.value)}
           onKeyDown={(event) => {
@@ -153,6 +157,6 @@ export function BlueprintContextMenu({
       <div className="border-t border-zinc-800 px-3 py-2 text-[10px] text-zinc-600">
         {t("canvas.hint")}
       </div>
-    </div>
+    </ContextMenu>
   );
 }
