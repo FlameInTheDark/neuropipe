@@ -14,6 +14,149 @@ import (
 )
 
 const blueprintCatalogMigrationKey = "migration.blueprint-catalog-v3"
+const rerouteWaypointMigrationKey = "migration.reroute-waypoints-v1"
+
+// migrateRerouteWaypoints replaces the old transparent reroute runtime nodes
+// with editor-only points on direct wires. Published revisions remain readable
+// through the legacy registrations; all editable drafts are upgraded once.
+func (s *Store) migrateRerouteWaypoints(ctx context.Context) error {
+	var completed string
+	err := statements(s.db).Select("value").From("settings").Where(squirrel.Eq{"key": rerouteWaypointMigrationKey}).QueryRowContext(ctx).Scan(&completed)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("read reroute waypoint migration marker: %w", err)
+	}
+	rows, err := statements(s.db).Select("id", "draft_definition").From("pipelines").Where("draft_definition LIKE ? OR draft_definition LIKE ?", "%flow:reroute%", "%data:reroute%").QueryContext(ctx)
+	if err != nil {
+		return fmt.Errorf("scan reroute drafts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	type candidate struct {
+		id         string
+		definition domain.FlowDefinition
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var item candidate
+		var raw string
+		if err := rows.Scan(&item.id, &raw); err != nil {
+			return err
+		}
+		if err := decode(raw, &item.definition); err != nil {
+			return fmt.Errorf("decode reroute draft %q: %w", item.id, err)
+		}
+		candidates = append(candidates, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, item := range candidates {
+		next, err := collapseRerouteNodes(item.definition)
+		if err != nil {
+			return fmt.Errorf("migrate pipeline %q reroutes: %w", item.id, err)
+		}
+		encoded, err := encode(next)
+		if err != nil {
+			return err
+		}
+		if _, err := statements(tx).Update("pipelines").Set("draft_definition", encoded).Set("status", domain.PipelineDraft).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"id": item.id}).ExecContext(ctx); err != nil {
+			return err
+		}
+	}
+	functionRows, err := statements(tx).Select("id", "draft_definition").From("functions").Where("draft_definition LIKE ? OR draft_definition LIKE ?", "%flow:reroute%", "%data:reroute%").QueryContext(ctx)
+	if err != nil {
+		return fmt.Errorf("scan function reroute drafts: %w", err)
+	}
+	defer func() { _ = functionRows.Close() }()
+	var functions []candidate
+	for functionRows.Next() {
+		var item candidate
+		var raw string
+		if err := functionRows.Scan(&item.id, &raw); err != nil {
+			return err
+		}
+		if err := decode(raw, &item.definition); err != nil {
+			return fmt.Errorf("decode function reroute draft %q: %w", item.id, err)
+		}
+		functions = append(functions, item)
+	}
+	if err := functionRows.Err(); err != nil {
+		return err
+	}
+	for _, item := range functions {
+		next, err := collapseRerouteNodes(item.definition)
+		if err != nil {
+			return fmt.Errorf("migrate function %q reroutes: %w", item.id, err)
+		}
+		encoded, err := encode(next)
+		if err != nil {
+			return err
+		}
+		if _, err := statements(tx).Update("functions").Set("draft_definition", encoded).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"id": item.id}).ExecContext(ctx); err != nil {
+			return err
+		}
+	}
+	if _, err := statements(tx).Insert("settings").Columns("key", "value").Values(rerouteWaypointMigrationKey, stamp(time.Now().UTC())).ExecContext(ctx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func collapseRerouteNodes(definition domain.FlowDefinition) (domain.FlowDefinition, error) {
+	for _, node := range definition.Nodes {
+		if node.Type != "flow:reroute" && node.Type != "data:reroute" {
+			continue
+		}
+		var incoming, outgoing []domain.FlowEdge
+		for _, edge := range definition.Edges {
+			if edge.Target == node.ID {
+				incoming = append(incoming, edge)
+			}
+			if edge.Source == node.ID {
+				outgoing = append(outgoing, edge)
+			}
+		}
+		if len(incoming) != 1 || len(outgoing) == 0 {
+			return definition, fmt.Errorf("reroute %q must have one input and at least one output", node.ID)
+		}
+		if incoming[0].Kind != "" && outgoing[0].Kind != "" && incoming[0].Kind != outgoing[0].Kind {
+			return definition, fmt.Errorf("reroute %q mixes pin kinds", node.ID)
+		}
+		nextEdges := make([]domain.FlowEdge, 0, len(definition.Edges)-1+len(outgoing))
+		for _, edge := range definition.Edges {
+			if edge.Source != node.ID && edge.Target != node.ID {
+				nextEdges = append(nextEdges, edge)
+			}
+		}
+		// A collapsed relay contributes every preceding waypoint (including any
+		// already migrated upstream reroutes), then its own canvas position, in
+		// wire order, ahead of the waypoints the outgoing wire already carried.
+		prefix := make([]domain.Position, 0, len(incoming[0].Waypoints)+1)
+		prefix = append(prefix, incoming[0].Waypoints...)
+		prefix = append(prefix, domain.Position{X: node.Position.X, Y: node.Position.Y})
+		for _, edge := range outgoing {
+			edge.Source, edge.SourceHandle = incoming[0].Source, incoming[0].SourceHandle
+			edge.Waypoints = append(append([]domain.Position(nil), prefix...), edge.Waypoints...)
+			nextEdges = append(nextEdges, edge)
+		}
+		definition.Edges = nextEdges
+		kept := make([]domain.FlowNode, 0, len(definition.Nodes)-1)
+		for _, candidate := range definition.Nodes {
+			if candidate.ID != node.ID {
+				kept = append(kept, candidate)
+			}
+		}
+		definition.Nodes = kept
+	}
+	return definition, nil
+}
 
 // migrateBlueprintCatalog converts only unambiguous packet-era draft nodes to
 // their Blueprint-v2 equivalents. Immutable revisions and execution history

@@ -63,6 +63,30 @@ func TestNamedRecordRequiresItsNamedGoValue(t *testing.T) {
 	}
 }
 
+func TestValidateValueAcceptsNumericKindsForFloatContracts(t *testing.T) {
+	// JSON has one number domain. Producers may hand execution a Go int (e.g.
+	// HTTP status codes) or a float64 (decoded JSON), and both satisfy a
+	// declared number contract; the strict int→float pin rule is connection
+	// assignability, not value validation.
+	for _, value := range []any{200, int64(200), uint(200), float32(200), float64(200)} {
+		if err := ValidateValue(value, Float()); err != nil {
+			t.Fatalf("ValidateValue(%T) error = %v", value, err)
+		}
+	}
+	if err := ValidateValue(1, Int()); err != nil {
+		t.Fatalf("ValidateValue(1, int) error = %v", err)
+	}
+	if err := ValidateValue(1.0, Int()); err == nil {
+		t.Fatal("ValidateValue() accepted a float for an int contract")
+	}
+	if err := ValidateValue("200", Float()); err == nil {
+		t.Fatal("ValidateValue() accepted a string for a float contract")
+	}
+	if err := ValidateValue(map[string]any{"age": int(37)}, domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{{Name: "age", Type: Float()}}}); err != nil {
+		t.Fatalf("record with an int age should pass a float field contract: %v", err)
+	}
+}
+
 func TestValidateSpec(t *testing.T) {
 	text := String()
 	if err := ValidateSpec(domain.TypeSpec{Kind: domain.TypeList, Element: &text}); err != nil {

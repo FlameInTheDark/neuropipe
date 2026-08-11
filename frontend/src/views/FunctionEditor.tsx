@@ -68,6 +68,7 @@ import type {
 import { useConfirmationStore } from "@/stores/confirmation";
 import { useUIStore } from "@/stores/ui";
 import { useTranslation } from "react-i18next";
+import { BlueprintWaypointEdge, waypointMoveEvent, waypointRemoveEvent } from "@/components/BlueprintWaypointEdge";
 
 type EditorNode = FlowNode & {
   data: {
@@ -171,6 +172,7 @@ function FunctionGraphNode({ data, selected }: NodeProps<EditorNode>) {
   );
 }
 const graphTypes = { functionNode: FunctionGraphNode };
+const edgeTypes = { waypoint: BlueprintWaypointEdge };
 
 export function FunctionEditor({
   functionID,
@@ -202,6 +204,23 @@ export function FunctionEditor({
   );
   const [flow, setFlow] = useState<ReactFlowInstance<EditorNode, FlowEdge>>();
   const canvasRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const move = (event: Event) => {
+			const detail = (event as CustomEvent<{ edgeID: string; index: number; position: { x: number; y: number } }>).detail;
+			if (!detail) return;
+			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).map((point, index) => index === detail.index ? detail.position : point) }));
+			setDirty(true);
+		};
+		const remove = (event: Event) => {
+			const detail = (event as CustomEvent<{ edgeID: string; index: number }>).detail;
+			if (!detail) return;
+			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).filter((_, index) => index !== detail.index) }));
+			setDirty(true);
+		};
+		window.addEventListener(waypointMoveEvent, move);
+		window.addEventListener(waypointRemoveEvent, remove);
+		return () => { window.removeEventListener(waypointMoveEvent, move); window.removeEventListener(waypointRemoveEvent, remove); };
+	}, []);
   const reconnectRef = useRef<ReconnectState>();
   const load = useCallback(async () => {
     try {
@@ -209,7 +228,7 @@ export function FunctionEditor({
       const next = await desktop.getFunction(functionID);
       setItem(next);
       setNodes(hydrate(next, definitions));
-      setEdges(next.draftDefinition.edges ?? []);
+      setEdges((next.draftDefinition.edges ?? []).map((edge) => (edge.waypoints && edge.waypoints.length > 0 ? { ...edge, type: "waypoint" } : edge)));
       setDirty(false);
     } catch (reason) {
       setError(
@@ -258,7 +277,7 @@ export function FunctionEditor({
   const availableDefinitions = useMemo(
     () =>
       definitions.filter((definition) => {
-        if (definition.type.startsWith("trigger:") || isFunctionBoundary(definition.type)) return false;
+        if (definition.type.startsWith("trigger:") || isFunctionBoundary(definition.type) || definition.type === "data:reroute" || definition.type === "flow:reroute") return false;
         return item?.mode !== "pure" || definition.mode === "pure" || definition.mode === "visual";
       }),
     [definitions, item?.mode],
@@ -513,16 +532,7 @@ export function FunctionEditor({
   const insertReroute = useCallback((edgeID: string, position: { x: number; y: number }) => {
     const edge = edges.find((item) => item.id === edgeID);
     if (!edge) return;
-    const type = edge.kind === "exec" ? "flow:reroute" : "data:reroute";
-    const definition = availableDefinitions.find((item) => item.type === type);
-    if (!definition) return;
-    const id = addNode(definition, { x: position.x - 10, y: position.y - 10 });
-    const inputHandle = edge.kind === "exec" ? "in" : "value";
-    const outputHandle = edge.kind === "exec" ? "out" : "value";
-    setEdges((current) => current.flatMap((item) => item.id === edgeID ? [
-      { ...item, id: crypto.randomUUID(), target: id, targetHandle: inputHandle, selected: false },
-      { ...item, id: crypto.randomUUID(), source: id, sourceHandle: outputHandle, selected: false },
-    ] : [item]));
+    setEdges((current) => current.map((item) => item.id === edgeID ? { ...item, waypoints: [...(item.waypoints ?? []), position] } : item));
     setDirty(true);
   }, [addNode, availableDefinitions, edges]);
   const openMenu = (
@@ -578,6 +588,15 @@ export function FunctionEditor({
     setMenu(undefined);
     setConnecting(undefined);
   }, [addNode, menu, nodes]);
+  const menuDefinitions = useMemo(() => {
+    const source = menu?.source ? nodes.find((node) => node.id === menu.source) : undefined;
+    const sourcePin = source?.data.outputs.find((pin) => pin.id === menu?.sourceHandle);
+    const query = menuQuery.trim().toLocaleLowerCase();
+    return availableDefinitions.filter((definition) =>
+      `${definition.label} ${definition.category} ${definition.description}`.toLocaleLowerCase().includes(query) &&
+      (!sourcePin || graphInputs(definition.type, definition, item, structuredClone(definition.defaultConfig ?? {})).some((input) => compatiblePins(sourcePin, input))),
+    );
+  }, [availableDefinitions, item, menu?.source, menu?.sourceHandle, menuQuery, nodes]);
   const drop = (event: React.DragEvent) => {
     event.preventDefault();
     const type = event.dataTransfer.getData("application/neuropipe-function-node");
@@ -724,7 +743,12 @@ export function FunctionEditor({
           <ReactFlow
             className="select-none"
             nodes={nodes}
-            edges={edges}
+            edges={edges.map((edge) =>
+              edge.waypoints && edge.waypoints.length > 0
+                ? { ...edge, type: "waypoint", data: { waypoints: edge.waypoints } }
+                : { ...edge },
+            )}
+            edgeTypes={edgeTypes}
             nodeTypes={graphTypes}
             defaultEdgeOptions={defaultEdgeOptions}
             onNodesChange={onNodesChange}
@@ -792,7 +816,7 @@ export function FunctionEditor({
           {menu ? (
             <BlueprintContextMenu
               menu={menu}
-              definitions={availableDefinitions}
+              definitions={menuDefinitions}
               search={menuQuery}
               onSearch={setMenuQuery}
               onAdd={(definition) => {
@@ -858,13 +882,7 @@ export function FunctionEditor({
               <span className="flex gap-1"><LucideIconPicker value={item.icon} label={t("functionEditor.icon")} iconColor={item.iconColor} iconBackground={item.iconBackground} onValueChange={(icon) => update({ icon })} /><IconAppearancePicker iconColor={item.iconColor} iconBackground={item.iconBackground} onIconColorChange={(iconColor) => update({ iconColor })} onIconBackgroundChange={(iconBackground) => update({ iconBackground })} /></span>
             </div>
           </section>
-          {selectedDefinition?.fields.some(
-            (field) =>
-              field.kind === "field-outputs" ||
-              field.kind === "object-fields" ||
-              field.kind === "switch-cases" ||
-              field.kind === "javascript-editor",
-          ) ? (
+          {selectedDefinition?.fields.length ? (
             <section className="mt-6 space-y-3">
               <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-zinc-600">
                 {t("editor.configureNode")}
@@ -916,7 +934,16 @@ export function FunctionEditor({
                     />
                   );
                 }
-                return null;
+                if (field.kind === "boolean") {
+                  return <div key={field.name} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"><span className="text-xs text-zinc-400">{field.label}</span><Switch checked={Boolean(value)} onCheckedChange={(next) => updateNodeConfig(field.name, next)} label={field.label} /></div>;
+                }
+                if (field.kind === "select" || field.kind === "wire-representation") {
+                  return <label key={field.name} className="block text-xs font-medium text-zinc-400"><span className="mb-1.5 block">{field.label}</span><Select value={String(value ?? "")} onValueChange={(next) => updateNodeConfig(field.name, next)} ariaLabel={field.label} options={(field.options ?? []).map((option) => ({ value: option.value, label: option.label }))} placeholder={field.placeholder} /></label>;
+                }
+                if (field.kind === "textarea" || field.kind === "json" || field.kind === "type-spec") {
+                  return <label key={field.name} className="block text-xs font-medium text-zinc-400"><span className="mb-1.5 block">{field.label}</span><textarea value={typeof value === "string" ? value : JSON.stringify(value ?? {}, null, 2)} onChange={(event) => updateNodeConfig(field.name, event.target.value)} placeholder={field.placeholder} className="min-h-24 w-full resize-y rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-xs text-zinc-200 outline-none focus:border-zinc-500" /></label>;
+                }
+                return <label key={field.name} className="block text-xs font-medium text-zinc-400"><span className="mb-1.5 block">{field.label}</span><Input type={field.kind === "number" ? "number" : "text"} value={String(value ?? "")} onChange={(event) => updateNodeConfig(field.name, event.target.value)} placeholder={field.placeholder} /></label>;
               })}
             </section>
           ) : null}

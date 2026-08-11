@@ -89,6 +89,9 @@ func TestHTTPResultCanFeedBreakObject(t *testing.T) {
 		v2Node("break", "data:break_object", map[string]any{"outputs": []any{
 			map[string]any{"id": "body", "label": "Body", "path": "body", "dataType": "text"},
 			map[string]any{"id": "headers", "label": "Headers", "path": "headers", "dataType": "object"},
+			// HTTP status is a Go int inside the packet; a declared number
+			// (float) contract must still accept it.
+			map[string]any{"id": "status", "label": "Status", "path": "status", "dataType": "number"},
 		}}),
 		v2Node("notice", "action:notification", map[string]any{"title": "HTTP"}),
 	}, Edges: []domain.FlowEdge{
@@ -99,10 +102,62 @@ func TestHTTPResultCanFeedBreakObject(t *testing.T) {
 	}}
 
 	sender := &recordingNotificationSender{}
+	result, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, run := range result.NodeRuns {
+		if run.NodeID != "break" {
+			continue
+		}
+		outputs, ok := run.Output.(map[string]any)
+		if !ok {
+			t.Fatalf("break output = %#v", run.Output)
+		}
+		if got, ok := outputs["status"]; !ok || got != 200 {
+			t.Fatalf("break status = %#v, want 200", outputs["status"])
+		}
+	}
+	if got, want := sender.calls, []notificationCall{{title: "HTTP", message: "Blueprint ready"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notifications = %#v, want %#v", got, want)
+	}
+}
+
+// Regression: an HTTP status (a Go int) compared through Break Object → Equals
+// with a Constant number (a float64) must report equality.
+func TestHTTPStatusSurvivesBreakObjectIntoEqualsAgainstConstant(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("request", "action:http", map[string]any{"url": server.URL, "method": "GET"}),
+		v2Node("break", "data:break_object", map[string]any{"outputs": []any{
+			map[string]any{"id": "status", "label": "Status", "path": "status", "dataType": "number"},
+		}}),
+		v2Node("constant", "data:constant", map[string]any{"value": 200.0}),
+		v2Node("equal", "data:equals", nil),
+		v2Node("branch", "flow:branch", nil),
+		v2Node("match", "action:notification", map[string]any{"title": "Status", "message": "OK"}),
+		v2Node("mismatch", "action:notification", map[string]any{"title": "Status", "message": "Unexpected"}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("start-request", "start", "out", "request", "in"),
+		execEdge("request-branch", "request", "out", "branch", "in"),
+		dataEdge("request-break", "request", "result", "break", "source"),
+		dataEdge("break-equal", "break", "status", "equal", "left"),
+		dataEdge("constant-equal", "constant", "value", "equal", "right"),
+		dataEdge("equal-branch", "equal", "value", "branch", "condition"),
+		execEdge("branch-match", "branch", "true", "match", "in"),
+		execEdge("branch-mismatch", "branch", "false", "mismatch", "in"),
+	}}
+
+	sender := &recordingNotificationSender{}
 	if _, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got, want := sender.calls, []notificationCall{{title: "HTTP", message: "Blueprint ready"}}; !reflect.DeepEqual(got, want) {
+	if got, want := sender.calls, []notificationCall{{title: "Status", message: "OK"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("notifications = %#v, want %#v", got, want)
 	}
 }
@@ -179,6 +234,31 @@ func TestBlueprintCachesPureDataAndRoutesExec(t *testing.T) {
 	}
 	if pureRuns != 1 {
 		t.Fatalf("pure value evaluations = %d, want one cached evaluation", pureRuns)
+	}
+}
+
+func TestBlueprintWaypointEdgesExecuteLikeDirectEdges(t *testing.T) {
+	waypoints := []domain.Position{{X: 40, Y: 60}, {X: -10, Y: 200}}
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("truth", "data:constant", map[string]any{"value": true, "type": "boolean"}),
+		v2Node("branch", "flow:branch", nil),
+		v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
+	}, Edges: []domain.FlowEdge{
+		{ID: "start-branch", Source: "start", SourceHandle: "out", Target: "branch", TargetHandle: "in", Kind: domain.PinExec, Waypoints: waypoints},
+		{ID: "truth-condition", Source: "truth", SourceHandle: "value", Target: "branch", TargetHandle: "condition", Kind: domain.PinData, Waypoints: waypoints},
+		{ID: "branch-notice", Source: "branch", SourceHandle: "true", Target: "notice", TargetHandle: "in", Kind: domain.PinExec, Waypoints: waypoints[:1]},
+	}}
+	sender := &recordingNotificationSender{}
+	result, err := NewEngine(catalog.New(), nil, nil, WithNotificationSender(sender)).Execute(context.Background(), flow, "start", Packet{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(sender.calls) != 1 || sender.calls[0].message != "Done" {
+		t.Fatalf("notifications = %#v", sender.calls)
+	}
+	if len(result.NodeRuns) != 4 || result.NodeRuns[2].NodeID != "branch" || result.NodeRuns[3].NodeID != "notice" {
+		t.Fatalf("NodeRuns = %#v", result.NodeRuns)
 	}
 }
 

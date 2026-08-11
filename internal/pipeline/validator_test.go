@@ -26,6 +26,47 @@ func TestValidateAcceptsTypedDataAndExecEdges(t *testing.T) {
 	}
 }
 
+func TestValidateV3AcceptsWaypointEdgesAsDirectWires(t *testing.T) {
+	waypoints := []domain.Position{{X: 120, Y: 240}, {X: 300, Y: 80}}
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("constant", "data:constant", map[string]any{"value": true, "type": "boolean"}),
+		v2Node("branch", "flow:branch", nil),
+		v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
+	}, Edges: []domain.FlowEdge{
+		{ID: "exec", Source: "start", SourceHandle: "out", Target: "branch", TargetHandle: "in", Kind: domain.PinExec, Waypoints: waypoints},
+		{ID: "data", Source: "constant", SourceHandle: "value", Target: "branch", TargetHandle: "condition", Kind: domain.PinData, Waypoints: waypoints},
+		{ID: "then", Source: "branch", SourceHandle: "true", Target: "notice", TargetHandle: "in", Kind: domain.PinExec, Waypoints: []domain.Position{{X: -48, Y: 512}}},
+	}}
+	if err := Validate(flow, catalog.New()); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateV3WaypointsDoNotChangeEdgeContractErrors(t *testing.T) {
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("constant", "data:constant", map[string]any{"value": true}),
+		v2Node("branch", "flow:branch", nil),
+	}, Edges: []domain.FlowEdge{
+		{ID: "exec", Source: "start", SourceHandle: "out", Target: "branch", TargetHandle: "in", Kind: domain.PinExec},
+		{ID: "data", Source: "constant", SourceHandle: "value", Target: "branch", TargetHandle: "condition", Kind: domain.PinData, Waypoints: []domain.Position{{X: 1, Y: 2}}},
+	}}
+	if err := Validate(flow, catalog.New()); err == nil {
+		t.Fatal("Validate() accepted an incompatible waypoint edge")
+	}
+}
+
+func TestValidateV3RejectsLegacyRerouteNodes(t *testing.T) {
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("relay", "flow:reroute", nil),
+	}}
+	if err := Validate(flow, catalog.New()); err == nil {
+		t.Fatal("Validate() accepted a legacy reroute in a V3 graph")
+	}
+}
+
 func TestPinsCompatibleRequiresExplicitV3Conversion(t *testing.T) {
 	integer := domain.NodePort{Kind: domain.PinData, Type: &domain.TypeSpec{Kind: domain.TypeInt}}
 	text := domain.NodePort{Kind: domain.PinData, Type: &domain.TypeSpec{Kind: domain.TypeString}}

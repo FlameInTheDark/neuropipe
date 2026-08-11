@@ -52,6 +52,10 @@ func New(root string) (*Store, error) {
 		_ = database.Close()
 		return nil, err
 	}
+	if err := store.migrateRerouteWaypoints(context.Background()); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
 	return store, nil
 }
 

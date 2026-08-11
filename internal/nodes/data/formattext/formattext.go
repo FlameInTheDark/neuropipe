@@ -17,7 +17,44 @@ type Node = nodes.Implementation
 var _ nodes.Node = Node{}
 
 func Register(registrar nodes.Registrar) error {
-	return registrar.Register(Node{Metadata: datanodes.Node("data:format_text", "Data", "Format Text", "Format text with an explicit Value data pin.", "text", []domain.NodePort{datanodes.Pin("value", "Value", domain.PinInput, domain.DataAny)}, []domain.NodePort{datanodes.Pin("text", "Text", domain.PinOutput, domain.DataText)}, []domain.ConfigField{datanodes.Field("format", "Format", "string", "{.value}", true)}, map[string]any{"format": "{.value}"}), Executor: nodes.Outputs(Evaluate)})
+	return registrar.Register(Node{
+		Metadata: datanodes.Node(
+			"data:format_text",
+			"Data",
+			"Format Text",
+			"Format text with an explicit Value data pin.",
+			"text",
+			[]domain.NodePort{
+				datanodes.Pin(
+					"value",
+					"Value",
+					domain.PinInput,
+					domain.DataAny,
+				),
+			},
+			[]domain.NodePort{
+				datanodes.Pin(
+					"text",
+					"Text",
+					domain.PinOutput,
+					domain.DataText,
+				),
+			},
+			[]domain.ConfigField{
+				datanodes.Field(
+					"format",
+					"Format",
+					"string",
+					"{{.value}}",
+					true,
+				),
+			},
+			map[string]any{
+				"format": "{{.value}}",
+			},
+		),
+		Executor: nodes.Outputs(Evaluate),
+	})
 }
 
 // Evaluate renders this node's format string against its input object.

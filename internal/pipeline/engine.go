@@ -306,7 +306,7 @@ func (e *Engine) executeLLM(ctx context.Context, node domain.FlowNode, config ma
 		return nil, fmt.Errorf("configure an LLM provider in Settings before running AI nodes")
 	}
 	prompt := text(config, "prompt")
-	if node.Type == "llm:summarize" {
+	if node.Type == "llm:summarize" || node.Type == "llm:agent" {
 		prompt = text(config, "instructions")
 	}
 	if node.Type == "llm:coding_agent" {

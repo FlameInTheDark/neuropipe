@@ -142,6 +142,99 @@ func TestAgentRunsMultipleConnectedLLMToolFunctions(t *testing.T) {
 	}
 }
 
+type captureChatRunner struct {
+	requests []ChatRequest
+}
+
+func (r *captureChatRunner) Chat(_ context.Context, request ChatRequest) (ChatResponse, error) {
+	r.requests = append(r.requests, request)
+	return ChatResponse{Content: "ok"}, nil
+}
+
+// Regression: an Agent without connected tools is the legacy fallback path;
+// its instructions field must be honored there too.
+func TestAgentWithoutToolsUsesInstructionsField(t *testing.T) {
+	ctx := context.Background()
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
+		v2Node("agent", "llm:agent", map[string]any{"instructions": "Standby."}),
+	}, Edges: []domain.FlowEdge{
+		execEdge("chat-agent", "chat", "out", "agent", "in"),
+		{ID: "chat-instructions", Source: "chat", SourceHandle: "text", Target: "agent", TargetHandle: "instructions", Kind: domain.PinData},
+	}}
+	runner := &captureChatRunner{}
+	if _, err := NewEngine(catalog.New(), runner, nil).Execute(ctx, flow, "chat", Packet{"text": "Wired instructions no tools.", "chatId": "c1", "chatRunId": "r1"}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(runner.requests) != 1 {
+		t.Fatalf("LLM calls = %d, want 1", len(runner.requests))
+	}
+	if !strings.Contains(runner.requests[0].Prompt, "Wired instructions no tools.") {
+		t.Fatalf("prompt = %q, want wired instructions", runner.requests[0].Prompt)
+	}
+}
+
+type instructionsCaptureRunner struct {
+	requests []domain.AssistantChatRequest
+}
+
+func (r *instructionsCaptureRunner) Chat(_ context.Context, _ ChatRequest) (ChatResponse, error) {
+	return ChatResponse{}, fmt.Errorf("unexpected non-tool LLM request")
+}
+
+func (r *instructionsCaptureRunner) Converse(_ context.Context, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
+	r.requests = append(r.requests, request)
+	return domain.AssistantChatResponse{Content: "ok"}, nil
+}
+
+// A wired instructions pin must override the inspector text: the model has to
+// receive the connected value as the agent's system prompt.
+func TestAgentUsesWiredInstructionsPin(t *testing.T) {
+	ctx := context.Background()
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	weather, err := createPublishedToolFunction(ctx, store, "Weather", "forecast for Yekaterinburg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := catalog.New()
+	definitions, err := store.PublishedFunctionDefinitions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.ReplaceDynamic(definitions)
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
+		v2Node("agent", "llm:agent", map[string]any{"instructions": "Inspector fallback must be overridden.", "maxTurns": 2.0}),
+		v2Node("weather", "function:"+weather.ID, nil),
+	}, Edges: []domain.FlowEdge{
+		execEdge("chat-agent", "chat", "out", "agent", "in"),
+		{ID: "chat-instructions", Source: "chat", SourceHandle: "text", Target: "agent", TargetHandle: "instructions", Kind: domain.PinData},
+		{ID: "weather-tool", Source: "weather", SourceHandle: "tool", Target: "agent", TargetHandle: "tools", Kind: domain.PinTool},
+	}}
+	runner := &instructionsCaptureRunner{}
+	if _, err := NewEngine(registry, runner, nil, WithFunctionResolver(store)).Execute(ctx, flow, "chat", Packet{"text": "Wired instructions reach the model.", "chatId": "c1", "chatRunId": "r1"}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(runner.requests) == 0 {
+		t.Fatal("assistant was never called")
+	}
+	messages := runner.requests[0].Messages
+	var system string
+	for _, message := range messages {
+		if message.Role == domain.ChatRoleSystem {
+			system = message.Content
+		}
+	}
+	if system != "Wired instructions reach the model." {
+		t.Fatalf("agent system prompt = %q, want wired instructions value", system)
+	}
+}
+
 func createPublishedToolFunction(ctx context.Context, store *persistence.Store, name, value string) (domain.CustomFunction, error) {
 	function, err := store.CreateFunctionWithRequest(ctx, domain.CreateFunctionRequest{Name: name, Description: name + " tool", Kind: domain.FunctionTool, Mode: domain.NodeImpure})
 	if err != nil {

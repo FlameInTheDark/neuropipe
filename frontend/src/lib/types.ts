@@ -46,7 +46,7 @@ export type FlowNode = Node<{
   config?: Record<string, unknown>;
   [key: string]: unknown;
 }>;
-export type FlowEdge = Edge & { kind?: PinKind };
+export type FlowEdge = Edge & { kind?: PinKind; waypoints?: { x: number; y: number }[] };
 
 export interface FlowDefinition {
   schemaVersion: number;

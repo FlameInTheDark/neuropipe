@@ -43,9 +43,16 @@ func (s *blueprintState) executeConnectedToolAgent(node domain.FlowNode, config,
 		return nil, fmt.Errorf("execution cancelled: %w", err)
 	}
 
-	prompt := text(config, "instructions")
+	// A wired data pin always overrides the inspector value, matching every
+	// other impure node (see the legacy merge in blueprint.go).
+	merged := cloneValues(config)
+	for key, value := range inputs {
+		merged[key] = value
+	}
+
+	prompt := text(merged, "instructions")
 	if node.Type == "llm:coding_agent" {
-		prompt = "Coding task:\n" + text(config, "task") + "\n\nWorkspace: " + text(config, "workspace")
+		prompt = "Coding task:\n" + text(merged, "task") + "\n\nWorkspace: " + text(merged, "workspace")
 	}
 	messages := make([]domain.ChatMessage, 0, 2+len(tools)*2)
 	if prompt != "" {
@@ -100,6 +107,16 @@ func (s *blueprintState) executeConnectedToolAgent(node domain.FlowNode, config,
 }
 
 func (s *blueprintState) connectedTools(agentID string) ([]connectedTool, error) {
+	hasToolEdges := false
+	for _, edge := range s.definition.Edges {
+		if edge.Target == agentID && edge.TargetHandle == "tools" && edgeKind(edge) == domain.PinTool {
+			hasToolEdges = true
+			break
+		}
+	}
+	if !hasToolEdges {
+		return nil, nil
+	}
 	if s.engine.functions == nil {
 		return nil, fmt.Errorf("custom functions are unavailable")
 	}

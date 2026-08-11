@@ -433,6 +433,7 @@ export namespace domain {
 	    sourceHandle?: string;
 	    targetHandle?: string;
 	    kind?: string;
+	    waypoints?: Position[];
 	
 	    static createFrom(source: any = {}) {
 	        return new FlowEdge(source);
@@ -446,7 +447,26 @@ export namespace domain {
 	        this.sourceHandle = source["sourceHandle"];
 	        this.targetHandle = source["targetHandle"];
 	        this.kind = source["kind"];
+	        this.waypoints = this.convertValues(source["waypoints"], Position);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Position {
 	    x: number;

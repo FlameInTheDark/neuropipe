@@ -214,6 +214,9 @@ type FlowEdge struct {
 	SourceHandle string  `json:"sourceHandle,omitempty"`
 	TargetHandle string  `json:"targetHandle,omitempty"`
 	Kind         PinKind `json:"kind,omitempty"`
+	// Waypoints are editor-only wire layout hints; validation and execution
+	// deliberately ignore them.
+	Waypoints []Position `json:"waypoints,omitempty"`
 }
 
 type TriggerBinding struct {

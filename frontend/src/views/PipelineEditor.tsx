@@ -96,6 +96,7 @@ import i18n from "@/i18n";
 import { localizeNodeDefinitions } from "@/i18n/node-catalog";
 import { useTranslation } from "react-i18next";
 import { TwitchIdentitySelect } from "@/components/TwitchIdentitySelect";
+import { BlueprintWaypointEdge, waypointMoveEvent, waypointRemoveEvent } from "@/components/BlueprintWaypointEdge";
 
 interface EditorNodeData {
   type: string;
@@ -129,9 +130,6 @@ interface ReconnectState {
 }
 
 const contextOnlyNodeTypes = new Set([
-  "data:reroute",
-  "flow:reroute",
-  "logic:reroute",
   "function:entry",
   "function:return",
   "function:input",
@@ -454,6 +452,7 @@ function withExecutionEdges(
 }
 
 const nodeTypes = { neuropipe: NeuropipeNode };
+const edgeTypes = { waypoint: BlueprintWaypointEdge };
 
 export function PipelineEditor({
   pipelineID,
@@ -515,6 +514,23 @@ function EditorContents({
     sourceHandle: string | null;
   }>();
   const canvasRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const move = (event: Event) => {
+			const detail = (event as CustomEvent<{ edgeID: string; index: number; position: { x: number; y: number } }>).detail;
+			if (!detail) return;
+			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).map((point, index) => index === detail.index ? detail.position : point) }));
+			setDirty(true);
+		};
+		const remove = (event: Event) => {
+			const detail = (event as CustomEvent<{ edgeID: string; index: number }>).detail;
+			if (!detail) return;
+			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).filter((_, index) => index !== detail.index) }));
+			setDirty(true);
+		};
+		window.addEventListener(waypointMoveEvent, move);
+		window.addEventListener(waypointRemoveEvent, remove);
+		return () => { window.removeEventListener(waypointMoveEvent, move); window.removeEventListener(waypointRemoveEvent, remove); };
+	}, []);
   const reconnectRef = useRef<ReconnectState>();
   const snapToGrid = gridSnapMode === "on";
   const snapPosition = useCallback(
@@ -564,7 +580,7 @@ function EditorContents({
         withExecutionEdges(
           asArray(nextPipeline.draftDefinition?.edges),
           asArray(nextHistory)[0],
-        ),
+        ).map((edge) => (edge.waypoints && edge.waypoints.length > 0 ? { ...edge, type: "waypoint" } : edge)),
       );
       setHistory(asArray(nextHistory));
       setDirty(false);
@@ -1100,40 +1116,7 @@ function EditorContents({
     (edgeID: string, position: { x: number; y: number }) => {
       const edge = edges.find((item) => item.id === edgeID);
       if (!edge) return;
-      const rerouteType =
-        edge.kind === "exec" ? "flow:reroute" : "data:reroute";
-      const definition = definitions.find((item) => item.type === rerouteType);
-      if (!definition) return;
-      const reroute = createEditorNode(
-        definition,
-        snapPosition({ x: position.x - 10, y: position.y - 10 }),
-      );
-      const inputHandle = edge.kind === "exec" ? "in" : "value";
-      const outputHandle = edge.kind === "exec" ? "out" : "value";
-      setNodes((current) => [...current, reroute]);
-      setEdges((current) =>
-        current.flatMap((item) =>
-          item.id === edgeID
-            ? [
-                {
-                  ...item,
-                  id: crypto.randomUUID(),
-                  target: reroute.id,
-                  targetHandle: inputHandle,
-                  selected: false,
-                },
-                {
-                  ...item,
-                  id: crypto.randomUUID(),
-                  source: reroute.id,
-                  sourceHandle: outputHandle,
-                  selected: false,
-                },
-              ]
-            : [item],
-        ),
-      );
-      setSelectedID(reroute.id);
+      setEdges((current) => current.map((item) => item.id === edgeID ? { ...item, waypoints: [...(item.waypoints ?? []), position] } : item));
       setDirty(true);
     },
     [definitions, edges, snapPosition],
@@ -1350,7 +1333,12 @@ function EditorContents({
             <ReactFlow
               className="select-none"
               nodes={nodes}
-              edges={edges}
+              edges={edges.map((edge) =>
+                edge.waypoints && edge.waypoints.length > 0
+                  ? { ...edge, type: "waypoint", data: { waypoints: edge.waypoints } }
+                  : { ...edge },
+              )}
+              edgeTypes={edgeTypes}
               nodeTypes={nodeTypes}
               defaultEdgeOptions={defaultEdgeOptions}
               onNodesChange={onNodesChange}

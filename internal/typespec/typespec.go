@@ -174,10 +174,17 @@ func validate(value reflect.Value, target domain.TypeSpec, path string) error {
 			return typeError(path, target, value)
 		}
 	case domain.TypeFloat:
-		if value.Kind() != reflect.Float32 && value.Kind() != reflect.Float64 {
+		// JSON has a single number domain: runtime values may be held in any Go
+		// int, uint, or float kind, and all satisfy a float contract. The strict
+		// int-pin → float-pin connection rule lives in Assignable, not here —
+		// this check validates a value against a declared number contract.
+		isInt := value.Kind() >= reflect.Int && value.Kind() <= reflect.Int64
+		isUint := value.Kind() >= reflect.Uint && value.Kind() <= reflect.Uint64
+		isFloat := value.Kind() == reflect.Float32 || value.Kind() == reflect.Float64
+		if !isInt && !isUint && !isFloat {
 			return typeError(path, target, value)
 		}
-		if math.IsNaN(value.Float()) || math.IsInf(value.Float(), 0) {
+		if isFloat && (math.IsNaN(value.Float()) || math.IsInf(value.Float(), 0)) {
 			return fmt.Errorf("%s must be finite", path)
 		}
 	case domain.TypeBytes:

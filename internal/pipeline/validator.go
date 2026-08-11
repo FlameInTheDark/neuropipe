@@ -29,6 +29,12 @@ func Validate(definition domain.FlowDefinition, registry *catalog.Registry) erro
 		if _, exists := nodes[node.ID]; exists {
 			return ValidationError{Message: fmt.Sprintf("node ID %q is duplicated", node.ID)}
 		}
+		// Reroutes are presentation-only wire waypoints in current Blueprint
+		// graphs. V2 registrations remain solely to execute immutable legacy
+		// revisions until they are reopened and migrated.
+		if definition.SchemaVersion >= domain.GraphSchemaV3 && (node.Type == "flow:reroute" || node.Type == "data:reroute") {
+			return ValidationError{Message: fmt.Sprintf("node %q is a legacy reroute; reopen the draft to migrate it to a wire waypoint", node.ID)}
+		}
 		definition, exists := registry.Get(node.Type)
 		if !exists {
 			return ValidationError{Message: fmt.Sprintf("node %q uses unavailable type %q", node.ID, node.Type)}
