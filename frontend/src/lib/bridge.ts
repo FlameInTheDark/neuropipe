@@ -1,4 +1,4 @@
-import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SecretMetadata, Settings, TrayMenuLabels, TriggerBinding, TwitchDeviceAuthorization, TwitchDeviceAuthorizationRequest, TwitchEventDescriptor, TwitchIdentity, TwitchManualIdentityRequest, TwitchStatus, UpdateAvailability } from '@/lib/types'
+import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, GlobalVariable, GlobalVariableSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SaveGlobalVariableRequest, SecretMetadata, Settings, TrayMenuLabels, TriggerBinding, TwitchDeviceAuthorization, TwitchDeviceAuthorizationRequest, TwitchEventDescriptor, TwitchIdentity, TwitchManualIdentityRequest, TwitchStatus, UpdateAvailability } from '@/lib/types'
 import i18n from '@/i18n'
 
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
@@ -26,13 +26,17 @@ export const desktop = {
   getDocumentation: (language: string, id: string) => call<DocumentationDocument>('GetDocumentation', language, id),
   searchDocumentation: (language: string, query: string) => call<DocumentationSearchResult[]>('SearchDocumentation', language, query),
   getDocumentationForNode: (nodeType: string) => call<DocumentationReference>('GetDocumentationForNode', nodeType),
-  listFunctions: () => call<FunctionSummary[]>('ListFunctions'),
-  createFunction: (request: CreateFunctionRequest) => call<CustomFunction>('CreateFunction', request),
-  getFunction: (id: string) => call<CustomFunction>('GetFunction', id),
-  saveFunction: (item: CustomFunction) => call<CustomFunction>('SaveFunction', item),
-  publishFunction: (item: CustomFunction) => call<CustomFunction>('PublishFunction', item),
-  deleteFunction: (id: string) => call<void>('DeleteFunction', id),
-  listButtons: () => call<TriggerBinding[]>('ListTriggerButtons'),
+	listFunctions: () => call<FunctionSummary[]>('ListFunctions'),
+	createFunction: (request: CreateFunctionRequest) => call<CustomFunction>('CreateFunction', request),
+	getFunction: (id: string) => call<CustomFunction>('GetFunction', id),
+	saveFunction: (item: CustomFunction) => call<CustomFunction>('SaveFunction', item),
+	publishFunction: (item: CustomFunction) => call<CustomFunction>('PublishFunction', item),
+	deleteFunction: (id: string) => call<void>('DeleteFunction', id),
+	listGlobalVariables: () => call<GlobalVariableSummary[]>('ListGlobalVariables'),
+	createGlobalVariable: (request: SaveGlobalVariableRequest) => call<GlobalVariable>('CreateGlobalVariable', request),
+	updateGlobalVariable: (request: SaveGlobalVariableRequest) => call<GlobalVariable>('UpdateGlobalVariable', request),
+	deleteGlobalVariable: (id: string) => call<void>('DeleteGlobalVariable', id),
+  listTriggers: () => call<TriggerBinding[]>('ListAllTriggers'),
   listSchedules: () => call<TriggerBinding[]>('ListSchedules'),
 	listTwitchTriggers: () => call<TriggerBinding[]>('ListTwitchTriggers'),
 	setTwitchTriggerEnabled: (id: string, enabled: boolean) => call<void>('SetTwitchTriggerEnabled', id, enabled),

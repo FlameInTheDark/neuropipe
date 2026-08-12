@@ -236,6 +236,20 @@ CREATE TABLE IF NOT EXISTS permissions (
   granted_at TEXT NOT NULL,
   PRIMARY KEY (pipeline_id, revision, capability, scope)
 );
+CREATE TABLE IF NOT EXISTS global_variables (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  data_type TEXT NOT NULL,
+  default_value TEXT NOT NULL DEFAULT 'null',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS global_variable_values (
+  name TEXT PRIMARY KEY REFERENCES global_variables(name) ON DELETE CASCADE,
+  value TEXT NOT NULL DEFAULT 'null',
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

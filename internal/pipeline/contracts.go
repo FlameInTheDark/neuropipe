@@ -126,6 +126,13 @@ func WithTwitchChatSender(sender nodes.TwitchChatSender) EngineOption {
 	return func(engine *Engine) { engine.twitch = sender }
 }
 
+// WithGlobalVariablesStore makes workspace-scoped global variables available to
+// running graphs. A nil store keeps the engine usable in headless tests and
+// turns reads/writes into clear node errors.
+func WithGlobalVariablesStore(store GlobalVariablesStore) EngineOption {
+	return func(engine *Engine) { engine.globals = store }
+}
+
 // ValidationError explains why a definition cannot be published.
 type ValidationError struct {
 	Message string `json:"message"`

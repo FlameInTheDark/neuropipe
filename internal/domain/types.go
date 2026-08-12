@@ -2,6 +2,8 @@
 package domain
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -486,6 +488,9 @@ type NodePort struct {
 	Required       bool         `json:"required,omitempty"`
 	Default        any          `json:"default,omitempty"`
 	MaxConnections int          `json:"maxConnections,omitempty"`
+	// IgnoreConfigFallback leaves a matching inspector field out of runtime
+	// inputs so the node can parse that field through its explicit literal path.
+	IgnoreConfigFallback bool `json:"-"`
 }
 
 // DataField documents a known field within an object-valued data pin. Plugins
@@ -564,6 +569,65 @@ type FunctionSummary struct {
 	Mode              NodeExecutionMode `json:"mode"`
 	PublishedRevision int               `json:"publishedRevision"`
 	UpdatedAt         time.Time         `json:"updatedAt"`
+}
+
+// GlobalVariable is a workspace-scoped, typed, persisted variable. Name is the
+// immutable identifier stored inside node configurations; DataType constrains
+// writes; DefaultValue is returned when no value has been written yet.
+type GlobalVariable struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	DataType     DataType `json:"dataType"`
+	DefaultValue any      `json:"defaultValue"`
+	// Value is the current in-memory content; it falls back to DefaultValue
+	// until the variables service hydrates its SQLite snapshot.
+	Value     any       `json:"value"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// SaveGlobalVariableRequest carries only the user-editable fields over the
+// Wails boundary. IDs, timestamps, and live values are server-owned, which
+// also keeps Wails from unmarshalling empty time strings.
+type SaveGlobalVariableRequest struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	DataType     DataType `json:"dataType"`
+	DefaultValue any      `json:"defaultValue"`
+}
+
+// GlobalVariableSummary is the compact Variables-library card. Value carries
+// the current content so the list view can preview it without a follow-up call.
+type GlobalVariableSummary struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	DataType    DataType  `json:"dataType"`
+	Value       any       `json:"value"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// ValidateGlobalVariableName enforces the same identifier rule as local
+// execution variables so node configs and database keys remain stable.
+var globalVariableNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func ValidateGlobalVariableName(name string) error {
+	if !globalVariableNamePattern.MatchString(name) {
+		return fmt.Errorf("variable name must start with a letter or underscore and contain only letters, numbers, or underscores")
+	}
+	return nil
+}
+
+// ValidDataType reports whether the value is a recognised pinned data type.
+func ValidDataType(dataType DataType) bool {
+	switch dataType {
+	case DataAny, DataText, DataNumber, DataBoolean, DataObject, DataList:
+		return true
+	default:
+		return false
+	}
 }
 
 type ConfigField struct {

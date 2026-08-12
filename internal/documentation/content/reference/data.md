@@ -46,6 +46,10 @@ Data nodes are pure unless noted. They have no exec pins and calculate only when
 
 **Purpose:** read a value stored earlier in this run. **Pins:** Value output. **Configure:** variable name. **Produces:** Any. **Capabilities:** none. **Failure:** an unknown name returns no value; execute Set Variable first. **Example:** Get Variable `CustomerName` → Format Text.
 
+## Get Global Variable
+
+**Purpose:** read a workspace variable shared by every pipeline and run. **Pins:** Value output. **Configure:** pick a declared variable name. **Produces:** the declared data type. **Capabilities:** none. **Failure:** an unknown or deleted variable stops the run; a read before any write returns the declared default. **Example:** Get Global Variable `visits` → Math Add → Set Global Variable.
+
 ## Data Reroute
 
 **Purpose:** keep data wires legible. **Pins:** Value input/output. **Configure:** none. **Produces:** the same value. **Capabilities:** none. **Failure:** none beyond source evaluation. **Example:** LLM result → Data Reroute → Create Report.

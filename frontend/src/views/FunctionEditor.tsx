@@ -5,10 +5,8 @@ import {
   applyNodeChanges,
   Background,
   Controls,
-  Handle,
   MarkerType,
   Panel,
-  Position,
   ReactFlow,
   reconnectEdge,
   type Connection,
@@ -39,7 +37,7 @@ import {
 } from "@/components/BlueprintDataMappingsEditor";
 import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEditor";
 import { BlueprintNodeLibrary } from "@/components/BlueprintNodeLibrary";
-import { BlueprintPinTooltip } from "@/components/BlueprintPinTooltip";
+import { BlueprintNodeCard } from "@/components/BlueprintNodeCard";
 import { JavaScriptCodeControl } from "@/components/JavaScriptCodeControl";
 import { IconAppearancePicker, LucideIcon, LucideIconPicker } from "@/components/LucideIconPicker";
 import { Input } from "@/components/ui/input";
@@ -74,6 +72,7 @@ type EditorNode = FlowNode & {
   data: {
     type: string;
     label: string;
+    icon?: string;
     inputs: NodePort[];
     outputs: NodePort[];
     config: Record<string, unknown>;
@@ -121,54 +120,13 @@ function compatiblePins(source: NodePort, target: NodePort) {
 
 function FunctionGraphNode({ data, selected }: NodeProps<EditorNode>) {
   return (
-    <div
-      className={cn(
-        "min-w-48 rounded-lg border bg-zinc-950 shadow-xl",
-        selected ? "border-zinc-100 ring-2 ring-white/10" : "border-zinc-700",
-      )}
-    >
-      <div className="border-b border-zinc-800 px-3 py-2 text-xs font-medium text-zinc-100">
-        {data.label}
-      </div>
-      <div className="py-1">
-        {data.inputs.map((pin) => (
-          <div
-            key={pin.id}
-            className="relative flex min-h-6 items-center px-3 text-[10px] text-zinc-400"
-          >
-            <Handle
-              id={pin.id}
-              type="target"
-              position={Position.Left}
-              className={
-                pin.kind === "exec" ? "!h-3 !w-3 !rounded-sm" : "!size-2.5"
-              }
-              style={{ background: nodePinColor(pin), left: 0 }}
-            />
-            <BlueprintPinTooltip pin={pin} target />
-          </div>
-        ))}
-      </div>
-      <div className="border-t border-zinc-800 py-1">
-        {data.outputs.map((pin) => (
-          <div
-            key={pin.id}
-            className="relative flex min-h-6 items-center justify-end px-3 text-[10px] text-zinc-400"
-          >
-            <BlueprintPinTooltip pin={pin} />
-            <Handle
-              id={pin.id}
-              type="source"
-              position={Position.Right}
-              className={
-                pin.kind === "exec" ? "!h-3 !w-3 !rounded-sm" : "!size-2.5"
-              }
-              style={{ background: nodePinColor(pin), right: 0 }}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
+    <BlueprintNodeCard
+      label={data.label}
+      icon={data.icon ? <LucideIcon name={data.icon} className="size-3 text-zinc-300" /> : undefined}
+      inputs={data.inputs}
+      outputs={data.outputs}
+      selected={selected}
+    />
   );
 }
 const graphTypes = { functionNode: FunctionGraphNode };
@@ -1109,6 +1067,7 @@ function hydrate(
       data: {
         type: nodeType,
         label: definition?.label ?? nodeType,
+        icon: definition?.icon,
         inputs: graphInputs(nodeType, definition, item, config),
         outputs: graphOutputs(nodeType, definition, item, config),
         config,

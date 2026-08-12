@@ -22,11 +22,15 @@ export function CreateChatConversation(arg1:domain.ChatMode,arg2:string):Promise
 
 export function CreateFunction(arg1:domain.CreateFunctionRequest):Promise<domain.CustomFunction>;
 
+export function CreateGlobalVariable(arg1:domain.SaveGlobalVariableRequest):Promise<domain.GlobalVariable>;
+
 export function CreatePipeline(arg1:string):Promise<domain.Pipeline>;
 
 export function DeleteChatConversation(arg1:string):Promise<void>;
 
 export function DeleteFunction(arg1:string):Promise<void>;
+
+export function DeleteGlobalVariable(arg1:string):Promise<void>;
 
 export function DeleteInstalledLlamaModel(arg1:string):Promise<void>;
 
@@ -93,6 +97,8 @@ export function ListDocumentation(arg1:string):Promise<Array<domain.Documentatio
 export function ListExecutions(arg1:string):Promise<Array<domain.Execution>>;
 
 export function ListFunctions():Promise<Array<domain.FunctionSummary>>;
+
+export function ListGlobalVariables():Promise<Array<domain.GlobalVariableSummary>>;
 
 export function ListInstalledLlamaModels():Promise<Array<domain.LocalModel>>;
 
@@ -185,5 +191,7 @@ export function StopLlamaRuntime():Promise<domain.LlamaRuntimeStatus>;
 export function TrustPipelineRevision(arg1:string,arg2:number):Promise<void>;
 
 export function TrustTwitchTrigger(arg1:string):Promise<void>;
+
+export function UpdateGlobalVariable(arg1:domain.SaveGlobalVariableRequest):Promise<domain.GlobalVariable>;
 
 export function ValidateJavaScript(arg1:string):Promise<void>;

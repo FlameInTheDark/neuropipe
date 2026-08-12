@@ -1007,6 +1007,93 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class GlobalVariable {
+	    id: string;
+	    name: string;
+	    description: string;
+	    dataType: string;
+	    defaultValue: any;
+	    value: any;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new GlobalVariable(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.dataType = source["dataType"];
+	        this.defaultValue = source["defaultValue"];
+	        this.value = source["value"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GlobalVariableSummary {
+	    id: string;
+	    name: string;
+	    description: string;
+	    dataType: string;
+	    value: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new GlobalVariableSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.dataType = source["dataType"];
+	        this.value = source["value"];
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class InstallProgress {
 	    kind: string;
 	    stage: string;
@@ -2119,6 +2206,26 @@ export namespace domain {
 		}
 	}
 	
+	export class SaveGlobalVariableRequest {
+	    id: string;
+	    name: string;
+	    description: string;
+	    dataType: string;
+	    defaultValue: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveGlobalVariableRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.dataType = source["dataType"];
+	        this.defaultValue = source["defaultValue"];
+	    }
+	}
 	export class TwitchIdentity {
 	    id: string;
 	    label: string;

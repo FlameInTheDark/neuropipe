@@ -152,6 +152,9 @@ type Invocation struct {
 	ExecInput     string
 	Config        map[string]any
 	Inputs        map[string]any
+	// ConnectedInputs distinguishes values supplied by graph edges from
+	// inspector configuration copied into a matching input pin.
+	ConnectedInputs map[string]bool
 }
 
 // ExecutionResult is the uniform output of every node execution. Pure nodes
@@ -235,6 +238,23 @@ type VariableStore interface {
 	VariableReader
 	VariableWriter
 	DeleteVariable(name string)
+}
+
+// GlobalVariableReader is the narrow capability used by Get Global Variable.
+// The host resolves names to workspace declarations and returns lived values.
+// A read miss (variable deleted mid-run) yields false, never a synthetic stub.
+type GlobalVariableReader interface {
+	ReadGlobalVariable(name string) (any, bool)
+}
+
+// GlobalVariableWriter is the narrow mutable capability used by Set Global
+// Variable. All operations are atomic under the host's lock: IncrementGlobal
+// reads and adds in one step, AppendGlobal mutates a list in place, so two
+// concurrent pipelines cannot lose an update.
+type GlobalVariableWriter interface {
+	WriteGlobalVariable(name string, value any) error
+	IncrementGlobalVariable(name string, delta float64) (float64, error)
+	AppendGlobalVariable(name string, item any) ([]any, error)
 }
 
 // JavaScriptHostProvider supplies the deliberately narrow application services

@@ -149,7 +149,7 @@ export function FunctionsView({ functions, onRefresh }: { functions: FunctionSum
         ) : Object.entries(groups).map(([category, items]) => (
           <section key={category} className="mb-7">
             <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.14em] text-zinc-500"><ChevronDown className="size-3.5" />{category}</h2>
-            <div className="overflow-visible rounded-xl border border-zinc-800">
+            <div className="overflow-hidden rounded-xl border border-zinc-800">
               {items.map((item) => (
                 <FunctionRow
                   key={item.id}

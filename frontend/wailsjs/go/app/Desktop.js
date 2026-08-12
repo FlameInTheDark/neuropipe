@@ -34,6 +34,10 @@ export function CreateFunction(arg1) {
   return window['go']['app']['Desktop']['CreateFunction'](arg1);
 }
 
+export function CreateGlobalVariable(arg1) {
+  return window['go']['app']['Desktop']['CreateGlobalVariable'](arg1);
+}
+
 export function CreatePipeline(arg1) {
   return window['go']['app']['Desktop']['CreatePipeline'](arg1);
 }
@@ -44,6 +48,10 @@ export function DeleteChatConversation(arg1) {
 
 export function DeleteFunction(arg1) {
   return window['go']['app']['Desktop']['DeleteFunction'](arg1);
+}
+
+export function DeleteGlobalVariable(arg1) {
+  return window['go']['app']['Desktop']['DeleteGlobalVariable'](arg1);
 }
 
 export function DeleteInstalledLlamaModel(arg1) {
@@ -176,6 +184,10 @@ export function ListExecutions(arg1) {
 
 export function ListFunctions() {
   return window['go']['app']['Desktop']['ListFunctions']();
+}
+
+export function ListGlobalVariables() {
+  return window['go']['app']['Desktop']['ListGlobalVariables']();
 }
 
 export function ListInstalledLlamaModels() {
@@ -360,6 +372,10 @@ export function TrustPipelineRevision(arg1, arg2) {
 
 export function TrustTwitchTrigger(arg1) {
   return window['go']['app']['Desktop']['TrustTwitchTrigger'](arg1);
+}
+
+export function UpdateGlobalVariable(arg1) {
+  return window['go']['app']['Desktop']['UpdateGlobalVariable'](arg1);
 }
 
 export function ValidateJavaScript(arg1) {

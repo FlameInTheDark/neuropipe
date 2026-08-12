@@ -17,6 +17,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/equals"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/formattext"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/getfield"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/getglobalvariable"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/gettype"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/getvariable"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/greaterthan"
@@ -40,6 +41,7 @@ import (
 	flowreroute "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/reroute"
 	returnnode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/return"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/sequence"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/setglobalvariable"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/setvariable"
 	switchnode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/switch"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/while"
@@ -80,6 +82,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 		greaterthan.Register,
 		jsonparse.Register,
 		getvariable.Register,
+		getglobalvariable.Register,
 		chathistory.Register,
 		reroute.Register,
 		arrayappend.Register,
@@ -105,6 +108,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 		flowreroute.Register,
 		breaknode.Register,
 		setvariable.Register,
+		setglobalvariable.Register,
 		returnnode.Register,
 		add.Register,
 		subtract.Register,

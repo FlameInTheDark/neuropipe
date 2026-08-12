@@ -17,6 +17,17 @@ type Registry struct {
 	definitions map[string]domain.NodeDefinition
 	builtins    map[string]struct{}
 	modules     *nodes.Registry
+	// variableOptions feeds the picklist on Global Variable nodes. It is wired
+	// once during Desktop composition before the catalog is used.
+	variableOptions func() []domain.Option
+}
+
+// SetVariableOptions wires the global variable catalogue into the registry so
+// dynamic picklist options can be injected on Global Variable nodes at All().
+func (r *Registry) SetVariableOptions(source func() []domain.Option) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.variableOptions = source
 }
 
 // New creates a registry containing Neuropipe's built-in node catalog.
@@ -62,10 +73,19 @@ func (r *Registry) Node(nodeType string) (nodes.Node, bool) {
 // All returns the current catalog in display order.
 func (r *Registry) All() []domain.NodeDefinition {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	options := r.variableOptions
 	definitions := make([]domain.NodeDefinition, 0, len(r.definitions))
 	for _, definition := range r.definitions {
 		definitions = append(definitions, definition)
+	}
+	r.mu.RUnlock()
+	if options != nil {
+		list := options()
+		for index, definition := range definitions {
+			if definition.Type == "data:get_global_variable" || definition.Type == "flow:set_global_variable" {
+				definitions[index] = injectVariableOptions(definition, list)
+			}
+		}
 	}
 	sort.Slice(definitions, func(i, j int) bool {
 		if definitions[i].Category == definitions[j].Category {
@@ -74,6 +94,20 @@ func (r *Registry) All() []domain.NodeDefinition {
 		return definitions[i].Category < definitions[j].Category
 	})
 	return definitions
+}
+
+// injectVariableOptions replaces the select field options for the variable
+// name field on Global Variable nodes. It clones the fields before mutation so
+// the caller's definition value is never altered in place.
+func injectVariableOptions(definition domain.NodeDefinition, options []domain.Option) domain.NodeDefinition {
+	definition.Fields = append([]domain.ConfigField(nil), definition.Fields...)
+	for index, field := range definition.Fields {
+		if field.Name == "name" && field.Kind == "select" {
+			field.Options = options
+			definition.Fields[index] = field
+		}
+	}
+	return definition
 }
 
 // Register adds a plugin definition after its bundle has been validated.

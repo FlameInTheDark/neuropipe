@@ -24,6 +24,13 @@ export function Dialog({
   const titleID = useId();
   const descriptionID = useId();
   const previousFocus = useRef<HTMLElement | undefined>(undefined);
+  // The effect below restores focus when the dialog closes; a ref keeps the
+  // identity of the callback out of the dependency list so inline closures do
+  // not re-fire the effect and steal focus from form fields on each render.
+  const onOpenChangeRef = useRef(onOpenChange);
+  useEffect(() => {
+    onOpenChangeRef.current = onOpenChange;
+  }, [onOpenChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -31,14 +38,14 @@ export function Dialog({
       ? document.activeElement
       : undefined;
     const dismiss = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onOpenChange(false);
+      if (event.key === "Escape") onOpenChangeRef.current(false);
     };
     window.addEventListener("keydown", dismiss);
     return () => {
       window.removeEventListener("keydown", dismiss);
       previousFocus.current?.focus();
     };
-  }, [onOpenChange, open]);
+  }, [open]);
 
   if (!open) return null;
 

@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Braces, Clock3, FileText, LayoutGrid, MessageCircle, PanelLeft, Settings2, Workflow } from 'lucide-react'
+import { BarChart3, BookOpen, Braces, Clock3, Database, FileText, LayoutGrid, MessageCircle, PanelLeft, Settings2, Workflow } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { type Screen, useUIStore } from '@/stores/ui'
@@ -10,6 +10,7 @@ const navigation: { id: Exclude<Screen, 'editor' | 'function-editor'>; labelKey:
   { id: 'triggers', labelKey: 'nav.triggers', icon: PanelLeft },
   { id: 'pipelines', labelKey: 'nav.pipelines', icon: Workflow },
   { id: 'functions', labelKey: 'nav.functions', icon: Braces },
+  { id: 'variables', labelKey: 'nav.variables', icon: Database },
   { id: 'reports', labelKey: 'nav.reports', icon: FileText },
   { id: 'metrics', labelKey: 'nav.metrics', icon: BarChart3 },
   { id: 'documentation', labelKey: 'nav.documentation', icon: BookOpen },

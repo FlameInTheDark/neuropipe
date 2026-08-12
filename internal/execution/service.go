@@ -33,6 +33,7 @@ type Service struct {
 	notifier pipeline.NotificationSender
 	metrics  MetricsRecorder
 	twitch   nodes.TwitchChatSender
+	globals  pipeline.GlobalVariablesStore
 
 	mu            sync.Mutex
 	running       map[string]struct{}
@@ -66,6 +67,12 @@ type ServiceOption func(*Service)
 // graph execution; OAuth and EventSub remain outside this coordinator.
 func WithTwitchChatSender(sender nodes.TwitchChatSender) ServiceOption {
 	return func(service *Service) { service.twitch = sender }
+}
+
+// WithGlobalVariablesStore attaches the workspace-scoped variable store used
+// by graph execution. A nil store keeps the engine usable in headless tests.
+func WithGlobalVariablesStore(store pipeline.GlobalVariablesStore) ServiceOption {
+	return func(service *Service) { service.globals = store }
 }
 
 // SetTwitchChatSender completes Desktop composition before workers start.
@@ -420,6 +427,7 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		pipeline.WithChatWriter(chatWriter),
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, execution.PipelineID, execution.ID)),
 		pipeline.WithTwitchChatSender(s.twitch),
+		pipeline.WithGlobalVariablesStore(s.globals),
 	)
 	result, runErr := engine.Execute(runCtx, job.definition, job.triggerNodeID, job.input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
@@ -502,6 +510,7 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 		pipeline.WithChatWriter(chatWriter),
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, pipelineID, execution.ID)),
 		pipeline.WithTwitchChatSender(s.twitch),
+		pipeline.WithGlobalVariablesStore(s.globals),
 	)
 	result, runErr := engine.Execute(ctx, definition, triggerNodeID, input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)

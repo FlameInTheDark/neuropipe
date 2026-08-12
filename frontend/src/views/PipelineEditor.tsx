@@ -59,7 +59,7 @@ import {
 } from "@/components/BlueprintDataMappingsEditor";
 import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEditor";
 import { BlueprintNodeLibrary } from "@/components/BlueprintNodeLibrary";
-import { BlueprintPinTooltip } from "@/components/BlueprintPinTooltip";
+import { BlueprintNodeCard } from "@/components/BlueprintNodeCard";
 import { JavaScriptCodeControl } from "@/components/JavaScriptCodeControl";
 import { IconAppearancePicker, LucideIconPicker } from "@/components/LucideIconPicker";
 import { ShortcutRecorder } from "@/components/ShortcutRecorder";
@@ -134,6 +134,11 @@ const contextOnlyNodeTypes = new Set([
   "function:return",
   "function:input",
   "function:output",
+]);
+const backendResolvedNodeTypes = new Set([
+  "twitch:event",
+  "data:get_global_variable",
+  "flow:set_global_variable",
 ]);
 const defaultEdgeOptions = { reconnectable: "target" as const };
 const nodeLibraryCollapsedCategoriesKey =
@@ -254,41 +259,22 @@ function NeuropipeNode({ data, selected }: NodeProps<EditorNode>) {
           ? "animate-pulse bg-amber-400"
           : "";
   return (
-    <div
-      className={cn(
-        "min-w-52 rounded-lg border bg-zinc-950 shadow-xl transition-colors",
-        selected ? "border-zinc-300 ring-2 ring-white/10" : runTone,
-      )}
-    >
-      <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
-        <div className="flex size-5 items-center justify-center rounded bg-zinc-800">
-          <NodeIcon name={node.icon} fallback={Icon} />
-        </div>
-        <span className="max-w-32 flex-1 truncate text-xs font-medium text-zinc-100">
-          {node.label || node.type.replace(":", " · ")}
-        </span>
-        {node.lastRun ? (
+    <BlueprintNodeCard
+      label={node.label || node.type.replace(":", " · ")}
+      icon={<NodeIcon name={node.icon} fallback={Icon} />}
+      summary={summaryFor(node)}
+      inputs={inputs}
+      outputs={outputs}
+      selected={selected}
+      tone={runTone}
+      status={
+        node.lastRun ? (
           <Tooltip content={node.lastRun.status} side="bottom">
             <span className={cn("size-2 shrink-0 rounded-full", runDot)} />
           </Tooltip>
-        ) : null}
-      </div>
-      <div className="px-3 py-2 text-[11px] text-zinc-500">
-        {summaryFor(node)}
-      </div>
-      <div className="grid grid-cols-2 border-t border-zinc-800">
-        <div className="border-r border-zinc-800 py-1">
-          {inputs.map((input) => (
-            <PinRow key={input.id} pin={input} target />
-          ))}
-        </div>
-        <div className="py-1">
-          {outputs.map((output) => (
-            <PinRow key={output.id} pin={output} />
-          ))}
-        </div>
-      </div>
-    </div>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -336,30 +322,6 @@ function RerouteNode({
         className={exec ? "!h-3 !w-3 !rounded-sm" : "!size-2.5"}
         style={{ background: color, right: 0 }}
       />
-    </div>
-  );
-}
-
-function PinRow({ pin, target = false }: { pin: NodePort; target?: boolean }) {
-  const exec = pin.kind === "exec";
-  return (
-    <div
-      className={cn(
-        "relative flex min-h-6 items-center px-3 text-[10px]",
-        target ? "justify-start text-zinc-400" : "justify-end text-zinc-400",
-      )}
-    >
-      <Handle
-        id={pin.id}
-        type={target ? "target" : "source"}
-        position={target ? Position.Left : Position.Right}
-        className={exec ? "!h-3 !w-3 !rounded-sm" : "!size-2.5"}
-        style={{
-          background: nodePinColor(pin),
-          [target ? "left" : "right"]: 0,
-        }}
-      />
-      <BlueprintPinTooltip pin={pin} target={target} />
     </div>
   );
 }
@@ -563,7 +525,7 @@ function EditorContents({
 			asArray(nextHistory)[0],
 		);
 		setNodes(hydrated);
-		const dynamic = hydrated.filter((node) => node.data.type === "twitch:event");
+		const dynamic = hydrated.filter((node) => backendResolvedNodeTypes.has(node.data.type));
 		if (dynamic.length > 0) {
 			void Promise.all(dynamic.map(async (node) => {
 				const definition = await desktop.resolveNodeDefinition({ id: node.id, type: node.data.type, position: node.position, data: { config: node.data.config } });
@@ -769,7 +731,7 @@ function EditorContents({
     (definition: NodeDefinition, position = { x: 280, y: 180 }) => {
       const node = createEditorNode(definition, snapPosition(position));
       setNodes((current) => [...current, node]);
-		if (node.data.type === "twitch:event") {
+		if (backendResolvedNodeTypes.has(node.data.type)) {
 			void desktop.resolveNodeDefinition({
 				id: node.id,
 				type: node.data.type,
@@ -993,10 +955,11 @@ function EditorContents({
         };
       }),
     );
-	// Dynamic first-party contracts stay owned by the backend module. The
-	// Twitch trigger is resolved after its event selection changes so the
-	// canvas, compatibility highlighting, and runtime share one port shape.
-	if (selectedNode?.data.type === "twitch:event" && nextConfig) {
+		// Nodes with backend-owned dynamic contracts re-resolve after every config
+		// change so the canvas, compatibility highlighting, and runtime share one
+		// port shape. Twitch picks ports by event type; global variables pick the
+		// global-variable pins by the selected declaration and operation.
+		if (selectedNode && backendResolvedNodeTypes.has(selectedNode.data.type) && nextConfig) {
 		void desktop.resolveNodeDefinition({
 			id: selectedNode.id,
 			type: selectedNode.data.type,

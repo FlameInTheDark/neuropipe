@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 
-export type Screen = 'button-board' | 'chat' | 'triggers' | 'pipelines' | 'functions' | 'function-editor' | 'reports' | 'metrics' | 'schedules' | 'settings' | 'documentation' | 'editor'
+export type Screen = 'button-board' | 'chat' | 'triggers' | 'pipelines' | 'functions' | 'function-editor' | 'reports' | 'metrics' | 'schedules' | 'settings' | 'documentation' | 'variables' | 'editor'
 
 const persistedScreenKey = 'neuropipe.screen.v1'
 const persistedSidebarCollapsedKey = 'neuropipe.sidebar.collapsed.v1'
-const persistentScreens: readonly Screen[] = ['button-board', 'chat', 'triggers', 'pipelines', 'functions', 'reports', 'metrics', 'schedules', 'settings', 'documentation']
+const persistentScreens: readonly Screen[] = ['button-board', 'chat', 'triggers', 'pipelines', 'functions', 'reports', 'metrics', 'schedules', 'settings', 'documentation', 'variables']
 
 function initialScreen(): Screen {
   try {

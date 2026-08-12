@@ -342,12 +342,13 @@ func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.N
 	}
 	if module, exists := s.engine.registry.Node(node.Type); exists {
 		result, err := module.Execute(s.ctx, nodes.Invocation{
-			Node:          node,
-			Definition:    definition,
-			SchemaVersion: s.definition.SchemaVersion,
-			ExecInput:     execInput,
-			Config:        configFor(node),
-			Inputs:        inputs,
+			Node:            node,
+			Definition:      definition,
+			SchemaVersion:   s.definition.SchemaVersion,
+			ExecInput:       execInput,
+			Config:          configFor(node),
+			Inputs:          inputs,
+			ConnectedInputs: s.connectedInputs(node.ID),
 		}, s)
 		return result.Outputs, result.Ports, result.Loop, err
 	}
@@ -410,7 +411,7 @@ func (s *blueprintState) resolveInputs(node domain.FlowNode, definition domain.N
 			return result, err
 		}
 		fromConfiguration := false
-		if !found {
+		if !found && !pin.IgnoreConfigFallback {
 			value, found = config[pin.ID]
 			fromConfiguration = found
 		}
@@ -490,6 +491,16 @@ func (s *blueprintState) resolveInput(targetID string, pin domain.NodePort, fram
 	return nil, false, nil
 }
 
+func (s *blueprintState) connectedInputs(targetID string) map[string]bool {
+	connected := make(map[string]bool)
+	for _, edge := range s.definition.Edges {
+		if edge.Target == targetID && edgeKind(edge) == domain.PinData {
+			connected[edge.TargetHandle] = true
+		}
+	}
+	return connected
+}
+
 func (s *blueprintState) resolveData(nodeID, pinID string, frame *blueprintFrame) (any, error) {
 	node, exists := s.nodes[nodeID]
 	if !exists {
@@ -542,11 +553,12 @@ func (s *blueprintState) evaluatePure(node domain.FlowNode, definition domain.No
 	config := configFor(node)
 	if module, exists := s.engine.registry.Node(node.Type); exists {
 		result, err := module.Execute(s.ctx, nodes.Invocation{
-			Node:          node,
-			Definition:    definition,
-			SchemaVersion: s.definition.SchemaVersion,
-			Config:        config,
-			Inputs:        inputs,
+			Node:            node,
+			Definition:      definition,
+			SchemaVersion:   s.definition.SchemaVersion,
+			Config:          config,
+			Inputs:          inputs,
+			ConnectedInputs: s.connectedInputs(node.ID),
 		}, s)
 		if err != nil {
 			return nil, err
@@ -626,6 +638,44 @@ func (s *blueprintState) RequestBreak() { s.breakRequested = true }
 
 // StoreVariable implements nodes.VariableWriter.
 func (s *blueprintState) StoreVariable(name string, value any) { s.variables[name] = value }
+
+// ReadGlobalVariable implements nodes.GlobalVariableReader. The engine
+// consults a workspace-scoped store; the call blocks at the global store's
+// own lock so concurrent pipelines see a consistent snapshot.
+func (s *blueprintState) ReadGlobalVariable(name string) (any, bool) {
+	if s.engine.globals == nil {
+		return nil, false
+	}
+	value, err := s.engine.globals.Read(name)
+	if err != nil {
+		return nil, false
+	}
+	return value, true
+}
+
+// WriteGlobalVariable implements nodes.GlobalVariableWriter.
+func (s *blueprintState) WriteGlobalVariable(name string, value any) error {
+	if s.engine.globals == nil {
+		return fmt.Errorf("global variables are unavailable for this execution")
+	}
+	return s.engine.globals.Set(name, value)
+}
+
+// IncrementGlobalVariable implements nodes.GlobalVariableWriter with atomicity.
+func (s *blueprintState) IncrementGlobalVariable(name string, delta float64) (float64, error) {
+	if s.engine.globals == nil {
+		return 0, fmt.Errorf("global variables are unavailable for this execution")
+	}
+	return s.engine.globals.Increment(name, delta)
+}
+
+// AppendGlobalVariable implements nodes.GlobalVariableWriter with atomicity.
+func (s *blueprintState) AppendGlobalVariable(name string, item any) ([]any, error) {
+	if s.engine.globals == nil {
+		return nil, fmt.Errorf("global variables are unavailable for this execution")
+	}
+	return s.engine.globals.Append(name, item)
+}
 
 // DeleteVariable implements nodes.VariableStore for JavaScript's scoped
 // variable API. This only affects the active Blueprint execution.

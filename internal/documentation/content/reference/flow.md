@@ -43,3 +43,7 @@ Cases are evaluated from top to bottom. The first true comparison wins; no later
 ## Set Variable
 
 **Purpose:** store a value for this active execution. **Pins:** Exec/Value inputs; Then exec and Value data outputs. **Configure:** variable name. **Produces:** stored value. **Capabilities:** none. **Failure:** it must be reached before Get Variable can use its result. **Example:** HTTP Result → Set Variable `Response` → later Get Variable.
+
+## Set Global Variable
+
+**Purpose:** write a workspace variable shared by every pipeline and run, surviving an application restart. **Pins:** Exec/Value inputs; Then exec and Value data outputs. **Configure:** pick a declared variable name and an operation — Set overwrites, Increment atomically adds to a number, Append atomically extends a list. **Produces:** the value after the operation, ready for the next step. **Capabilities:** none. **Failure:** a type mismatch or unknown variable stops the run; only the declared type, number for Increment, and list for Append are accepted. **Example:** Cron Trigger → Set Global Variable `lastRun` (operation: Set).

@@ -30,6 +30,8 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/localization"
 	"github.com/FlameInTheDark/neuropipe/internal/metrics"
 	javascriptnode "github.com/FlameInTheDark/neuropipe/internal/nodes/code/javascript"
+	getglobalvariablenodes "github.com/FlameInTheDark/neuropipe/internal/nodes/data/getglobalvariable"
+	setglobalvariablenodes "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/setglobalvariable"
 	"github.com/FlameInTheDark/neuropipe/internal/notifications"
 	"github.com/FlameInTheDark/neuropipe/internal/persistence"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
@@ -39,6 +41,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/security"
 	twitchservice "github.com/FlameInTheDark/neuropipe/internal/twitch"
 	"github.com/FlameInTheDark/neuropipe/internal/updatecheck"
+	variablesservice "github.com/FlameInTheDark/neuropipe/internal/variables"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -73,6 +76,7 @@ type Desktop struct {
 	twitch                 *twitchservice.Service
 	settingsMu             sync.RWMutex
 	settings               domain.Settings
+	variables              *variablesservice.Service
 	trayMu                 sync.RWMutex
 	trayMenu               trayLabelSink
 	updates                UpdateChecker
@@ -118,13 +122,23 @@ func New(version string) (*Desktop, error) {
 	}
 	settings.ContentDirectory = contentDirectory
 	registry := catalog.New()
+	variables, err := variablesservice.New(store)
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	getglobalvariablenodes.SetDeclaredType(variables.VariableType)
+	getglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
+	setglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
+	setglobalvariablenodes.SetDeclaredType(variables.VariableType)
 	pluginManager := plugins.NewManager(settings.PluginDirectory)
 	docs, err := documentation.New(pluginManager)
 	if err != nil {
 		_ = store.Close()
 		return nil, err
 	}
-	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version)}
+	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version), variables: variables}
+	desktop.registry.SetVariableOptions(variables.VariableOptions)
 	if err := desktop.refreshFunctionRegistry(context.Background()); err != nil {
 		_ = store.Close()
 		return nil, err
@@ -135,6 +149,7 @@ func New(version string) (*Desktop, error) {
 	desktop.runs = execution.NewService(store, registry, desktop.providers, desktop.emit,
 		execution.WithNotificationSender(notifications.NewToastSender("Neuropipe")),
 		execution.WithMetricsRecorder(desktop.metrics),
+		execution.WithGlobalVariablesStore(variables),
 	)
 	desktop.runs.SetMaxConcurrentRuns(settings.MaxConcurrentRuns)
 	desktop.twitch = twitchservice.New(vault, store, desktop.runs, desktop.saveTwitchIdentity, desktop.emit)
@@ -152,6 +167,7 @@ func New(version string) (*Desktop, error) {
 func (d *Desktop) Startup(ctx context.Context) {
 	d.ctx = ctx
 	d.startUpdateChecks(ctx)
+	d.variables.Start(ctx)
 	d.runs.Start(ctx)
 	d.chat.Start(ctx)
 	d.metrics.Start(ctx, d.settings.Metrics)
@@ -181,6 +197,7 @@ func (d *Desktop) Shutdown(context.Context) {
 	d.twitch.Stop()
 	d.chat.Stop()
 	d.runs.Stop()
+	d.variables.Stop()
 	d.metrics.Stop()
 	d.llama.Stop()
 	_ = d.store.Close()
@@ -682,6 +699,30 @@ func (d *Desktop) ResolveNodeDefinition(node domain.FlowNode) (domain.NodeDefini
 		return module.Resolve(node)
 	}
 	return definition, nil
+}
+
+// ListGlobalVariables returns workspace-wide declaration summaries for the
+// Variables library and the node picklist.
+func (d *Desktop) ListGlobalVariables() ([]domain.GlobalVariableSummary, error) {
+	return d.variables.List()
+}
+
+// CreateGlobalVariable declares a new variable and appends it to the in-memory
+// bridge used by the node picklist.
+func (d *Desktop) CreateGlobalVariable(request domain.SaveGlobalVariableRequest) (domain.GlobalVariable, error) {
+	return d.variables.Create(d.context(), domain.GlobalVariable{Name: request.Name, Description: request.Description, DataType: request.DataType, DefaultValue: request.DefaultValue})
+}
+
+// UpdateGlobalVariable edits only description and default value. Name and type
+// stay frozen because existing node configurations reference them.
+func (d *Desktop) UpdateGlobalVariable(request domain.SaveGlobalVariableRequest) (domain.GlobalVariable, error) {
+	return d.variables.Update(d.context(), domain.GlobalVariable{ID: request.ID, Name: request.Name, Description: request.Description, DataType: request.DataType, DefaultValue: request.DefaultValue})
+}
+
+// DeleteGlobalVariable refuses to remove a variable still referenced by a
+// pipeline or function.
+func (d *Desktop) DeleteGlobalVariable(id string) error {
+	return d.variables.Delete(d.context(), id)
 }
 
 func (d *Desktop) saveTwitchIdentity(ctx context.Context, identity domain.TwitchIdentity) error {

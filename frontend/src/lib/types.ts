@@ -222,6 +222,36 @@ export interface CreateFunctionRequest {
   kind: FunctionKind;
   mode: Extract<NodeExecutionMode, "pure" | "impure">;
 }
+// GlobalVariable is the workspace-scoped persisted declaration Contract that
+// pairs a name with a fixed data type. Value is the current in-memory content.
+export interface GlobalVariable {
+  id: string;
+  name: string;
+  description: string;
+  dataType: DataType;
+  defaultValue: unknown;
+  value: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface GlobalVariableSummary {
+  id: string;
+  name: string;
+  description: string;
+  dataType: DataType;
+  value: unknown;
+  updatedAt: string;
+}
+// SaveGlobalVariableRequest carries only user-editable fields across the Wails
+// boundary. Server-owned IDs and timestamps are excluded so empty strings never
+// reach time parsing in the binding layer.
+export interface SaveGlobalVariableRequest {
+  id?: string;
+  name: string;
+  description: string;
+  dataType: DataType;
+  defaultValue: unknown;
+}
 
 export interface ProviderConfig {
   id: string;

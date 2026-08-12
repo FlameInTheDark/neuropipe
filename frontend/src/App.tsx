@@ -4,7 +4,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { TitleBar } from '@/components/TitleBar'
 import { Button } from '@/components/ui/button'
 import { desktop } from '@/lib/bridge'
-import type { FunctionSummary, NodeDefinition, PipelineSummary, Report, Settings, TriggerBinding } from '@/lib/types'
+import type { FunctionSummary, GlobalVariableSummary, NodeDefinition, PipelineSummary, Report, Settings, TriggerBinding } from '@/lib/types'
 import { useUIStore } from '@/stores/ui'
 import i18n from '@/i18n'
 import { localizeNodeDefinitions } from '@/i18n/node-catalog'
@@ -15,6 +15,7 @@ import { SettingsView } from '@/views/SettingsView'
 import { TriggersView } from '@/views/TriggersView'
 import { FunctionsView } from '@/views/FunctionsView'
 import { FunctionEditor } from '@/views/FunctionEditor'
+import { VariablesView } from '@/views/VariablesView'
 import { DocumentationDialog } from '@/components/DocumentationWorkspace'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -41,11 +42,12 @@ export function App() {
   const { screen, pipelineID, functionID, error, sidebarCollapsed, documentationDialog, closeDocumentation, setError, setScreen } = useUIStore()
   const { t } = useTranslation()
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([])
-  const [buttons, setButtons] = useState<TriggerBinding[]>([])
+  const [triggers, setTriggers] = useState<TriggerBinding[]>([])
   const [schedules, setSchedules] = useState<TriggerBinding[]>([])
   const [reports, setReports] = useState<Report[]>([])
   const [nodes, setNodes] = useState<NodeDefinition[]>([])
   const [functions, setFunctions] = useState<FunctionSummary[]>([])
+  const [variables, setVariables] = useState<GlobalVariableSummary[]>([])
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const reportRefreshSequence = useRef(0)
@@ -53,10 +55,10 @@ export function App() {
   const refresh = useCallback(async () => {
     try {
       setLoading(true)
-      const [nextPipelines, nextButtons, nextSchedules, nextReports, nextNodes, nextFunctions, nextSettings] = await withTimeout(Promise.all([desktop.listPipelines(), desktop.listButtons(), desktop.listSchedules(), desktop.listReports(), desktop.listNodes(), desktop.listFunctions(), desktop.getSettings()]), workspaceLoadTimeoutMs)
+      const [nextPipelines, nextTriggers, nextSchedules, nextReports, nextNodes, nextFunctions, nextVariables, nextSettings] = await withTimeout(Promise.all([desktop.listPipelines(), desktop.listTriggers(), desktop.listSchedules(), desktop.listReports(), desktop.listNodes(), desktop.listFunctions(), desktop.listGlobalVariables(), desktop.getSettings()]), workspaceLoadTimeoutMs)
       const language = nextSettings.language || 'en'
       if (i18n.resolvedLanguage !== language) await i18n.changeLanguage(language)
-      setPipelines(nextPipelines); setButtons(nextButtons); setSchedules(nextSchedules); setReports(nextReports); setNodes(localizeNodeDefinitions(nextNodes, language)); setFunctions(nextFunctions); setSettings(nextSettings)
+      setPipelines(nextPipelines); setTriggers(nextTriggers); setSchedules(nextSchedules); setReports(nextReports); setNodes(localizeNodeDefinitions(nextNodes, language)); setFunctions(nextFunctions); setVariables(nextVariables); setSettings(nextSettings)
       setError()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t('app.unavailable'))
@@ -72,6 +74,16 @@ export function App() {
       setError()
     } catch (reason) {
       if (sequence !== reportRefreshSequence.current) return
+      setError(reason instanceof Error ? reason.message : i18n.t('app.unavailable'))
+    }
+  }, [setError])
+
+  const refreshVariables = useCallback(async () => {
+    try {
+      const nextVariables = await withTimeout(desktop.listGlobalVariables(), workspaceLoadTimeoutMs)
+      setVariables(nextVariables)
+      setError()
+    } catch (reason) {
       setError(reason instanceof Error ? reason.message : i18n.t('app.unavailable'))
     }
   }, [setError])
@@ -94,16 +106,17 @@ export function App() {
     switch (screen) {
       case 'pipelines': return <PipelinesView pipelines={pipelines} onRefresh={refresh} />
       case 'functions': return <FunctionsView functions={functions} onRefresh={refresh} />
+      case 'variables': return <VariablesView variables={variables} onRefresh={refreshVariables} />
       case 'function-editor': return functionID && <FunctionEditor functionID={functionID} definitions={nodes} onRefresh={refresh} />
       case 'reports': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingReports')}</div>}><ReportsView reports={reports} onRefresh={refreshReports} /></Suspense>
       case 'metrics': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingMetrics')}</div>}><MetricsView pipelines={pipelines} /></Suspense>
       case 'schedules': return <SchedulesView schedules={schedules} onRefresh={refresh} />
       case 'settings': return settings && <SettingsView settings={settings} onSettingsChange={setSettings} onRefresh={refresh} />
-      case 'button-board': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingBoard')}</div>}><TriggerButtonsView buttons={buttons} pipelines={pipelines} onRefresh={refresh} /></Suspense>
+      case 'button-board': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingBoard')}</div>}><TriggerButtonsView buttons={triggers.filter((trigger) => trigger.kind === 'button')} pipelines={pipelines} onRefresh={refresh} /></Suspense>
       case 'chat': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingChat')}</div>}><ChatView /></Suspense>
       case 'documentation': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingDocumentation')}</div>}><DocumentationView /></Suspense>
       case 'editor': return pipelineID && <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingEditor')}</div>}><PipelineEditor pipelineID={pipelineID} definitions={nodes} onRefresh={refresh} /></Suspense>
-      default: return <TriggersView buttons={buttons} onRefresh={refresh} />
+      default: return <TriggersView triggers={triggers} onRefresh={refresh} />
     }
   }
 

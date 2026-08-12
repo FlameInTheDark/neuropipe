@@ -23,6 +23,16 @@ type CapabilityGate interface {
 	Allow(ctx context.Context, node domain.FlowNode, capabilities []domain.Capability) error
 }
 
+// GlobalVariablesStore exposes workspace-scoped variables to running graphs.
+// It deliberately exposes only the narrow operations nodes rely on; catalogue
+// management remains with the composition root.
+type GlobalVariablesStore interface {
+	Read(name string) (any, error)
+	Set(name string, value any) error
+	Increment(name string, delta float64) (float64, error)
+	Append(name string, item any) ([]any, error)
+}
+
 // Engine executes a validated graph without knowing where definitions are stored.
 type Engine struct {
 	registry      *catalog.Registry
@@ -36,6 +46,7 @@ type Engine struct {
 	chat          ChatWriter
 	javascript    nodes.JavaScriptHost
 	twitch        nodes.TwitchChatSender
+	globals       GlobalVariablesStore
 	variables     Packet
 }
 
