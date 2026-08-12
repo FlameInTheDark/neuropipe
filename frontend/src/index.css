@@ -59,8 +59,11 @@ select option, select optgroup { background: #18181b; color: #e4e4e7; }
 .titlebar-update:focus-visible { outline: 2px solid rgb(255 255 255 / .55); outline-offset: 2px; }
 .surface { border: 1px solid rgb(63 63 70 / 0.75); background: rgb(24 24 27 / 0.7); box-shadow: 0 1px 1px rgb(0 0 0 / 0.25); }
 .muted-scroll { scrollbar-gutter: stable; }
-.react-flow__controls { border: 1px solid #3f3f46 !important; background: #18181b !important; box-shadow: none !important; }
-.react-flow__controls-button { border-bottom-color: #3f3f46 !important; fill: #d4d4d8 !important; background: #18181b !important; }
+.react-flow__controls.blueprint-controls { display: flex; flex-direction: column; gap: 2px; overflow: hidden; padding: 4px; border: 1px solid #3f3f46; border-radius: .375rem; background: #09090b; box-shadow: none; }
+.react-flow__controls.blueprint-controls .react-flow__controls-button { width: 28px; height: 28px; border: 0; border-radius: .375rem; background: transparent; color: #d4d4d8; transition: background-color .15s, color .15s; }
+.react-flow__controls.blueprint-controls .react-flow__controls-button:hover { background: #27272a; color: #f4f4f5; }
+.react-flow__controls.blueprint-controls .react-flow__controls-button:focus-visible { outline: 2px solid #71717a; outline-offset: -2px; }
+.react-flow__controls.blueprint-controls .react-flow__controls-button svg { width: 14px; height: 14px; max-width: none; max-height: none; fill: currentColor; }
 .react-flow__minimap { border: 1px solid #3f3f46; background: #09090b !important; }
 .react-flow__attribution { display: none; }
 .react-flow__edge-path { stroke: #71717a; stroke-width: 1.5; }

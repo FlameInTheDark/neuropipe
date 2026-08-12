@@ -39,6 +39,8 @@ import {
   Loader2,
   Magnet,
   MousePointer2,
+  PanelLeft,
+  PanelRight,
   Play,
   Plus,
   Save,
@@ -459,6 +461,7 @@ function EditorContents({
   const [nameDraft, setNameDraft] = useState("");
   const [search, setSearch] = useState("");
   const [showPalette, setShowPalette] = useState(true);
+  const [showInspector, setShowInspector] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState("");
   const [history, setHistory] = useState<Execution[]>([]);
@@ -988,11 +991,13 @@ function EditorContents({
     updateConfigValues({ [field.name]: parseFieldValue(field, value) });
   };
   const removeSelected = () => {
-    if (!selectedID) return;
-    setNodes((current) => current.filter((node) => node.id !== selectedID));
+    const selectedNodeIDs = nodes.filter((node) => node.selected).map((node) => node.id);
+    const removedIDs = new Set(selectedNodeIDs.length > 0 ? selectedNodeIDs : selectedID ? [selectedID] : []);
+    if (removedIDs.size === 0) return;
+    setNodes((current) => current.filter((node) => !removedIDs.has(node.id)));
     setEdges((current) =>
       current.filter(
-        (edge) => edge.source !== selectedID && edge.target !== selectedID,
+        (edge) => !removedIDs.has(edge.source) && !removedIDs.has(edge.target),
       ),
     );
     setSelectedID(undefined);
@@ -1236,14 +1241,6 @@ function EditorContents({
         <div className="title-no-drag flex items-center gap-2">
           <Button
             size="sm"
-            variant="ghost"
-            onClick={() => setShowPalette((value) => !value)}
-          >
-            <LayoutGrid className="size-3.5" />
-            {t("editor.library")}
-          </Button>
-          <Button
-            size="sm"
             variant="outline"
             onClick={() => void save()}
             disabled={!dirty || busy !== ""}
@@ -1279,7 +1276,7 @@ function EditorContents({
         <div
           className="grid h-full min-h-0"
           style={{
-            gridTemplateColumns: `${showPalette ? "246px " : ""}minmax(0,1fr) 300px`,
+            gridTemplateColumns: `${showPalette ? "246px " : ""}minmax(0,1fr)${showInspector ? " 300px" : ""}`,
           }}
         >
           {showPalette && (
@@ -1333,8 +1330,17 @@ function EditorContents({
               onReconnectEnd={onReconnectEnd}
               onNodeClick={(_, node) => setSelectedID(node.id)}
               onNodeContextMenu={(event, node) => {
+                if (!nodes.find((item) => item.id === node.id)?.selected) {
+                  setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })));
+                }
                 setSelectedID(node.id);
                 openCanvasMenu(event, node.id);
+              }}
+              onSelectionContextMenu={(event, selectedNodes) => {
+                const nodeID = selectedNodes[0]?.id;
+                if (!nodeID) return;
+                setSelectedID(nodeID);
+                openCanvasMenu(event, nodeID);
               }}
               onEdgeContextMenu={(event, edge) =>
                 openCanvasMenu(event, undefined, undefined, edge.id)
@@ -1344,6 +1350,7 @@ function EditorContents({
                 setMenu(undefined);
               }}
               onPaneContextMenu={(event) => openCanvasMenu(event)}
+              multiSelectionKeyCode={["Shift", "Control", "Meta"]}
               onInit={setFlow}
               onDrop={drop}
               onDragOver={(event) => {
@@ -1355,22 +1362,42 @@ function EditorContents({
               fitView
             >
               <Background color="#27272a" gap={20} size={1} />
-              <Controls showInteractive={false} />
+              <Controls className="blueprint-controls" showInteractive={false} />
               <Panel
                 position="top-left"
+                className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1"
+              >
+                <Tooltip content={t("editor.library")} side="bottom" align="start">
+                  <Button size="sm" variant={showPalette ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowPalette((value) => !value)} aria-label={t("editor.library")} aria-pressed={showPalette}>
+                    <PanelLeft className="size-3.5" />
+                  </Button>
+                </Tooltip>
+              </Panel>
+              <Panel
+                position="top-right"
+                className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1"
+              >
+                <Tooltip content={t("editorActions.inspector")} side="bottom" align="end">
+                  <Button size="sm" variant={showInspector ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowInspector((value) => !value)} aria-label={t("editorActions.inspector")} aria-pressed={showInspector}>
+                    <PanelRight className="size-3.5" />
+                  </Button>
+                </Tooltip>
+              </Panel>
+              <Panel
+                position="bottom-right"
                 className="!m-3 flex gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1"
               >
-                <Tooltip content={t("editor.layout")} side="bottom">
+                <Tooltip content={t("editor.layout")} side="top">
                   <Button size="sm" variant="ghost" className="size-7 p-0" onClick={autoLayout} aria-label={t("editor.layout")}>
                     <LayoutGrid className="size-3.5" />
                   </Button>
                 </Tooltip>
-                <Tooltip content={snapToGrid ? t("editor.snapOff") : t("editor.snapOn")} side="bottom">
+                <Tooltip content={snapToGrid ? t("editor.snapOff") : t("editor.snapOn")} side="top">
                   <Button size="sm" variant={snapToGrid ? "secondary" : "ghost"} className="size-7 p-0" aria-label={snapToGrid ? t("editor.snapOff") : t("editor.snapOn")} aria-pressed={snapToGrid} onClick={() => setGridSnapMode(snapToGrid ? "off" : "on")}>
                     <Magnet className="size-3.5" />
                   </Button>
                 </Tooltip>
-                <Tooltip content={t("editorActions.duplicate")} side="bottom">
+                <Tooltip content={t("editorActions.duplicate")} side="top">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1382,7 +1409,7 @@ function EditorContents({
                     <Copy className="size-3.5" />
                   </Button>
                 </Tooltip>
-                <Tooltip content={t("editorActions.delete")} side="bottom">
+                <Tooltip content={t("editorActions.delete")} side="top">
                   <Button size="sm" variant="ghost" className="size-7 p-0" onClick={removeSelected} disabled={!selected} aria-label={t("editorActions.delete")}>
                     <Trash2 className="size-3.5 text-red-300" />
                   </Button>
@@ -1408,7 +1435,7 @@ function EditorContents({
               />
             )}
           </div>
-          <Inspector
+          {showInspector ? <Inspector
             node={selected}
             definition={selectedDefinition}
             sourceFields={selectedSourceFields}
@@ -1416,7 +1443,7 @@ function EditorContents({
             onUpdateConfig={updateConfigValues}
             history={history}
             runLogKey={runLogKey}
-          />
+          /> : null}
         </div>
       </div>
     </section>

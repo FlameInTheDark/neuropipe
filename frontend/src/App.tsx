@@ -90,6 +90,12 @@ export function App() {
 
   useEffect(() => { void refresh() }, [refresh])
 
+  useEffect(() => {
+    const disableBrowserContextMenu = (event: MouseEvent) => event.preventDefault()
+    document.addEventListener('contextmenu', disableBrowserContextMenu)
+    return () => document.removeEventListener('contextmenu', disableBrowserContextMenu)
+  }, [])
+
   useEffect(() => EventsOn('app.open.settings', () => setScreen('settings')), [setScreen])
 
   useEffect(() => {

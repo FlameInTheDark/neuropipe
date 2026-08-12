@@ -8,6 +8,7 @@ import {
 } from "@xyflow/react";
 import { GripVertical } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Tooltip } from "@/components/ui/tooltip";
 import type { FlowEdge } from "@/lib/types";
 
 export const waypointMoveEvent = "neuropipe:move-wire-waypoint";
@@ -110,24 +111,29 @@ export function BlueprintWaypointEdge({
       />
       {waypoints.map((point, index) => (
         <EdgeLabelRenderer key={`${id}-${index}`}>
-          <button
-            type="button"
-            aria-label={t("canvas.moveWaypoint")}
-            onPointerDown={(event) => beginMove(index, event)}
-            onKeyDown={(event) => {
-              if (event.key === "Delete" || event.key === "Backspace")
-                remove(index, event);
-            }}
-            onDoubleClick={(event) => remove(index, event)}
-            title={t("canvas.moveWaypoint")}
-            className="nodrag nopan absolute z-10 flex size-5 cursor-grab touch-none items-center justify-center rounded-full border border-zinc-400 bg-zinc-950 text-zinc-400 shadow-md hover:border-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 active:cursor-grabbing"
+          <div
+            className="nodrag nopan absolute z-10"
             style={{
               transform: `translate(-50%, -50%) translate(${point.x}px, ${point.y}px)`,
               pointerEvents: "all",
             }}
           >
-            <GripVertical className="size-3" />
-          </button>
+            <Tooltip content={t("canvas.moveWaypoint")} side="top" wrap={false}>
+              <button
+                type="button"
+                aria-label={t("canvas.moveWaypoint")}
+                onPointerDown={(event) => beginMove(index, event)}
+                onKeyDown={(event) => {
+                  if (event.key === "Delete" || event.key === "Backspace")
+                    remove(index, event);
+                }}
+                onDoubleClick={(event) => remove(index, event)}
+                className="flex size-5 cursor-grab touch-none items-center justify-center rounded-full border border-zinc-400 bg-zinc-950 text-zinc-400 shadow-md hover:border-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 active:cursor-grabbing"
+              >
+                <GripVertical className="size-3" />
+              </button>
+            </Tooltip>
+          </div>
         </EdgeLabelRenderer>
       ))}
     </>

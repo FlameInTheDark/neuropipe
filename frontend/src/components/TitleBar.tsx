@@ -49,7 +49,7 @@ export function TitleBar() {
   return (
     <header className="app-titlebar title-drag">
       <div className="flex items-center gap-2 px-3 text-zinc-300">
-        <Tooltip content={sidebarCollapsed ? t('titlebar.expandSidebar') : t('titlebar.collapseSidebar')} side="bottom">
+        <Tooltip content={sidebarCollapsed ? t('titlebar.expandSidebar') : t('titlebar.collapseSidebar')} side="bottom" align="start">
           <button
             type="button"
             onClick={toggleSidebar}

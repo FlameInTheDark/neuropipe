@@ -138,7 +138,7 @@ export function LucideIconPicker({
             ? `${icons.length} matching icons`
             : `Showing ${Math.min(icons.length, maxVisibleIcons)} icons — search to find any Lucide icon.`}
         </p>
-        <div className="muted-scroll mt-2 grid max-h-72 grid-cols-7 gap-1 overflow-y-auto pr-1">
+        <div className="muted-scroll mt-2 grid max-h-72 grid-cols-[repeat(7,minmax(0,1fr))] gap-1 overflow-x-hidden overflow-y-auto pr-1">
           {icons.map((icon) => {
             const active = icon === selected;
             return (
@@ -232,7 +232,7 @@ export function IconAppearancePicker({
           </Button>
         </PopoverTrigger>
       </Tooltip>
-      <PopoverContent align="end" sideOffset={6} className="w-64 space-y-4 p-3">
+      <PopoverContent align="start" sideOffset={6} className="w-64 space-y-4 p-3">
         <ColorChoices label="Icon color" value={iconColor} values={iconColorChoices} onChange={onIconColorChange} />
         <ColorChoices label="Background" value={iconBackground} values={iconBackgroundChoices} onChange={onIconBackgroundChange} />
       </PopoverContent>

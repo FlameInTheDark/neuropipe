@@ -23,6 +23,7 @@ import {
   Loader2,
   Magnet,
   PanelLeft,
+  PanelRight,
   Plus,
   Save,
   Trash2,
@@ -150,6 +151,7 @@ export function FunctionEditor({
   const [selectedID, setSelectedID] = useState<string>();
   const [libraryQuery, setLibraryQuery] = useState("");
   const [showLibrary, setShowLibrary] = useState(true);
+  const [showInspector, setShowInspector] = useState(true);
   const [menu, setMenu] = useState<FunctionCanvasMenu>();
   const [menuQuery, setMenuQuery] = useState("");
   const [connecting, setConnecting] = useState<{ source: string; sourceHandle: string | null }>();
@@ -456,12 +458,14 @@ export function FunctionEditor({
     return id;
   }, [item, snapPosition]);
   const removeSelected = useCallback(() => {
-    if (!selectedID) return;
-    setNodes((current) => current.filter((node) => node.id !== selectedID));
-    setEdges((current) => current.filter((edge) => edge.source !== selectedID && edge.target !== selectedID));
+    const selectedNodeIDs = nodes.filter((node) => node.selected).map((node) => node.id);
+    const removedIDs = new Set(selectedNodeIDs.length > 0 ? selectedNodeIDs : selectedID ? [selectedID] : []);
+    if (removedIDs.size === 0) return;
+    setNodes((current) => current.filter((node) => !removedIDs.has(node.id)));
+    setEdges((current) => current.filter((edge) => !removedIDs.has(edge.source) && !removedIDs.has(edge.target)));
     setSelectedID(undefined);
     setDirty(true);
-  }, [selectedID]);
+  }, [nodes, selectedID]);
   const duplicateSelected = useCallback(() => {
     const selected = nodes.find((node) => node.id === selectedID);
     if (!selected) return;
@@ -648,15 +652,6 @@ export function FunctionEditor({
         </div>
         <div className="title-no-drag flex gap-2">
           <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowLibrary((value) => !value)}
-            aria-pressed={showLibrary}
-          >
-            <PanelLeft className="size-3.5" />
-            {t("editor.library")}
-          </Button>
-          <Button
             variant="outline"
             size="sm"
             onClick={() => void save()}
@@ -685,7 +680,7 @@ export function FunctionEditor({
       </header>
       <div
         className="grid min-h-0 flex-1"
-        style={{ gridTemplateColumns: `${showLibrary ? "246px " : ""}minmax(0,1fr) 330px` }}
+        style={{ gridTemplateColumns: `${showLibrary ? "246px " : ""}minmax(0,1fr)${showInspector ? " 330px" : ""}` }}
       >
         {showLibrary ? (
           <BlueprintNodeLibrary
@@ -727,8 +722,17 @@ export function FunctionEditor({
             onReconnectEnd={onReconnectEnd}
             onNodeClick={(_, node) => setSelectedID(node.id)}
             onNodeContextMenu={(event, node) => {
+              if (!nodes.find((item) => item.id === node.id)?.selected) {
+                setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })));
+              }
               setSelectedID(node.id);
               openMenu(event, node.id);
+            }}
+            onSelectionContextMenu={(event, selectedNodes) => {
+              const nodeID = selectedNodes[0]?.id;
+              if (!nodeID) return;
+              setSelectedID(nodeID);
+              openMenu(event, nodeID);
             }}
             onEdgeContextMenu={(event, edge) => openMenu(event, undefined, edge.id)}
             onPaneClick={() => {
@@ -736,6 +740,7 @@ export function FunctionEditor({
               setMenu(undefined);
             }}
             onPaneContextMenu={(event) => openMenu(event)}
+            multiSelectionKeyCode={["Shift", "Control", "Meta"]}
             onInit={setFlow}
             onDrop={drop}
             onDragOver={(event) => {
@@ -747,24 +752,38 @@ export function FunctionEditor({
             snapGrid={editorSnapGrid}
           >
             <Background color="#27272a" gap={20} size={1} />
-            <Controls showInteractive={false} />
-            <Panel position="top-left" className="!m-3 flex gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1">
-              <Tooltip content={t("editor.layout")} side="bottom">
+            <Controls className="blueprint-controls" showInteractive={false} />
+            <Panel position="top-left" className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Tooltip content={t("editor.library")} side="bottom" align="start">
+                <Button size="sm" variant={showLibrary ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowLibrary((value) => !value)} aria-label={t("editor.library")} aria-pressed={showLibrary}>
+                  <PanelLeft className="size-3.5" />
+                </Button>
+              </Tooltip>
+            </Panel>
+            <Panel position="top-right" className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Tooltip content={t("editorActions.inspector")} side="bottom" align="end">
+                <Button size="sm" variant={showInspector ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowInspector((value) => !value)} aria-label={t("editorActions.inspector")} aria-pressed={showInspector}>
+                  <PanelRight className="size-3.5" />
+                </Button>
+              </Tooltip>
+            </Panel>
+            <Panel position="bottom-right" className="!m-3 flex gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Tooltip content={t("editor.layout")} side="top">
                 <Button size="sm" variant="ghost" className="size-7 p-0" onClick={autoLayout} aria-label={t("editor.layout")}>
                   <LayoutGrid className="size-3.5" />
                 </Button>
               </Tooltip>
-              <Tooltip content={gridSnapMode === "on" ? t("editor.snapOff") : t("editor.snapOn")} side="bottom">
+              <Tooltip content={gridSnapMode === "on" ? t("editor.snapOff") : t("editor.snapOn")} side="top">
                 <Button size="sm" variant={gridSnapMode === "on" ? "secondary" : "ghost"} className="size-7 p-0" aria-label={gridSnapMode === "on" ? t("editor.snapOff") : t("editor.snapOn")} aria-pressed={gridSnapMode === "on"} onClick={() => setGridSnapMode(gridSnapMode === "on" ? "off" : "on")}>
                   <Magnet className="size-3.5" />
                 </Button>
               </Tooltip>
-              <Tooltip content={t("editorActions.duplicate")} side="bottom">
+              <Tooltip content={t("editorActions.duplicate")} side="top">
                 <Button size="sm" variant="ghost" className="size-7 p-0" aria-label={t("editorActions.duplicate")} onClick={duplicateSelected} disabled={!selectedID}>
                   <Copy className="size-3.5" />
                 </Button>
               </Tooltip>
-              <Tooltip content={t("editorActions.delete")} side="bottom">
+              <Tooltip content={t("editorActions.delete")} side="top">
                 <Button size="sm" variant="ghost" className="size-7 p-0" onClick={removeSelected} disabled={!selectedID} aria-label={t("editorActions.delete")}>
                   <Trash2 className="size-3.5 text-red-300" />
                 </Button>
@@ -795,7 +814,7 @@ export function FunctionEditor({
             />
           ) : null}
         </div>
-        <aside className="muted-scroll min-w-0 overflow-x-hidden overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-4">
+        {showInspector ? <aside className="muted-scroll min-w-0 overflow-x-hidden overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-4">
           <section className="space-y-3">
             <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-zinc-600">
               {t("functionEditor.details")}
@@ -932,7 +951,7 @@ export function FunctionEditor({
             <Trash2 className="size-3.5" />
             {t("functionEditor.deleteFunction")}
           </Button>
-        </aside>
+        </aside> : null}
       </div>
     </section>
   );
