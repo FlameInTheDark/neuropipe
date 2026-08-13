@@ -16,6 +16,7 @@ import { TriggersView } from '@/views/TriggersView'
 import { FunctionsView } from '@/views/FunctionsView'
 import { FunctionEditor } from '@/views/FunctionEditor'
 import { VariablesView } from '@/views/VariablesView'
+import { DatabasesView } from '@/views/DatabasesView'
 import { DocumentationDialog } from '@/components/DocumentationWorkspace'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -113,6 +114,7 @@ export function App() {
       case 'pipelines': return <PipelinesView pipelines={pipelines} onRefresh={refresh} />
       case 'functions': return <FunctionsView functions={functions} onRefresh={refresh} />
       case 'variables': return <VariablesView variables={variables} onRefresh={refreshVariables} />
+      case 'databases': return <DatabasesView />
       case 'function-editor': return functionID && <FunctionEditor functionID={functionID} definitions={nodes} onRefresh={refresh} />
       case 'reports': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingReports')}</div>}><ReportsView reports={reports} onRefresh={refreshReports} /></Suspense>
       case 'metrics': return <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 size-4 animate-spin" />{t('app.loadingMetrics')}</div>}><MetricsView pipelines={pipelines} /></Suspense>

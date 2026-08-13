@@ -40,6 +40,7 @@ import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEdi
 import { BlueprintNodeLibrary } from "@/components/BlueprintNodeLibrary";
 import { BlueprintNodeCard } from "@/components/BlueprintNodeCard";
 import { JavaScriptCodeControl } from "@/components/JavaScriptCodeControl";
+import { DatabaseSelectControl, SQLCodeControl } from "@/components/SQLCodeControl";
 import { IconAppearancePicker, LucideIcon, LucideIconPicker } from "@/components/LucideIconPicker";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -910,6 +911,13 @@ export function FunctionEditor({
                       onChange={(config) => updateNodeConfigValues(config as unknown as Record<string, unknown>)}
                     />
                   );
+                }
+                if (field.kind === "sql-parameters") return null;
+                if (field.kind === "sql-editor") {
+                  return <SQLCodeControl key={field.name} config={selected?.data.config ?? {}} onChange={updateNodeConfigValues} />;
+                }
+                if (field.kind === "database-select") {
+                  return <label key={field.name} className="block text-xs font-medium text-zinc-400"><span className="mb-1.5 block">{field.label}</span><DatabaseSelectControl value={String(value ?? "")} onChange={(next) => updateNodeConfig(field.name, next)} ariaLabel={field.label} /></label>;
                 }
                 if (field.kind === "boolean") {
                   return <div key={field.name} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"><span className="text-xs text-zinc-400">{field.label}</span><Switch checked={Boolean(value)} onCheckedChange={(next) => updateNodeConfig(field.name, next)} label={field.label} /></div>;

@@ -1,4 +1,4 @@
-import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, GlobalVariable, GlobalVariableSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SaveGlobalVariableRequest, SecretMetadata, Settings, TrayMenuLabels, TriggerBinding, TwitchDeviceAuthorization, TwitchDeviceAuthorizationRequest, TwitchEventDescriptor, TwitchIdentity, TwitchManualIdentityRequest, TwitchStatus, UpdateAvailability } from '@/lib/types'
+import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, Database, DatabaseSchema, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, GlobalVariable, GlobalVariableSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SaveDatabaseRequest, SaveGlobalVariableRequest, SecretMetadata, Settings, SQLDebugRequest, SQLResult, TrayMenuLabels, TriggerBinding, TwitchDeviceAuthorization, TwitchDeviceAuthorizationRequest, TwitchEventDescriptor, TwitchIdentity, TwitchManualIdentityRequest, TwitchStatus, UpdateAvailability } from '@/lib/types'
 import i18n from '@/i18n'
 
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
@@ -36,6 +36,15 @@ export const desktop = {
 	createGlobalVariable: (request: SaveGlobalVariableRequest) => call<GlobalVariable>('CreateGlobalVariable', request),
 	updateGlobalVariable: (request: SaveGlobalVariableRequest) => call<GlobalVariable>('UpdateGlobalVariable', request),
 	deleteGlobalVariable: (id: string) => call<void>('DeleteGlobalVariable', id),
+	listDatabases: () => call<Database[]>('ListDatabases'),
+	createDatabase: (request: SaveDatabaseRequest) => call<Database>('CreateDatabase', request),
+	registerDatabase: (request: SaveDatabaseRequest) => call<Database>('RegisterDatabase', request),
+	updateDatabase: (request: SaveDatabaseRequest) => call<Database>('UpdateDatabase', request),
+	deleteDatabase: (id: string) => call<void>('DeleteDatabase', id),
+	inspectDatabase: (id: string) => call<DatabaseSchema>('InspectDatabase', id),
+	debugDatabase: (request: SQLDebugRequest) => call<SQLResult>('DebugDatabase', request),
+	chooseDatabaseFile: () => call<string>('ChooseDatabaseFile'),
+	chooseDatabaseCreateFile: () => call<string>('ChooseDatabaseCreateFile'),
   listTriggers: () => call<TriggerBinding[]>('ListAllTriggers'),
   listSchedules: () => call<TriggerBinding[]>('ListSchedules'),
 	listTwitchTriggers: () => call<TriggerBinding[]>('ListTwitchTriggers'),

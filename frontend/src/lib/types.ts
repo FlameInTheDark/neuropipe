@@ -253,6 +253,24 @@ export interface SaveGlobalVariableRequest {
   defaultValue: unknown;
 }
 
+export interface Database {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface SaveDatabaseRequest { id?: string; name: string; path: string; }
+export interface DatabaseSchema { tables: DatabaseTable[]; }
+export interface DatabaseTable { name: string; columns: DatabaseColumn[]; indexes: DatabaseIndex[]; }
+export interface DatabaseColumn { name: string; dataType: string; nullable: boolean; primaryKey: boolean; default?: string; }
+export interface DatabaseIndex { name: string; unique: boolean; columns: string[]; }
+export interface SQLParameter { id: string; name: string; label: string; type: TypeSpec; required?: boolean; }
+export interface SQLArgument { name: string; value: unknown; }
+export interface SQLRequest { databaseId: string; sql: string; parameters: SQLArgument[]; maxRows?: number; }
+export type SQLDebugRequest = SQLRequest;
+export interface SQLResult { columns: string[]; rows: Record<string, unknown>[]; rowsAffected: number; lastInsertId?: number; truncated: boolean; }
+
 export interface ProviderConfig {
   id: string;
   name: string;

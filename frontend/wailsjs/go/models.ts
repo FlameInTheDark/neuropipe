@@ -752,6 +752,147 @@ export namespace domain {
 	        this.optional = source["optional"];
 	    }
 	}
+	export class Database {
+	    id: string;
+	    name: string;
+	    path: string;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Database(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DatabaseColumn {
+	    name: string;
+	    dataType: string;
+	    nullable: boolean;
+	    primaryKey: boolean;
+	    default?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DatabaseColumn(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	        this.nullable = source["nullable"];
+	        this.primaryKey = source["primaryKey"];
+	        this.default = source["default"];
+	    }
+	}
+	export class DatabaseIndex {
+	    name: string;
+	    unique: boolean;
+	    columns: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DatabaseIndex(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.unique = source["unique"];
+	        this.columns = source["columns"];
+	    }
+	}
+	export class DatabaseTable {
+	    name: string;
+	    columns: DatabaseColumn[];
+	    indexes: DatabaseIndex[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DatabaseTable(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.columns = this.convertValues(source["columns"], DatabaseColumn);
+	        this.indexes = this.convertValues(source["indexes"], DatabaseIndex);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DatabaseSchema {
+	    tables: DatabaseTable[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DatabaseSchema(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tables = this.convertValues(source["tables"], DatabaseTable);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class DocumentationDocument {
 	    id: string;
 	    title: string;
@@ -2206,6 +2347,92 @@ export namespace domain {
 		}
 	}
 	
+	export class SQLArgument {
+	    name: string;
+	    value: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new SQLArgument(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.value = source["value"];
+	    }
+	}
+	export class SQLDebugRequest {
+	    databaseId: string;
+	    sql: string;
+	    parameters: SQLArgument[];
+	    maxRows?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SQLDebugRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.databaseId = source["databaseId"];
+	        this.sql = source["sql"];
+	        this.parameters = this.convertValues(source["parameters"], SQLArgument);
+	        this.maxRows = source["maxRows"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SQLResult {
+	    columns: string[];
+	    rows: any[];
+	    rowsAffected: number;
+	    lastInsertId?: number;
+	    truncated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SQLResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.columns = source["columns"];
+	        this.rows = source["rows"];
+	        this.rowsAffected = source["rowsAffected"];
+	        this.lastInsertId = source["lastInsertId"];
+	        this.truncated = source["truncated"];
+	    }
+	}
+	export class SaveDatabaseRequest {
+	    id: string;
+	    name: string;
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveDatabaseRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	    }
+	}
 	export class SaveGlobalVariableRequest {
 	    id: string;
 	    name: string;

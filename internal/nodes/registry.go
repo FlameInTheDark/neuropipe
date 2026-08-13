@@ -257,6 +257,16 @@ type GlobalVariableWriter interface {
 	AppendGlobalVariable(name string, item any) ([]any, error)
 }
 
+// SQLExecutorProvider supplies the registered-database boundary to SQL nodes.
+type SQLExecutorProvider interface {
+	SQLExecutor() SQLExecutor
+}
+
+// SQLExecutor is the only database operation available to Blueprint nodes.
+type SQLExecutor interface {
+	ExecuteSQL(context.Context, domain.SQLRequest) (domain.SQLResult, error)
+}
+
 // JavaScriptHostProvider supplies the deliberately narrow application services
 // that a JavaScript node can reach through its np object. Node modules depend
 // on this port rather than Wails, persistence, or a graph-engine concrete type.

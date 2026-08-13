@@ -14,11 +14,17 @@ export function CancelTwitchDeviceAuthorization(arg1:string):Promise<void>;
 
 export function ChooseContentDirectory():Promise<string>;
 
+export function ChooseDatabaseCreateFile():Promise<string>;
+
+export function ChooseDatabaseFile():Promise<string>;
+
 export function ClearMetrics():Promise<void>;
 
 export function ConfigureTrayMenu(arg1:app.TrayMenuLabels):Promise<void>;
 
 export function CreateChatConversation(arg1:domain.ChatMode,arg2:string):Promise<domain.ChatConversation>;
+
+export function CreateDatabase(arg1:domain.SaveDatabaseRequest):Promise<domain.Database>;
 
 export function CreateFunction(arg1:domain.CreateFunctionRequest):Promise<domain.CustomFunction>;
 
@@ -26,7 +32,11 @@ export function CreateGlobalVariable(arg1:domain.SaveGlobalVariableRequest):Prom
 
 export function CreatePipeline(arg1:string):Promise<domain.Pipeline>;
 
+export function DebugDatabase(arg1:domain.SQLDebugRequest):Promise<domain.SQLResult>;
+
 export function DeleteChatConversation(arg1:string):Promise<void>;
+
+export function DeleteDatabase(arg1:string):Promise<void>;
 
 export function DeleteFunction(arg1:string):Promise<void>;
 
@@ -76,6 +86,8 @@ export function GrantCapability(arg1:domain.PermissionGrant):Promise<void>;
 
 export function HandleWebhook(arg1:string,arg2:Array<number>,arg3:string):Promise<domain.Execution>;
 
+export function InspectDatabase(arg1:string):Promise<domain.DatabaseSchema>;
+
 export function InstallLlamaModel(arg1:domain.ModelInstallRequest):Promise<domain.LocalModel>;
 
 export function InstallLlamaRuntime(arg1:domain.LlamaRuntimeInstallRequest):Promise<domain.LlamaRuntimeCatalogStatus>;
@@ -91,6 +103,8 @@ export function ListChatPipelines():Promise<Array<domain.ChatPipeline>>;
 export function ListChatRunEvents(arg1:string):Promise<Array<domain.ChatRunEvent>>;
 
 export function ListChatRuns(arg1:string):Promise<Array<domain.ChatRun>>;
+
+export function ListDatabases():Promise<Array<domain.Database>>;
 
 export function ListDocumentation(arg1:string):Promise<Array<domain.DocumentationEntry>>;
 
@@ -139,6 +153,8 @@ export function PublishPipeline(arg1:domain.Pipeline):Promise<domain.Pipeline>;
 export function RecordHTTPMetric(arg1:domain.MetricActivityEvent):Promise<void>;
 
 export function RediscoverPlugins():Promise<Array<domain.PluginStatus>>;
+
+export function RegisterDatabase(arg1:domain.SaveDatabaseRequest):Promise<domain.Database>;
 
 export function RemoveTwitchIdentity(arg1:string):Promise<void>;
 
@@ -191,6 +207,8 @@ export function StopLlamaRuntime():Promise<domain.LlamaRuntimeStatus>;
 export function TrustPipelineRevision(arg1:string,arg2:number):Promise<void>;
 
 export function TrustTwitchTrigger(arg1:string):Promise<void>;
+
+export function UpdateDatabase(arg1:domain.SaveDatabaseRequest):Promise<domain.Database>;
 
 export function UpdateGlobalVariable(arg1:domain.SaveGlobalVariableRequest):Promise<domain.GlobalVariable>;
 

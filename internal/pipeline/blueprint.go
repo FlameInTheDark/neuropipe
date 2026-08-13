@@ -326,6 +326,9 @@ func (s *blueprintState) runLoopPlan(node domain.FlowNode, definition domain.Nod
 
 var errLoopStopped = fmt.Errorf("loop stopped")
 
+// SQLExecutor exposes only the database operation required by action:sql.
+func (s *blueprintState) SQLExecutor() nodes.SQLExecutor { return s.engine.databases }
+
 func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame, execInput string) (map[string]any, []string, *nodes.LoopPlan, error) {
 	if strings.HasPrefix(node.Type, "function:") && node.Type != "function:return" && node.Type != "function:entry" {
 		outputs, err := s.runFunction(node, inputs, frame)

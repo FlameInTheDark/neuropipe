@@ -21,6 +21,7 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	chatservice "github.com/FlameInTheDark/neuropipe/internal/chat"
+	databaseservice "github.com/FlameInTheDark/neuropipe/internal/databases"
 	documentation "github.com/FlameInTheDark/neuropipe/internal/documentation"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/execution"
@@ -77,6 +78,7 @@ type Desktop struct {
 	settingsMu             sync.RWMutex
 	settings               domain.Settings
 	variables              *variablesservice.Service
+	databases              *databaseservice.Service
 	trayMu                 sync.RWMutex
 	trayMenu               trayLabelSink
 	updates                UpdateChecker
@@ -127,6 +129,7 @@ func New(version string) (*Desktop, error) {
 		_ = store.Close()
 		return nil, err
 	}
+	databases := databaseservice.New(store)
 	getglobalvariablenodes.SetDeclaredType(variables.VariableType)
 	getglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
 	setglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
@@ -137,7 +140,7 @@ func New(version string) (*Desktop, error) {
 		_ = store.Close()
 		return nil, err
 	}
-	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version), variables: variables}
+	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version), variables: variables, databases: databases}
 	desktop.registry.SetVariableOptions(variables.VariableOptions)
 	if err := desktop.refreshFunctionRegistry(context.Background()); err != nil {
 		_ = store.Close()
@@ -150,6 +153,7 @@ func New(version string) (*Desktop, error) {
 		execution.WithNotificationSender(notifications.NewToastSender("Neuropipe")),
 		execution.WithMetricsRecorder(desktop.metrics),
 		execution.WithGlobalVariablesStore(variables),
+		execution.WithDatabaseService(databases),
 	)
 	desktop.runs.SetMaxConcurrentRuns(settings.MaxConcurrentRuns)
 	desktop.twitch = twitchservice.New(vault, store, desktop.runs, desktop.saveTwitchIdentity, desktop.emit)
@@ -200,7 +204,42 @@ func (d *Desktop) Shutdown(context.Context) {
 	d.variables.Stop()
 	d.metrics.Stop()
 	d.llama.Stop()
+	_ = d.databases.Close()
 	_ = d.store.Close()
+}
+
+func (d *Desktop) ListDatabases() ([]domain.Database, error) {
+	return d.databases.List(d.context())
+}
+
+func (d *Desktop) CreateDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
+	return d.databases.Create(d.context(), request)
+}
+
+func (d *Desktop) RegisterDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
+	return d.databases.Register(d.context(), request)
+}
+
+func (d *Desktop) UpdateDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
+	return d.databases.Update(d.context(), request)
+}
+
+func (d *Desktop) DeleteDatabase(id string) error { return d.databases.Delete(d.context(), id) }
+
+func (d *Desktop) InspectDatabase(id string) (domain.DatabaseSchema, error) {
+	return d.databases.Inspect(d.context(), id)
+}
+
+func (d *Desktop) DebugDatabase(request domain.SQLDebugRequest) (domain.SQLResult, error) {
+	return d.databases.Debug(d.context(), request)
+}
+
+func (d *Desktop) ChooseDatabaseFile() (string, error) {
+	return wailsruntime.OpenFileDialog(d.context(), wailsruntime.OpenDialogOptions{Title: "Select SQLite database", Filters: []wailsruntime.FileFilter{{DisplayName: "SQLite database", Pattern: "*.db;*.sqlite;*.sqlite3"}}})
+}
+
+func (d *Desktop) ChooseDatabaseCreateFile() (string, error) {
+	return wailsruntime.SaveFileDialog(d.context(), wailsruntime.SaveDialogOptions{Title: "Create SQLite database", DefaultFilename: "database.sqlite", Filters: []wailsruntime.FileFilter{{DisplayName: "SQLite database", Pattern: "*.db;*.sqlite;*.sqlite3"}}})
 }
 
 func (d *Desktop) ListPipelines() ([]domain.PipelineSummary, error) {

@@ -47,6 +47,7 @@ type Engine struct {
 	javascript    nodes.JavaScriptHost
 	twitch        nodes.TwitchChatSender
 	globals       GlobalVariablesStore
+	databases     nodes.SQLExecutor
 	variables     Packet
 }
 

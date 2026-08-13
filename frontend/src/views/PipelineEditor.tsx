@@ -63,6 +63,7 @@ import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEdi
 import { BlueprintNodeLibrary } from "@/components/BlueprintNodeLibrary";
 import { BlueprintNodeCard } from "@/components/BlueprintNodeCard";
 import { JavaScriptCodeControl } from "@/components/JavaScriptCodeControl";
+import { DatabaseSelectControl, SQLCodeControl } from "@/components/SQLCodeControl";
 import { IconAppearancePicker, LucideIconPicker } from "@/components/LucideIconPicker";
 import { ShortcutRecorder } from "@/components/ShortcutRecorder";
 import { Input } from "@/components/ui/input";
@@ -141,6 +142,7 @@ const backendResolvedNodeTypes = new Set([
   "twitch:event",
   "data:get_global_variable",
   "flow:set_global_variable",
+  "action:sql",
 ]);
 const defaultEdgeOptions = { reconnectable: "target" as const };
 const nodeLibraryCollapsedCategoriesKey =
@@ -1820,6 +1822,7 @@ function ConfigControl({
     (field.kind === "json" || field.kind === "type-spec") && typeof resolvedValue !== "string"
       ? JSON.stringify(resolvedValue ?? {}, null, 2)
       : String(resolvedValue ?? "");
+  if (field.kind === "sql-parameters") return null;
   return (
     <div className="block">
       <span className="mb-1.5 flex items-center gap-1 text-xs font-medium text-zinc-400">
@@ -1831,6 +1834,10 @@ function ConfigControl({
           config={{ ...nodeConfig, [field.name]: resolvedValue }}
           onChange={(config) => onConfigChange(config as unknown as Record<string, unknown>)}
         />
+      ) : field.kind === "sql-editor" ? (
+        <SQLCodeControl config={nodeConfig} onChange={onConfigChange} />
+      ) : field.kind === "database-select" ? (
+        <DatabaseSelectControl value={stringValue} onChange={onChange} ariaLabel={field.label} />
       ) : field.kind === "twitch-identity" ? (
         <TwitchIdentitySelect
           value={stringValue}

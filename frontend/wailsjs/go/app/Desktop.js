@@ -18,6 +18,14 @@ export function ChooseContentDirectory() {
   return window['go']['app']['Desktop']['ChooseContentDirectory']();
 }
 
+export function ChooseDatabaseCreateFile() {
+  return window['go']['app']['Desktop']['ChooseDatabaseCreateFile']();
+}
+
+export function ChooseDatabaseFile() {
+  return window['go']['app']['Desktop']['ChooseDatabaseFile']();
+}
+
 export function ClearMetrics() {
   return window['go']['app']['Desktop']['ClearMetrics']();
 }
@@ -28,6 +36,10 @@ export function ConfigureTrayMenu(arg1) {
 
 export function CreateChatConversation(arg1, arg2) {
   return window['go']['app']['Desktop']['CreateChatConversation'](arg1, arg2);
+}
+
+export function CreateDatabase(arg1) {
+  return window['go']['app']['Desktop']['CreateDatabase'](arg1);
 }
 
 export function CreateFunction(arg1) {
@@ -42,8 +54,16 @@ export function CreatePipeline(arg1) {
   return window['go']['app']['Desktop']['CreatePipeline'](arg1);
 }
 
+export function DebugDatabase(arg1) {
+  return window['go']['app']['Desktop']['DebugDatabase'](arg1);
+}
+
 export function DeleteChatConversation(arg1) {
   return window['go']['app']['Desktop']['DeleteChatConversation'](arg1);
+}
+
+export function DeleteDatabase(arg1) {
+  return window['go']['app']['Desktop']['DeleteDatabase'](arg1);
 }
 
 export function DeleteFunction(arg1) {
@@ -142,6 +162,10 @@ export function HandleWebhook(arg1, arg2, arg3) {
   return window['go']['app']['Desktop']['HandleWebhook'](arg1, arg2, arg3);
 }
 
+export function InspectDatabase(arg1) {
+  return window['go']['app']['Desktop']['InspectDatabase'](arg1);
+}
+
 export function InstallLlamaModel(arg1) {
   return window['go']['app']['Desktop']['InstallLlamaModel'](arg1);
 }
@@ -172,6 +196,10 @@ export function ListChatRunEvents(arg1) {
 
 export function ListChatRuns(arg1) {
   return window['go']['app']['Desktop']['ListChatRuns'](arg1);
+}
+
+export function ListDatabases() {
+  return window['go']['app']['Desktop']['ListDatabases']();
 }
 
 export function ListDocumentation(arg1) {
@@ -268,6 +296,10 @@ export function RecordHTTPMetric(arg1) {
 
 export function RediscoverPlugins() {
   return window['go']['app']['Desktop']['RediscoverPlugins']();
+}
+
+export function RegisterDatabase(arg1) {
+  return window['go']['app']['Desktop']['RegisterDatabase'](arg1);
 }
 
 export function RemoveTwitchIdentity(arg1) {
@@ -372,6 +404,10 @@ export function TrustPipelineRevision(arg1, arg2) {
 
 export function TrustTwitchTrigger(arg1) {
   return window['go']['app']['Desktop']['TrustTwitchTrigger'](arg1);
+}
+
+export function UpdateDatabase(arg1) {
+  return window['go']['app']['Desktop']['UpdateDatabase'](arg1);
 }
 
 export function UpdateGlobalVariable(arg1) {

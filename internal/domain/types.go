@@ -598,6 +598,88 @@ type SaveGlobalVariableRequest struct {
 	DefaultValue any      `json:"defaultValue"`
 }
 
+// Database is a user-registered SQLite file. Neuropipe stores only metadata;
+// the database contents remain in the selected local file.
+type Database struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// SaveDatabaseRequest carries editable database metadata across Wails.
+type SaveDatabaseRequest struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// DatabaseSchema is the inspectable SQLite catalog exposed to the editor.
+type DatabaseSchema struct {
+	Tables []DatabaseTable `json:"tables"`
+}
+
+type DatabaseTable struct {
+	Name    string           `json:"name"`
+	Columns []DatabaseColumn `json:"columns"`
+	Indexes []DatabaseIndex  `json:"indexes"`
+}
+
+type DatabaseColumn struct {
+	Name       string  `json:"name"`
+	DataType   string  `json:"dataType"`
+	Nullable   bool    `json:"nullable"`
+	PrimaryKey bool    `json:"primaryKey"`
+	Default    *string `json:"default,omitempty"`
+}
+
+type DatabaseIndex struct {
+	Name    string   `json:"name"`
+	Unique  bool     `json:"unique"`
+	Columns []string `json:"columns"`
+}
+
+// SQLParameter is the persisted dynamic input contract of an action:sql node.
+type SQLParameter struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Label    string   `json:"label"`
+	Type     TypeSpec `json:"type"`
+	Required bool     `json:"required,omitempty"`
+}
+
+// SQLArgument is one named, safely-bound query value.
+type SQLArgument struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
+}
+
+// SQLRequest is the narrow execution contract shared by the node and service.
+type SQLRequest struct {
+	DatabaseID string        `json:"databaseId"`
+	SQL        string        `json:"sql"`
+	Parameters []SQLArgument `json:"parameters"`
+	MaxRows    int           `json:"maxRows,omitempty"`
+}
+
+// SQLResult contains only JSON-safe values suitable for Blueprint packets.
+type SQLResult struct {
+	Columns      []string         `json:"columns"`
+	Rows         []map[string]any `json:"rows"`
+	RowsAffected int64            `json:"rowsAffected"`
+	LastInsertID *int64           `json:"lastInsertId,omitempty"`
+	Truncated    bool             `json:"truncated"`
+}
+
+// SQLDebugRequest is the Wails-facing query preview contract.
+type SQLDebugRequest struct {
+	DatabaseID string        `json:"databaseId"`
+	SQL        string        `json:"sql"`
+	Parameters []SQLArgument `json:"parameters"`
+	MaxRows    int           `json:"maxRows,omitempty"`
+}
+
 // GlobalVariableSummary is the compact Variables-library card. Value carries
 // the current content so the list view can preview it without a follow-up call.
 type GlobalVariableSummary struct {

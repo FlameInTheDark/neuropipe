@@ -1,5 +1,5 @@
 import { Fragment } from 'react'
-import { BarChart3, BookOpen, Braces, Clock3, Database, FileText, LayoutGrid, MessageCircle, PanelLeft, Settings2, Workflow } from 'lucide-react'
+import { BarChart3, BookOpen, Braces, Clock3, Database, FileText, HardDrive, LayoutGrid, MessageCircle, PanelLeft, Settings2, Workflow } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { type Screen, useUIStore } from '@/stores/ui'
@@ -14,12 +14,13 @@ const navigation: { id: Exclude<Screen, 'editor' | 'function-editor'>; labelKey:
   { id: 'pipelines', labelKey: 'nav.pipelines', icon: Workflow },
   { id: 'functions', labelKey: 'nav.functions', icon: Braces },
   { id: 'variables', labelKey: 'nav.variables', icon: Database },
+  { id: 'databases', labelKey: 'nav.databases', icon: HardDrive },
   { id: 'metrics', labelKey: 'nav.metrics', icon: BarChart3 },
   { id: 'documentation', labelKey: 'nav.documentation', icon: BookOpen },
   { id: 'settings', labelKey: 'nav.settings', icon: Settings2 },
 ]
 
-const separatedAfter = new Set<Screen>(['reports', 'variables'])
+const separatedAfter = new Set<Screen>(['reports', 'databases'])
 
 export function Sidebar() {
   const { screen, setScreen, sidebarCollapsed } = useUIStore()

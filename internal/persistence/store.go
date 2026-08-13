@@ -254,6 +254,14 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS databases (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS databases_name ON databases(name COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS functions (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

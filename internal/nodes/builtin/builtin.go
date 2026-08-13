@@ -29,6 +29,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexsplit"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/reroute"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/typeassert"
+	sqlnode "github.com/FlameInTheDark/neuropipe/internal/nodes/database/sql"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/date"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/branch"
 	breaknode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/break"
@@ -70,6 +71,7 @@ import (
 func RegisterAll(registrar nodes.Registrar) error {
 	for _, register := range []func(nodes.Registrar) error{
 		javascript.Register,
+		sqlnode.Register,
 		constant.Register,
 		formattext.Register,
 		getfield.Register,

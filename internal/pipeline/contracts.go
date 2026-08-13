@@ -133,6 +133,11 @@ func WithGlobalVariablesStore(store GlobalVariablesStore) EngineOption {
 	return func(engine *Engine) { engine.globals = store }
 }
 
+// WithSQLExecutor enables registered SQLite database access for SQL nodes.
+func WithSQLExecutor(executor nodes.SQLExecutor) EngineOption {
+	return func(engine *Engine) { engine.databases = executor }
+}
+
 // ValidationError explains why a definition cannot be published.
 type ValidationError struct {
 	Message string `json:"message"`

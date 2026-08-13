@@ -81,6 +81,10 @@ export function ShortcutRecorder({
     if (!recording) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (document.activeElement !== recordButtonRef.current) {
+        setRecording(false);
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "Escape") {
@@ -114,6 +118,7 @@ export function ShortcutRecorder({
           aria-pressed={recording}
           aria-describedby={recording ? helpID : undefined}
           onClick={() => setRecording((current) => !current)}
+          onBlur={() => setRecording(false)}
         >
           <Keyboard aria-hidden className="size-4 shrink-0" />
           <span className="min-w-0 truncate">

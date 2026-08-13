@@ -34,6 +34,7 @@ type Service struct {
 	metrics  MetricsRecorder
 	twitch   nodes.TwitchChatSender
 	globals  pipeline.GlobalVariablesStore
+	database nodes.SQLExecutor
 
 	mu            sync.Mutex
 	running       map[string]struct{}
@@ -73,6 +74,11 @@ func WithTwitchChatSender(sender nodes.TwitchChatSender) ServiceOption {
 // by graph execution. A nil store keeps the engine usable in headless tests.
 func WithGlobalVariablesStore(store pipeline.GlobalVariablesStore) ServiceOption {
 	return func(service *Service) { service.globals = store }
+}
+
+// WithDatabaseService supplies the registered SQLite executor to graph runs.
+func WithDatabaseService(service nodes.SQLExecutor) ServiceOption {
+	return func(s *Service) { s.database = service }
 }
 
 // SetTwitchChatSender completes Desktop composition before workers start.
@@ -428,6 +434,7 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, execution.PipelineID, execution.ID)),
 		pipeline.WithTwitchChatSender(s.twitch),
 		pipeline.WithGlobalVariablesStore(s.globals),
+		pipeline.WithSQLExecutor(s.database),
 	)
 	result, runErr := engine.Execute(runCtx, job.definition, job.triggerNodeID, job.input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
@@ -511,6 +518,7 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, pipelineID, execution.ID)),
 		pipeline.WithTwitchChatSender(s.twitch),
 		pipeline.WithGlobalVariablesStore(s.globals),
+		pipeline.WithSQLExecutor(s.database),
 	)
 	result, runErr := engine.Execute(ctx, definition, triggerNodeID, input)
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
