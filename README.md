@@ -1,5 +1,7 @@
 # Neuropipe
 
+![Neuropipe screenshot](assets/screenshot.png)
+
 Neuropipe is a Windows-first desktop workspace for building local AI automations. It combines a Blueprint-style visual editor, local and compatible LLM providers, scheduled and button-triggered pipelines, chat, reports, and operational metrics in one Wails application.
 
 Everything is designed to stay on your machine by default. Pipelines, reports, execution history, metrics, model metadata, and settings are stored in the local Neuropipe workspace. Secrets are kept separately in the Windows vault and are redacted from previews and logs.
