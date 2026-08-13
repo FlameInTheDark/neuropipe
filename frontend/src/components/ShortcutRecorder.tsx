@@ -101,8 +101,8 @@ export function ShortcutRecorder({
       recordButtonRef.current?.focus();
     };
 
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [onValueChange, recording]);
 
   const hasShortcut = value.trim().length > 0;

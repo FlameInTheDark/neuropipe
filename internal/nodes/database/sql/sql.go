@@ -95,7 +95,11 @@ func execute(ctx context.Context, invocation nodes.Invocation, runtime nodes.Run
 	if result.LastInsertID != nil {
 		lastInsertID = *result.LastInsertID
 	}
-	return nodes.ExecutionResult{Outputs: map[string]any{"columns": result.Columns, "rows": result.Rows, "rowsAffected": result.RowsAffected, "lastInsertId": lastInsertID, "truncated": result.Truncated}, Ports: []string{"out"}}, nil
+	rows := make([]any, len(result.Rows))
+	for index, row := range result.Rows {
+		rows[index] = row
+	}
+	return nodes.ExecutionResult{Outputs: map[string]any{"columns": result.Columns, "rows": rows, "rowsAffected": result.RowsAffected, "lastInsertId": lastInsertID, "truncated": result.Truncated}, Ports: []string{"out"}}, nil
 }
 
 func configuredParameters(values map[string]any) ([]domain.SQLParameter, error) {

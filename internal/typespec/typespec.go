@@ -104,7 +104,7 @@ func Assignable(source, target domain.TypeSpec) bool {
 	}
 	switch target.Kind {
 	case domain.TypeList:
-		return source.Element != nil && target.Element != nil && Assignable(*source.Element, *target.Element) && Assignable(*target.Element, *source.Element)
+		return source.Element != nil && target.Element != nil && Assignable(*source.Element, *target.Element)
 	case domain.TypeMap:
 		return source.Key != nil && source.Value != nil && target.Key != nil && target.Value != nil &&
 			Assignable(*source.Key, *target.Key) && Assignable(*target.Key, *source.Key) &&
@@ -149,6 +149,13 @@ func ValidateValue(value any, target domain.TypeSpec) error {
 }
 
 func validate(value reflect.Value, target domain.TypeSpec, path string) error {
+	// `any` accepts every value, including nil. Short-circuit before the
+	// nil-unwrapping loop below, which would otherwise reject nil values
+	// nested inside structured contracts (e.g. a SQL row's NULL column
+	// flowing into a list<map<string, any>> pin).
+	if target.Kind == domain.TypeAny {
+		return nil
+	}
 	for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer) {
 		if value.IsNil() {
 			return fmt.Errorf("%s is nil, need %s", path, target.Kind)
@@ -159,8 +166,6 @@ func validate(value reflect.Value, target domain.TypeSpec, path string) error {
 		return fmt.Errorf("%s is nil, need %s", path, target.Kind)
 	}
 	switch target.Kind {
-	case domain.TypeAny:
-		return nil
 	case domain.TypeBool:
 		if value.Kind() != reflect.Bool {
 			return typeError(path, target, value)

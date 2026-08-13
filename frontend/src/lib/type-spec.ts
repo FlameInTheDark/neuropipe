@@ -17,7 +17,10 @@ export function isTypeAssignable(source?: TypeSpec, target?: TypeSpec): boolean 
   if (!source || !target) return false;
   if (target.kind === "any") return true;
   if (source.kind === "any" || source.kind !== target.kind) return false;
-  if (target.kind === "list") return invariant(source.element, target.element);
+  if (target.kind === "list") {
+    if (!source.element || !target.element) return false;
+    return isTypeAssignable(source.element, target.element);
+  }
   if (target.kind === "map") return invariant(source.key, target.key) && invariant(source.value, target.value);
   if (target.kind === "record") {
     if (target.name) return source.name === target.name;

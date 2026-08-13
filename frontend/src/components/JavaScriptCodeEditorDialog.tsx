@@ -149,6 +149,7 @@ export function JavaScriptCodeEditorDialog({
         padding: { top: 14, bottom: 14 },
         scrollBeyondLastLine: false,
         wordWrap: "on",
+        editContext: false,
       });
       currentEditor.onDidChangeModelContent(() => setCode(currentEditor?.getValue() ?? ""));
       editor.current = currentEditor;

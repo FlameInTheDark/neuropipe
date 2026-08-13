@@ -93,7 +93,7 @@ export function SQLCodeEditorDialog({ open, config, onClose, onSave }: { open: b
     void loadMonaco().then((monaco) => {
       if (cancelled || !editorElement.current) return;
       monaco.editor.defineTheme("neuropipe-sql", { base: "vs-dark", inherit: true, rules: [], colors: { "editor.background": "#09090b", "editorGutter.background": "#09090b" } });
-      editor = monaco.editor.create(editorElement.current, { value: sqlRef.current, language: "sql", theme: "neuropipe-sql", automaticLayout: true, minimap: { enabled: false }, fontSize: 13, lineHeight: 21, padding: { top: 12, bottom: 12 }, scrollBeyondLastLine: false, wordWrap: "on" });
+      editor = monaco.editor.create(editorElement.current, { value: sqlRef.current, language: "sql", theme: "neuropipe-sql", automaticLayout: true, minimap: { enabled: false }, fontSize: 13, lineHeight: 21, padding: { top: 12, bottom: 12 }, scrollBeyondLastLine: false, wordWrap: "on", editContext: false });
       editor.onDidChangeModelContent(() => setSQL(editor?.getValue() ?? ""));
       editor.focus();
     }).catch(() => setError(translateRef.current("sql.editorUnavailable")));

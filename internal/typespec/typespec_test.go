@@ -26,6 +26,19 @@ func TestStructuralRecordAssignability(t *testing.T) {
 	}
 }
 
+func TestListElementIsCovariantForDataFlow(t *testing.T) {
+	stringType := String()
+	anyType := Any()
+	rowsType := domain.TypeSpec{Kind: domain.TypeList, Element: &domain.TypeSpec{Kind: domain.TypeMap, Key: &stringType, Value: &anyType}}
+	listAny := domain.TypeSpec{Kind: domain.TypeList, Element: &anyType}
+	if !Assignable(rowsType, listAny) {
+		t.Fatal("list<map<string, any>> should be assignable to list<any>")
+	}
+	if Assignable(listAny, rowsType) {
+		t.Fatal("list<any> should NOT be assignable to list<map<string, any>>")
+	}
+}
+
 func TestValidateValueChecksNestedRecords(t *testing.T) {
 	type profile struct {
 		Name string `json:"name"`
@@ -48,6 +61,26 @@ func TestValidateValueAllowsAnyNestedInsideStructuredContracts(t *testing.T) {
 	contract := domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{{Name: "payload", Type: domain.TypeSpec{Kind: domain.TypeMap, Key: &key, Value: &value}}}}
 	if err := ValidateValue(map[string]any{"payload": map[string]any{"count": 3, "items": []any{"text"}}}, contract); err != nil {
 		t.Fatalf("nested any value was rejected: %v", err)
+	}
+}
+
+func TestValidateValueAcceptsNilInsideAnyNestedContract(t *testing.T) {
+	// SQL rows frequently contain NULL columns (e.g. author_id). When the
+	// consumer pin is typed list<map<string, any>>, the nil map value must
+	// satisfy the `any` element contract rather than fail with
+	// "value[N] value is nil, need any".
+	stringType := String()
+	anyType := Any()
+	rowsContract := domain.TypeSpec{Kind: domain.TypeList, Element: &domain.TypeSpec{Kind: domain.TypeMap, Key: &stringType, Value: &anyType}}
+	rows := []any{
+		map[string]any{"id": int64(1), "author_id": int64(1)},
+		map[string]any{"id": int64(2), "author_id": int64(2)},
+		map[string]any{"id": int64(3), "author_id": int64(1)},
+		map[string]any{"id": int64(4), "author_id": nil}, // NULL column
+		map[string]any{"id": int64(5), "author_id": int64(3)},
+	}
+	if err := ValidateValue(rows, rowsContract); err != nil {
+		t.Fatalf("nil map value under `any` contract was rejected: %v", err)
 	}
 }
 
