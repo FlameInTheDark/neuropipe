@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Braces, FileInput, FileOutput, Loader2, Plus, Trash2 } from "lucide-react";
+import { Braces, FileInput, FileOutput, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { JavaScriptTypeSpecEditor } from "@/components/JavaScriptTypeSpecEditor";
+import { LLMCodeAssistantDialog } from "@/components/LLMCodeAssistantDialog";
 import { desktop } from "@/lib/bridge";
 import {
   defaultJavaScriptNodeConfig,
@@ -110,6 +111,7 @@ export function JavaScriptCodeEditorDialog({
   const [capabilities, setCapabilities] = useState<JavaScriptCapability[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [aiOpen, setAIOpen] = useState(false);
   const editorElement = useRef<HTMLDivElement>(null);
   const editor = useRef<import("monaco-editor").editor.IStandaloneCodeEditor>();
   const declaration = useRef<import("monaco-editor").IDisposable>();
@@ -234,6 +236,15 @@ export function JavaScriptCodeEditorDialog({
           <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-2.5 text-xs text-zinc-500">
             <Braces className="size-4 text-amber-200" />
             <span>{t("javascript.editorHint")}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-auto h-7 px-2 text-xs text-violet-300 hover:text-violet-200"
+              onClick={() => setAIOpen(true)}
+            >
+              <Sparkles className="size-3.5" />
+              {t("codeAssistant.title", "AI Code Assistant")}
+            </Button>
           </div>
           <div ref={editorElement} className="min-h-72 flex-1" />
         </div>
@@ -282,6 +293,23 @@ export function JavaScriptCodeEditorDialog({
           {t("javascript.save")}
         </Button>
       </div>
+      <LLMCodeAssistantDialog
+        open={aiOpen}
+        request={{
+          editorType: "javascript",
+          currentCode: code,
+          jsContext: {
+            inputs: inputs.map((c) => ({ id: c.id, type: JSON.stringify(c.type) })),
+            outputs: outputs.map((c) => ({ id: c.id, type: JSON.stringify(c.type) })),
+            capabilities: capabilities,
+          },
+        }}
+        onApply={(generatedCode) => {
+          setCode(generatedCode);
+          if (editor.current) { editor.current.setValue(generatedCode); }
+        }}
+        onClose={() => setAIOpen(false)}
+      />
     </Dialog>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, CircleHelp, Columns3, Database as DatabaseIcon, Loader2, Play, Plus, RefreshCw, Table2, Trash2 } from "lucide-react";
+import { ChevronRight, CircleHelp, Columns3, Database as DatabaseIcon, Loader2, Play, Plus, RefreshCw, Sparkles, Table2, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
+import { LLMCodeAssistantDialog } from "@/components/LLMCodeAssistantDialog";
 import { desktop } from "@/lib/bridge";
 import { loadMonaco } from "@/lib/monaco";
 import type { Database, DatabaseSchema, SQLParameter, SQLResult, TypeKind } from "@/lib/types";
@@ -65,7 +66,9 @@ export function SQLCodeEditorDialog({ open, config, onClose, onSave }: { open: b
   const [error, setError] = useState("");
   const [running, setRunning] = useState(false);
   const [refreshingSchema, setRefreshingSchema] = useState(false);
+  const [aiOpen, setAIOpen] = useState(false);
   const editorElement = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<import("monaco-editor").editor.IStandaloneCodeEditor>();
   const sqlRef = useRef(sql);
   const translateRef = useRef(t);
   useEffect(() => { sqlRef.current = sql; }, [sql]);
@@ -95,6 +98,7 @@ export function SQLCodeEditorDialog({ open, config, onClose, onSave }: { open: b
       monaco.editor.defineTheme("neuropipe-sql", { base: "vs-dark", inherit: true, rules: [], colors: { "editor.background": "#09090b", "editorGutter.background": "#09090b" } });
       editor = monaco.editor.create(editorElement.current, { value: sqlRef.current, language: "sql", theme: "neuropipe-sql", automaticLayout: true, minimap: { enabled: false }, fontSize: 13, lineHeight: 21, padding: { top: 12, bottom: 12 }, scrollBeyondLastLine: false, wordWrap: "on", editContext: false });
       editor.onDidChangeModelContent(() => setSQL(editor?.getValue() ?? ""));
+      editorRef.current = editor;
       editor.focus();
     }).catch(() => setError(translateRef.current("sql.editorUnavailable")));
     return () => { cancelled = true; editor?.dispose(); };
@@ -123,13 +127,31 @@ export function SQLCodeEditorDialog({ open, config, onClose, onSave }: { open: b
     return missingPlaceholders.length > 0 ? t("sql.missingParameters", { names: missingPlaceholders.join(", ") }) : "";
   })();
   return <Dialog open={open} title={t("sql.title")} description={t("sql.description")} onOpenChange={(next) => { if (!next && !running) onClose(); }} className="h-[min(920px,calc(100vh-40px))] max-w-[min(1440px,calc(100vw-40px))]">
-    <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-2.5"><span className="text-xs text-zinc-500">{t("sql.database")}</span><Select value={databaseId} onValueChange={setDatabaseId} options={databases.map((item) => ({ value: item.id, label: item.name }))} placeholder={t("sql.selectDatabase")} ariaLabel={t("sql.database")} /></div>
+    <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-2.5"><span className="text-xs text-zinc-500">{t("sql.database")}</span><Select value={databaseId} onValueChange={setDatabaseId} options={databases.map((item) => ({ value: item.id, label: item.name }))} placeholder={t("sql.selectDatabase")} ariaLabel={t("sql.database")} /><Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-xs text-violet-300 hover:text-violet-200" onClick={() => setAIOpen(true)}><Sparkles className="size-3.5" />{t("codeAssistant.title", "AI Code Assistant")}</Button></div>
     <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(0,1fr)_340px]">
       <aside className="muted-scroll min-h-0 overflow-y-auto border-r border-zinc-800 p-3"><div className="mb-3 flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-xs font-medium text-zinc-300"><DatabaseIcon className="size-3.5" />{t("sql.schema")}</h3><Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => void refreshSchema()} disabled={!databaseId || refreshingSchema} aria-label={t("sql.refreshSchema")}><RefreshCw className={`size-3.5 ${refreshingSchema ? "animate-spin" : ""}`} /></Button></div>{schema?.tables.length ? <div className="space-y-1">{schema.tables.map((table) => <div key={table.name}><button type="button" className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs text-zinc-300 hover:bg-zinc-900" onClick={() => setExpanded((current) => { const next = new Set(current); next.has(table.name) ? next.delete(table.name) : next.add(table.name); return next; })}><ChevronRight className={`size-3 transition-transform ${expanded.has(table.name) ? "rotate-90" : ""}`} /><Table2 className="size-3.5 text-emerald-300" /><span className="truncate">{table.name}</span></button>{expanded.has(table.name) ? <div className="ml-5 space-y-0.5 py-1">{table.columns.map((column) => <div key={column.name} className="flex items-center gap-1.5 px-1 py-0.5 text-[11px] text-zinc-500"><Columns3 className="size-3" /><span className="min-w-0 flex-1 truncate">{column.name}</span><span className="truncate text-zinc-700">{column.dataType}</span></div>)}</div> : null}</div>)}</div> : <p className="text-xs leading-5 text-zinc-600">{databaseId ? t("sql.noTables") : t("sql.selectDatabaseHint")}</p>}</aside>
       <div className="flex min-h-0 flex-col"><div ref={editorElement} className="min-h-48 flex-1" /><div className="max-h-64 min-h-24 overflow-auto border-t border-zinc-800">{error ? <p className="p-3 font-mono text-xs text-red-300">{error}</p> : result ? <ResultTable result={result} /> : <p className="flex h-full min-h-24 items-center justify-center text-xs text-zinc-600">{t("sql.noResult")}</p>}</div></div>
        <aside className="muted-scroll min-h-0 overflow-y-auto border-l border-zinc-800 bg-zinc-950/40 p-3"><div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-xs font-semibold text-zinc-200">{t("sql.parameters")}</h3><p className="mt-0.5 text-[10px] text-zinc-600">{t("sqlHelp.parameters")}</p></div><Button size="sm" variant="outline" className="h-7 shrink-0 px-2 text-[11px]" onClick={() => setParameters((current) => [...current, nextParameter(current)])}><Plus className="size-3.5" />{t("sql.addParameter")}</Button></div>{missingPlaceholders.length ? <p className="mb-3 rounded-md border border-amber-500/20 bg-amber-500/5 p-2 text-[11px] leading-4 text-amber-200">{t("sql.missingParameters", { names: missingPlaceholders.join(", ") })}</p> : null}<div className="space-y-2.5">{parameters.map((item, index) => <div key={item.id} className="rounded-lg border border-zinc-800 bg-zinc-900/45 p-2.5 shadow-inner shadow-black/10"><div className="mb-2 flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-emerald-300"><span className="text-zinc-600">$</span><span className="truncate">{item.name || t("sql.parameterName")}</span></span><Button size="sm" variant="ghost" className="size-6 shrink-0 p-0 text-zinc-500 hover:text-red-300" onClick={() => setParameters((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={t("sql.removeParameter", { name: item.name })}><Trash2 className="size-3.5" /></Button></div><div className="space-y-1.5"><label className="block"><FieldLabel label={t("sql.parameterName")} description={t("sqlHelp.parameterName")} /><Input className="h-8 font-mono text-xs" value={item.name} onChange={(event) => updateParameter(index, { name: event.target.value })} placeholder={t("sql.parameterName")} aria-label={t("sql.parameterName")} /></label><label className="block"><FieldLabel label={t("sql.pinId")} description={t("sqlHelp.pinId")} /><Input className="h-8 font-mono text-xs" value={item.id} onChange={(event) => updateParameter(index, { id: event.target.value })} placeholder={t("sql.pinId")} aria-label={t("sql.pinId")} /></label><label className="block"><FieldLabel label={t("sql.label")} description={t("sqlHelp.label")} /><Input className="h-8 text-xs" value={item.label} onChange={(event) => updateParameter(index, { label: event.target.value })} placeholder={t("sql.label")} aria-label={t("sql.label")} /></label><div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 pt-1"><label className="min-w-0"><FieldLabel label={t("sql.type")} description={t("sqlHelp.type")} /><Select className="w-full" value={item.type.kind} onValueChange={(kind) => updateParameter(index, { type: { kind: kind as TypeKind } })} options={typeKinds.map((kind) => ({ value: kind, label: t(`sql.types.${kind}`) }))} ariaLabel={t("sql.type")} /></label><div><FieldLabel label={t("sql.required")} description={t("sqlHelp.required")} /><div className="flex h-8 items-center justify-center rounded-md border border-zinc-800 bg-zinc-950/50 px-2"><Switch checked={Boolean(item.required)} onCheckedChange={(required) => updateParameter(index, { required })} label={t("sql.required")} /></div></div></div><label className="block border-t border-zinc-800/80 pt-2"><FieldLabel label={t("sql.debugValue")} description={t("sqlHelp.debugValue")} /><Input className="h-8 font-mono text-xs" value={debugValues[item.id] ?? ""} onChange={(event) => setDebugValues((current) => ({ ...current, [item.id]: event.target.value }))} placeholder={t("sql.debugValue")} aria-label={t("sql.debugValueFor", { name: item.name })} /></label></div></div>)}</div>{parameters.length === 0 ? <p className="rounded-md border border-dashed border-zinc-800 px-3 py-4 text-center text-[11px] leading-4 text-zinc-600">{t("sqlHelp.noParameters")}</p> : null}</aside>
     </div>
     <div className="flex items-center justify-between border-t border-zinc-800 px-5 py-3"><Button variant="outline" onClick={() => void run()} disabled={running || !databaseId || !sql.trim() || Boolean(parameterError)}>{running ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}{t("sql.run")}</Button><div className="flex min-w-0 items-center gap-2">{parameterError ? <span className="max-w-sm truncate text-xs text-amber-300">{parameterError}</span> : null}<Button variant="ghost" onClick={onClose} disabled={running}>{t("common.cancel")}</Button><Button onClick={() => { onSave({ ...config, databaseId, sql, parameters }); onClose(); }} disabled={!databaseId || !sql.trim() || Boolean(parameterError)}>{t("sql.save")}</Button></div></div>
+    <LLMCodeAssistantDialog
+      open={aiOpen}
+      request={{
+        editorType: "sql",
+        currentCode: sql,
+        sqlContext: {
+          databaseName: databases.find((db) => db.id === databaseId)?.name ?? "",
+          schema,
+          parameters: parameters.map((p) => ({ name: p.name, type: p.type.kind })),
+        },
+      }}
+      onApply={(generatedSQL) => {
+        setSQL(generatedSQL);
+        sqlRef.current = generatedSQL;
+        if (editorRef.current) { editorRef.current.setValue(generatedSQL); }
+      }}
+      onClose={() => setAIOpen(false)}
+    />
   </Dialog>;
 }
 

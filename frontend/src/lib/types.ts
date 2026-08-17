@@ -629,3 +629,28 @@ export interface InputDialogResponse {
   canceled: boolean;
   value: string;
 }
+
+/** CodeGenerationRequest is sent to the Go side to generate code via LLM. */
+export interface CodeGenerationRequest {
+  editorType: "javascript" | "sql";
+  prompt: string;
+  currentCode: string;
+  jsContext?: JSCodeContext;
+  sqlContext?: SQLCodeContext;
+}
+
+export interface JSCodeContext {
+  inputs: { id: string; type: string }[];
+  outputs: { id: string; type: string }[];
+  capabilities: string[];
+}
+
+export interface SQLCodeContext {
+  databaseName: string;
+  schema?: DatabaseSchema;
+  parameters: { name: string; type: string }[];
+}
+
+export interface CodeGenerationResponse {
+  code: string;
+}
