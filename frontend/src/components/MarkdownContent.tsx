@@ -5,6 +5,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { Browser } from "@wailsio/runtime";
 import type { ReactNode } from "react";
+import { CodeBlock } from "@/components/CodeBlock";
 
 const permittedSchemes = new Set(["http:", "https:"]);
 const markdownSchema = {
@@ -124,11 +125,7 @@ function components(baseURL?: string, onDocumentLink?: (id: string, anchor?: str
         <span className="text-zinc-400">{children}</span>
       );
     },
-    pre: ({ children }) => (
-      <pre className="mt-5 max-w-full overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-xs leading-6 text-zinc-300 [&>code]:block [&>code]:break-normal [&>code]:rounded-none [&>code]:bg-transparent [&>code]:px-0 [&>code]:py-0 [&_.hljs-comment]:text-zinc-500 [&_.hljs-keyword]:text-fuchsia-300 [&_.hljs-literal]:text-fuchsia-300 [&_.hljs-string]:text-emerald-300 [&_.hljs-number]:text-amber-300 [&_.hljs-title]:text-sky-300 [&_.hljs-attr]:text-sky-300 [&_.hljs-built_in]:text-cyan-300 [&_.hljs-type]:text-cyan-300 [&_.hljs-variable]:text-orange-300 [&_.hljs-meta]:text-zinc-400">
-        {children}
-      </pre>
-    ),
+    pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
     code: ({ children, className }) =>
       className ? (
         <code className={`font-mono text-[0.85em] ${className}`}>
