@@ -94,7 +94,7 @@ jobs:
           wails3 generate syso -arch amd64 -icon build/icon.ico -manifest build/wails.exe.manifest -info build/info.json
           wails3 generate bindings
 
-      - name: Build production artifacts
+      - name: Build production binary
         if: steps.release.outputs.has_release == 'true'
         env:
           CGO_ENABLED: "1"
@@ -103,16 +103,37 @@ jobs:
           -ldflags "-s -w -H windowsgui -X main.appVersion=${{ steps.release.outputs.tag }}"
           -o build/bin/neuropipe.exe
 
-      - name: Build NSIS installer (optional)
+      - name: Generate WebView2 bootstrapper
         if: steps.release.outputs.has_release == 'true'
         shell: pwsh
         run: |
-          if (Test-Path build/windows/installer.nsi) {
-            $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
-            if (-not $nsis) { throw 'makensis.exe not found after NSIS install step' }
-            & makensis.exe build/windows/installer.nsi
-          } else {
-            Write-Host 'Skipping NSIS installer: build/windows/installer.nsi not found'
+          wails3 generate webview2bootstrapper -dir build/windows/nsis
+
+      - name: Build NSIS installer
+        if: steps.release.outputs.has_release == 'true'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/windows/nsis/project.nsi)) {
+            # Copy from Wails v3 template if project.nsi doesn't exist
+            $wailsPath = (go env GOMODCACHE) + "\github.com\wailsapp\wails\v3@v3.0.0-beta.8\internal\commands\build_assets\windows\nsis\project.nsi.tmpl"
+            if (Test-Path $wailsPath) {
+              Copy-Item $wailsPath build/windows/nsis/project.nsi
+              Write-Host "Copied project.nsi from Wails v3 template"
+            } else {
+              throw "project.nsi not found and Wails v3 template unavailable at $wailsPath"
+            }
+          }
+
+          $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if (-not $makensis) { throw 'makensis.exe not found after NSIS install step' }
+
+          Push-Location build/windows/nsis
+          & makensis.exe -DARG_WAILS_AMD64_BINARY="$env:GITHUB_WORKSPACE\build\bin\neuropipe.exe" project.nsi
+          $installerExit = $LASTEXITCODE
+          Pop-Location
+
+          if ($installerExit -ne 0) {
+            throw "NSIS installer build failed with exit code $installerExit"
           }
 
       - name: Find release artifacts
@@ -124,14 +145,23 @@ jobs:
           if (-not (Test-Path $buildDirectory)) {
             throw "Build directory $buildDirectory does not exist"
           }
+
           $binary = Get-ChildItem -Path $buildDirectory -File -Filter 'neuropipe.exe' | Select-Object -First 1
           if (-not $binary) {
             throw "neuropipe.exe not found in $buildDirectory"
           }
           "binary=$($binary.FullName)" >> $env:GITHUB_OUTPUT
+
           $installer = Get-ChildItem -Path $buildDirectory -File -Filter '*-installer.exe' | Select-Object -First 1
+          if (-not $installer) {
+            # NSIS outputs to build/bin/ with the pattern {name}-{arch}-installer.exe
+            $installer = Get-ChildItem -Path $buildDirectory -File -Filter '*installer*' | Select-Object -First 1
+          }
           if ($installer) {
             "installer=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+            Write-Host "Found installer: $($installer.FullName)"
+          } else {
+            Write-Host "Warning: No installer found in $buildDirectory"
           }
 
       - name: Attach executable and installer to GitHub release
@@ -143,8 +173,11 @@ jobs:
           $binary = '${{ steps.artifacts.outputs.binary }}'
           $installer = '${{ steps.artifacts.outputs.installer }}'
           $tag = '${{ steps.release.outputs.tag }}'
+
           $assets = @("$binary#Neuropipe-$tag-windows-amd64.exe")
           if ($installer) {
             $assets += "$installer#Neuropipe-$tag-windows-amd64-installer.exe"
           }
+
+          Write-Host "Uploading assets: $assets"
           gh release upload $tag @assets --clobber
