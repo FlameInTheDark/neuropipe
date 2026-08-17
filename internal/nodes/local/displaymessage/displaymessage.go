@@ -38,7 +38,7 @@ func definition() domain.NodeDefinition {
 	}}
 	return domain.NodeDefinition{
 		Type:        "action:display_message",
-		Category:    "Local",
+		Category:    "Display",
 		Label:       "Display Message",
 		Description: "Show a native dialog window with a title, message, and OK button.",
 		Icon:        "message-square",

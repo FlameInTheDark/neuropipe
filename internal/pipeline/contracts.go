@@ -153,6 +153,13 @@ func WithInputDialogOpener(opener nodes.InputDialogOpener) EngineOption {
 	return func(engine *Engine) { engine.inputDialogs = opener }
 }
 
+// WithFormDialogOpener enables the Form node by exposing the styled form
+// dialog opener to running graphs. A nil opener keeps the engine usable in
+// headless tests and turns form-dialog calls into explicit errors.
+func WithFormDialogOpener(opener nodes.FormDialogOpener) EngineOption {
+	return func(engine *Engine) { engine.formDialogs = opener }
+}
+
 // ValidationError explains why a definition cannot be published.
 type ValidationError struct {
 	Message string `json:"message"`

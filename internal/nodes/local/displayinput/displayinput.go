@@ -44,7 +44,7 @@ func definition() domain.NodeDefinition {
 	}}
 	return domain.NodeDefinition{
 		Type:        "action:display_input",
-		Category:    "Local",
+		Category:    "Display",
 		Label:       "Display Input Dialog",
 		Description: "Show a dialog with an input field and Continue/Cancel buttons; route execution by the user's choice.",
 		Icon:        "keyboard",

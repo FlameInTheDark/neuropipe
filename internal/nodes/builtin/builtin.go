@@ -52,6 +52,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displaymessage"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displayquestion"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/download"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/form"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/listdirectory"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/readfile"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/writefile"
@@ -131,6 +132,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 		displaymessage.Register,
 		displayquestion.Register,
 		displayinput.Register,
+		form.Register,
 		event.Register,
 		sendchatmessage.Register,
 		split.Register,

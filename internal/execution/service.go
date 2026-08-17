@@ -37,6 +37,7 @@ type Service struct {
 	database nodes.SQLExecutor
 	dialogs  nodes.DialogOpener
 	inputs   nodes.InputDialogOpener
+	forms    nodes.FormDialogOpener
 
 	mu            sync.Mutex
 	running       map[string]struct{}
@@ -94,6 +95,12 @@ func WithDialogOpener(opener nodes.DialogOpener) ServiceOption {
 // Display Input Dialog node.
 func WithInputDialogOpener(opener nodes.InputDialogOpener) ServiceOption {
 	return func(s *Service) { s.inputs = opener }
+}
+
+// WithFormDialogOpener attaches the styled form dialog opener used by the
+// Form node.
+func WithFormDialogOpener(opener nodes.FormDialogOpener) ServiceOption {
+	return func(s *Service) { s.forms = opener }
 }
 
 // SetTwitchChatSender completes Desktop composition before workers start.
@@ -491,6 +498,7 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		pipeline.WithSQLExecutor(s.database),
 		pipeline.WithDialogOpener(s.dialogs),
 		pipeline.WithInputDialogOpener(s.inputs),
+		pipeline.WithFormDialogOpener(s.forms),
 	)
 	result, runErr := engine.Execute(runCtx, job.definition, job.triggerNodeID, job.input)
 	// Recover from panics inside node modules so the worker goroutine is
@@ -602,6 +610,7 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 		pipeline.WithSQLExecutor(s.database),
 		pipeline.WithDialogOpener(s.dialogs),
 		pipeline.WithInputDialogOpener(s.inputs),
+		pipeline.WithFormDialogOpener(s.forms),
 	)
 	result, runErr := engine.Execute(runCtx, definition, triggerNodeID, input)
 	// A panic inside a node module (for example a nil-pointer dereference

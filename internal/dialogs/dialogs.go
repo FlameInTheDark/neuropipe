@@ -10,7 +10,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -49,7 +48,7 @@ type InputResponse struct {
 // inputPending tracks one outstanding input dialog request.
 type inputPending struct {
 	done     chan struct{}
-	response InputResponse
+	response any
 	err      error
 }
 
@@ -176,7 +175,10 @@ func (s *Service) ShowInput(ctx context.Context, request InputRequest) (InputRes
 
 	select {
 	case <-pending.done:
-		return pending.response, pending.err
+		if resp, ok := pending.response.(InputResponse); ok {
+			return resp, pending.err
+		}
+		return InputResponse{Canceled: true}, pending.err
 	case <-ctx.Done():
 		s.emit("dialog.input.cancel", map[string]string{"id": request.ID})
 		return InputResponse{Canceled: true}, ctx.Err()
@@ -206,4 +208,92 @@ func newRequestID() string {
 	return "di-" + hex.EncodeToString(buffer)
 }
 
-var _ = fmt.Sprintf
+// FormDialogField is one field in the form, mirrored from nodes.FormItemSpec.
+type FormDialogField struct {
+	ID          string             `json:"id"`
+	Kind        string             `json:"kind"`
+	Label       string             `json:"label"`
+	Col         int                `json:"col"`
+	Row         int                `json:"row"`
+	Span        int                `json:"span"`
+	RowSpan     int                `json:"rowSpan"`
+	InputType   string             `json:"inputType,omitempty"`
+	Placeholder string             `json:"placeholder,omitempty"`
+	Options     []FormDialogOption `json:"options,omitempty"`
+}
+
+// FormDialogOption is one dropdown option.
+type FormDialogOption struct {
+	Value string `json:"value"`
+	Label string `json:"label,omitempty"`
+}
+
+// FormDialogRequest carries the data needed to render a styled form dialog in
+// the React layer.
+type FormDialogRequest struct {
+	ID       string            `json:"id"`
+	Title    string            `json:"title"`
+	Message  string            `json:"message"`
+	Continue string            `json:"continueLabel"`
+	Cancel   string            `json:"cancelLabel"`
+	Items    []FormDialogField `json:"items"`
+}
+
+// FormDialogResponse is returned from a styled form dialog.
+type FormDialogResponse struct {
+	Canceled bool           `json:"canceled"`
+	Values   map[string]any `json:"values"`
+}
+
+// ShowForm emits a Wails v3 custom event that asks the React layer to display
+// a styled form dialog and blocks until the user responds or the context is
+// cancelled.
+func (s *Service) ShowForm(ctx context.Context, request FormDialogRequest) (FormDialogResponse, error) {
+	if s.app == nil {
+		return FormDialogResponse{Canceled: true}, errors.New("dialogs service is not initialised")
+	}
+	if s.emit == nil {
+		return FormDialogResponse{Canceled: true}, errors.New("dialogs event sink is not configured")
+	}
+	if request.ID == "" {
+		request.ID = newRequestID()
+	}
+	pending := &inputPending{done: make(chan struct{})}
+	s.pendingMu.Lock()
+	s.pending[request.ID] = pending
+	s.pendingMu.Unlock()
+	defer func() {
+		s.pendingMu.Lock()
+		delete(s.pending, request.ID)
+		s.pendingMu.Unlock()
+	}()
+
+	s.emit("dialog.form.request", request)
+
+	select {
+	case <-pending.done:
+		// inputPending.response is any; for form we stored FormDialogResponse
+		if resp, ok := pending.response.(FormDialogResponse); ok {
+			return resp, pending.err
+		}
+		// fallback: treat as canceled
+		return FormDialogResponse{Canceled: true}, pending.err
+	case <-ctx.Done():
+		s.emit("dialog.form.cancel", map[string]string{"id": request.ID})
+		return FormDialogResponse{Canceled: true}, ctx.Err()
+	}
+}
+
+// ResolveForm is the Wails-bound callback the React layer invokes after the
+// user closes the form dialog.
+func (s *Service) ResolveForm(id string, response FormDialogResponse) bool {
+	s.pendingMu.Lock()
+	pending, ok := s.pending[id]
+	s.pendingMu.Unlock()
+	if !ok {
+		return false
+	}
+	pending.response = response
+	close(pending.done)
+	return true
+}

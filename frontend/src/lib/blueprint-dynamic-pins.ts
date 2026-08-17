@@ -4,7 +4,7 @@ import {
   resolveJavaScriptOutputs,
 } from "@/lib/javascript-node";
 import { typeSpecFromDataType } from "@/lib/type-spec";
-import type { DataType, NodeDefinition, NodePort, TypeSpec } from "@/lib/types";
+import type { DataType, FormItemValue, FormLayoutValue, NodeDefinition, NodePort, TypeSpec } from "@/lib/types";
 
 export interface FieldOutputValue {
   id: string;
@@ -104,17 +104,17 @@ function dataTypeForTypeSpec(type: TypeSpec): DataType {
 type TextBytesRepresentation = "text" | "bytes";
 
 function textBytesRepresentation(value: unknown): TextBytesRepresentation {
-	return value === "text" ? "text" : "bytes";
+        return value === "text" ? "text" : "bytes";
 }
 
 function textBytesPin(pin: NodePort, representation: TextBytesRepresentation): NodePort {
-	const dataType: DataType = representation === "text" ? "text" : "any";
-	return {
-		...pin,
-		dataType,
-		type: representation === "text" ? { kind: "string" } : { kind: "bytes" },
-		color: dataPinColor(dataType),
-	};
+        const dataType: DataType = representation === "text" ? "text" : "any";
+        return {
+                ...pin,
+                dataType,
+                type: representation === "text" ? { kind: "string" } : { kind: "bytes" },
+                color: dataPinColor(dataType),
+        };
 }
 
 export function isDataType(value: unknown): value is DataType {
@@ -470,6 +470,25 @@ export function resolveConfigDrivenOutputs(
       };
     });
   }
+  if (definition.type === "action:form") {
+    const layout = formLayoutFromValue(config.form ?? definition.defaultConfig?.form);
+    const dynamicPins = layout.items
+      .filter((it: FormItemValue) => it.kind !== "text")
+      .map((it: FormItemValue) => {
+        const dataType: DataType = it.kind === "input" && it.inputType === "number" ? "number" : "text";
+        return {
+          id: it.id,
+          label: it.label,
+          kind: "data" as const,
+          direction: "output" as const,
+          dataType,
+          type: typeSpecFromDataType(dataType),
+          color: dataPinColor(dataType),
+          maxConnections: 1,
+        };
+      });
+    return [...dynamicPins, ...outputs];
+  }
   if (
     definition.type !== "data:get_field" &&
     definition.type !== "data:break_object"
@@ -496,4 +515,33 @@ export function resolveConfigDrivenOutputs(
     color: dataPinColor(output.dataType),
     maxConnections: 1,
   }));
+}
+
+export function formLayoutFromValue(value: unknown): FormLayoutValue {
+  if (!value || typeof value !== "object") {
+    return { items: [{ id: "field_1", kind: "input", label: "Input", col: 0, row: 0, span: 4, rowSpan: 1, inputType: "text" }] };
+  }
+  const obj = value as Record<string, unknown>;
+  const itemsRaw = obj.items;
+  if (!Array.isArray(itemsRaw)) {
+    return { items: [{ id: "field_1", kind: "input", label: "Input", col: 0, row: 0, span: 4, rowSpan: 1, inputType: "text" }] };
+  }
+  const items = itemsRaw.map((raw, index) => {
+    const entry = (raw ?? {}) as Record<string, unknown>;
+    return {
+      id: String(entry.id ?? `field_${index + 1}`),
+      kind: (entry.kind === "text" || entry.kind === "input" || entry.kind === "dropdown" ? entry.kind : "input") as FormItemValue["kind"],
+      label: String(entry.label ?? ""),
+      col: Number(entry.col ?? 0),
+      row: Number(entry.row ?? 0),
+      span: Math.min(4, Math.max(1, Number(entry.span ?? 1))),
+      rowSpan: Math.max(1, Number(entry.rowSpan ?? 1)),
+      inputType: entry.inputType === "number" ? "number" : "text",
+      placeholder: entry.placeholder ? String(entry.placeholder) : undefined,
+      options: Array.isArray(entry.options)
+        ? entry.options.map((opt: Record<string, unknown>) => ({ value: String(opt.value ?? ""), label: opt.label ? String(opt.label) : undefined }))
+        : undefined,
+    } as FormItemValue;
+  });
+  return { items };
 }

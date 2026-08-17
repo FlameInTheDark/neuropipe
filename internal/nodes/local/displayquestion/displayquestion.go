@@ -39,7 +39,7 @@ func definition() domain.NodeDefinition {
 	}}
 	return domain.NodeDefinition{
 		Type:        "action:display_question",
-		Category:    "Local",
+		Category:    "Display",
 		Label:       "Display Question",
 		Description: "Show a native dialog with Yes and No buttons and route execution to the chosen branch.",
 		Icon:        "circle-help",

@@ -54,7 +54,47 @@ func (adapter *OpenerAdapter) ShowQuestion(ctx context.Context, title, message s
 var (
 	_ nodes.DialogOpener      = (*OpenerAdapter)(nil)
 	_ nodes.InputDialogOpener = (*InputAdapter)(nil)
+	_ nodes.FormDialogOpener  = (*FormAdapter)(nil)
 )
+
+// FormAdapter exposes a Service as the focused FormDialogOpener contract
+// consumed by the Form node.
+type FormAdapter struct {
+	service *Service
+}
+
+// NewFormAdapter wraps a Service so it satisfies nodes.FormDialogOpener.
+func NewFormAdapter(service *Service) *FormAdapter {
+	return &FormAdapter{service: service}
+}
+
+// ShowForm emits a styled form dialog request to the React layer and waits
+// for the user's response.
+func (adapter *FormAdapter) ShowForm(ctx context.Context, request nodes.FormRequest) (nodes.FormResponse, error) {
+	if adapter == nil || adapter.service == nil {
+		return nodes.FormResponse{Canceled: true}, errors.New("form dialog opener is unavailable")
+	}
+	fields := make([]FormDialogField, 0, len(request.Items))
+	for _, item := range request.Items {
+		field := FormDialogField{
+			ID: item.ID, Kind: item.Kind, Label: item.Label,
+			Col: item.Col, Row: item.Row, Span: item.Span, RowSpan: item.RowSpan,
+			InputType: item.InputType, Placeholder: item.Placeholder,
+		}
+		for _, opt := range item.Options {
+			field.Options = append(field.Options, FormDialogOption{Value: opt.Value, Label: opt.Label})
+		}
+		fields = append(fields, field)
+	}
+	resp, err := adapter.service.ShowForm(ctx, FormDialogRequest{
+		ID: request.ID, Title: request.Title, Message: request.Message,
+		Continue: request.Continue, Cancel: request.Cancel, Items: fields,
+	})
+	if err != nil {
+		return nodes.FormResponse{Canceled: true}, err
+	}
+	return nodes.FormResponse{Canceled: resp.Canceled, Values: resp.Values}, nil
+}
 
 // InputAdapter exposes a Service as the focused InputDialogOpener contract
 // consumed by the Display Input Dialog node.

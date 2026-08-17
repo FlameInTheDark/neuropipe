@@ -654,3 +654,51 @@ export interface SQLCodeContext {
 export interface CodeGenerationResponse {
   code: string;
 }
+
+/** FormDialogField is one field in the form, sent to the React layer. */
+export interface FormDialogField {
+  id: string;
+  kind: "text" | "input" | "dropdown";
+  label: string;
+  col: number;
+  row: number;
+  span: number;
+  rowSpan: number;
+  inputType?: "text" | "number";
+  placeholder?: string;
+  options?: { value: string; label?: string }[];
+}
+
+/** FormDialogRequest is emitted by the Go side when a Form node fires. */
+export interface FormDialogRequest {
+  id: string;
+  title: string;
+  message: string;
+  continueLabel: string;
+  cancelLabel: string;
+  items: FormDialogField[];
+}
+
+/** FormDialogResponse is sent back when the React modal closes. */
+export interface FormDialogResponse {
+  canceled: boolean;
+  values: Record<string, string | number>;
+}
+
+/** FormLayoutValue is the persisted form layout config. */
+export interface FormLayoutValue {
+  items: FormItemValue[];
+}
+
+export interface FormItemValue {
+  id: string;
+  kind: "text" | "input" | "dropdown";
+  label: string;
+  col: number;
+  row: number;
+  span: number;
+  rowSpan: number;
+  inputType?: "text" | "number";
+  placeholder?: string;
+  options?: { value: string; label?: string }[];
+}

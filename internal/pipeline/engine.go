@@ -51,6 +51,7 @@ type Engine struct {
 	databases     nodes.SQLExecutor
 	dialogs       nodes.DialogOpener
 	inputDialogs  nodes.InputDialogOpener
+	formDialogs   nodes.FormDialogOpener
 	variables     Packet
 }
 

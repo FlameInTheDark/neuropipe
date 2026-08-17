@@ -357,6 +357,52 @@ type InputDialogOpener interface {
 	ShowInput(ctx context.Context, request InputRequest) (InputResponse, error)
 }
 
+// FormDialogOpenerProvider is the runtime port consumed by the Form node.
+type FormDialogOpenerProvider interface {
+	FormDialogOpener() FormDialogOpener
+}
+
+// FormDialogOpener blocks until the user submits or cancels the styled form.
+type FormDialogOpener interface {
+	ShowForm(ctx context.Context, request FormRequest) (FormResponse, error)
+}
+
+// FormRequest carries the data needed to render a styled form dialog.
+type FormRequest struct {
+	ID       string         `json:"id"`
+	Title    string         `json:"title"`
+	Message  string         `json:"message"`
+	Continue string         `json:"continueLabel"`
+	Cancel   string         `json:"cancelLabel"`
+	Items    []FormItemSpec `json:"items"`
+}
+
+// FormResponse is returned from a styled form dialog.
+type FormResponse struct {
+	Canceled bool           `json:"canceled"`
+	Values   map[string]any `json:"values"`
+}
+
+// FormItemSpec is one field in the form, mirrored from the form node's layout.
+type FormItemSpec struct {
+	ID          string           `json:"id"`
+	Kind        string           `json:"kind"`
+	Label       string           `json:"label"`
+	Col         int              `json:"col"`
+	Row         int              `json:"row"`
+	Span        int              `json:"span"`
+	RowSpan     int              `json:"rowSpan"`
+	InputType   string           `json:"inputType,omitempty"`
+	Placeholder string           `json:"placeholder,omitempty"`
+	Options     []FormItemOption `json:"options,omitempty"`
+}
+
+// FormItemOption is one dropdown option.
+type FormItemOption struct {
+	Value string `json:"value"`
+	Label string `json:"label,omitempty"`
+}
+
 // DialogChoice reports which button the user pressed on a question dialog.
 type DialogChoice string
 

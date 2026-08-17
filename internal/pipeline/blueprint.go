@@ -703,6 +703,10 @@ func (s *blueprintState) DialogOpener() nodes.DialogOpener { return s.engine.dia
 // Display Input Dialog node.
 func (s *blueprintState) InputDialogOpener() nodes.InputDialogOpener { return s.engine.inputDialogs }
 
+// FormDialogOpener implements the focused runtime port consumed by the Form
+// node.
+func (s *blueprintState) FormDialogOpener() nodes.FormDialogOpener { return s.engine.formDialogs }
+
 // Return implements nodes.ReturnSignaler.
 func (s *blueprintState) Return(value map[string]any) {
 	s.result.Returned = true

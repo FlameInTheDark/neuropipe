@@ -62,9 +62,11 @@ import {
   ObjectFieldsEditor,
 } from "@/components/BlueprintDataMappingsEditor";
 import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEditor";
+import { FormBuilderEditor } from "@/components/BlueprintFormBuilderEditor";
 import { BlueprintNodeLibrary } from "@/components/BlueprintNodeLibrary";
 import { BlueprintNodeCard } from "@/components/BlueprintNodeCard";
 import { JavaScriptCodeControl } from "@/components/JavaScriptCodeControl";
+import { TextEditorExpandButton, TextEditorField } from "@/components/TextEditorField";
 import { DatabaseSelectControl, SQLCodeControl } from "@/components/SQLCodeControl";
 import { IconAppearancePicker, LucideIconPicker } from "@/components/LucideIconPicker";
 import { ShortcutRecorder } from "@/components/ShortcutRecorder";
@@ -1999,7 +2001,9 @@ function ConfigControl({
 }) {
   const { t } = useTranslation();
   const displayLabel =
-    field.kind === "switch-cases" ? t("switchCases.cases") : field.label;
+    field.kind === "switch-cases" ? t("switchCases.cases")
+    : field.kind === "form-builder" ? t("formBuilder.layout")
+    : field.label;
   const resolvedValue = value ?? defaultValue;
   const stringValue =
     (field.kind === "json" || field.kind === "type-spec") && typeof resolvedValue !== "string"
@@ -2011,6 +2015,9 @@ function ConfigControl({
       <span className="mb-1.5 flex items-center gap-1 text-xs font-medium text-zinc-400">
         {displayLabel}
         {field.required && <span className="text-zinc-600">*</span>}
+        {(field.kind === "string" || field.kind === "textarea" || field.kind === "json" || field.kind === "type-spec") && (
+          <TextEditorExpandButton onChange={onChange} value={stringValue} placeholder={field.placeholder} multiline={field.kind !== "string"} />
+        )}
       </span>
       {field.kind === "javascript-editor" ? (
         <JavaScriptCodeControl
@@ -2071,6 +2078,8 @@ function ConfigControl({
           legacyOptions={nodeConfig.options}
           onChange={onChange}
         />
+      ) : field.kind === "form-builder" ? (
+        <FormBuilderEditor value={resolvedValue} onChange={onChange} />
       ) : field.kind === "field-outputs" ? (
         <FieldOutputsEditor
           value={resolvedValue}
@@ -2094,18 +2103,26 @@ function ConfigControl({
       ) : field.kind === "tags" ? (
         <TagsEditor value={stringValue} onChange={onChange} />
       ) : field.kind === "textarea" || field.kind === "json" || field.kind === "type-spec" ? (
-        <textarea
+        <TextEditorField
+          value={stringValue}
+          onChange={onChange}
+          placeholder={field.placeholder}
+          multiline
+          ariaLabel={field.label}
+        />
+      ) : field.kind === "number" ? (
+        <Input
+          type="number"
           value={stringValue}
           onChange={(event) => onChange(event.target.value)}
-          className="min-h-24 w-full resize-y rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-xs leading-5 text-zinc-200 outline-none focus:border-zinc-500"
           placeholder={field.placeholder}
         />
       ) : (
-        <Input
-          type={field.kind === "number" ? "number" : "text"}
+        <TextEditorField
           value={stringValue}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={onChange}
           placeholder={field.placeholder}
+          ariaLabel={field.label}
         />
       )}
     </div>

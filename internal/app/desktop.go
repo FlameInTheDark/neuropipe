@@ -170,6 +170,7 @@ func New(version string) (*Desktop, error) {
 		execution.WithDatabaseService(databases),
 		execution.WithDialogOpener(dialogs.NewOpenerAdapter(desktop.dialogs)),
 		execution.WithInputDialogOpener(dialogs.NewInputAdapter(desktop.dialogs)),
+		execution.WithFormDialogOpener(dialogs.NewFormAdapter(desktop.dialogs)),
 	)
 	desktop.runs.SetMaxConcurrentRuns(settings.MaxConcurrentRuns)
 	desktop.twitch = twitchservice.New(vault, store, desktop.runs, desktop.saveTwitchIdentity, desktop.emit)
@@ -1230,6 +1231,16 @@ func (d *Desktop) ResolveInputDialog(id string, response dialogs.InputResponse) 
 		return false
 	}
 	return d.dialogs.ResolveInput(id, response)
+}
+
+// ResolveFormDialog completes a pending form dialog request from the React
+// layer. The renderer calls this Wails-bound method after the user closes the
+// styled form modal.
+func (d *Desktop) ResolveFormDialog(id string, response dialogs.FormDialogResponse) bool {
+	if d.dialogs == nil {
+		return false
+	}
+	return d.dialogs.ResolveForm(id, response)
 }
 
 func (d *Desktop) context() context.Context {
