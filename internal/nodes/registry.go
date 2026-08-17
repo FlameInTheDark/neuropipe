@@ -329,6 +329,63 @@ type TwitchChatSenderProvider interface {
 	TwitchChatSender() TwitchChatSender
 }
 
+// DialogOpenerProvider is the runtime port consumed by Display Message and
+// Display Question nodes. The host implements this to expose its dialog
+// opener without giving node modules access to the desktop shell.
+type DialogOpenerProvider interface {
+	DialogOpener() DialogOpener
+}
+
+// InputDialogOpenerProvider is the runtime port consumed by the Display Input
+// Dialog node. The host implements this to expose the styled input dialog
+// opener to node modules.
+type InputDialogOpenerProvider interface {
+	InputDialogOpener() InputDialogOpener
+}
+
+// DialogOpener is the focused runtime port consumed by Display Message and
+// Display Question nodes. It owns the small surface node modules need to show
+// a native dialog without depending on Wails or the dialog implementation.
+type DialogOpener interface {
+	ShowMessage(ctx context.Context, title, message string) error
+	ShowQuestion(ctx context.Context, title, message string) (DialogChoice, error)
+}
+
+// InputDialogOpener is the focused runtime port consumed by the Display Input
+// Dialog node. It returns the typed user value or reports cancellation.
+type InputDialogOpener interface {
+	ShowInput(ctx context.Context, request InputRequest) (InputResponse, error)
+}
+
+// DialogChoice reports which button the user pressed on a question dialog.
+type DialogChoice string
+
+const (
+	DialogYes    DialogChoice = "yes"
+	DialogNo     DialogChoice = "no"
+	DialogCancel DialogChoice = "cancel"
+)
+
+// InputRequest carries the data needed to render a styled input dialog. It is
+// mirrored on the dialog implementation; node modules construct one through
+// this contract instead of importing the dialogs package directly.
+type InputRequest struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Message     string `json:"message"`
+	Label       string `json:"label"`
+	InputType   string `json:"inputType"`
+	Continue    string `json:"continueLabel"`
+	Cancel      string `json:"cancelLabel"`
+	Placeholder string `json:"placeholder"`
+}
+
+// InputResponse is returned from a styled input dialog.
+type InputResponse struct {
+	Canceled bool   `json:"canceled"`
+	Value    string `json:"value"`
+}
+
 // TwitchChatSender accepts only the action's typed request and returns a
 // non-secret delivery result. Identity selection and OAuth token handling are
 // owned by infrastructure.

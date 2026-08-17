@@ -89,3 +89,4 @@ select option, select optgroup { background: #18181b; color: #e4e4e7; }
 }
 .trigger-button-success { animation: trigger-button-success .9s ease-in-out both; }
 .trigger-button-failure { animation: trigger-button-failure .9s ease-in-out both; }
+.trigger-button-running { box-shadow: 0 0 0 2px rgb(248 113 113 / .45), 0 10px 24px rgb(0 0 0 / .35) !important; }

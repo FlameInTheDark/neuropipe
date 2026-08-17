@@ -46,6 +46,7 @@ import {
   Save,
   Search,
   Send,
+  Square,
   Trash2,
   Undo2,
   UploadCloud,
@@ -57,6 +58,7 @@ import { BlueprintContextMenu } from "@/components/BlueprintContextMenu";
 import { contextMenuPosition } from "@/components/ContextMenu";
 import {
   FieldOutputsEditor,
+  HtmlExtractionsEditor,
   ObjectFieldsEditor,
 } from "@/components/BlueprintDataMappingsEditor";
 import { BlueprintSwitchCasesEditor } from "@/components/BlueprintSwitchCasesEditor";
@@ -71,7 +73,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { desktop } from "@/lib/bridge";
-import { nodePinColor } from "@/lib/node-pins";
+import { dataPinColor, nodePinColor } from "@/lib/node-pins";
 import {
   routeOptionsFromValue,
   resolveConfigDrivenInputs,
@@ -93,7 +95,7 @@ import type {
   Pipeline,
   DocumentationReference,
 } from "@/lib/types";
-import { isTypeAssignable } from "@/lib/type-spec";
+import { isTypeAssignable, typeSpecFromDataType } from "@/lib/type-spec";
 import { useUIStore } from "@/stores/ui";
 import i18n from "@/i18n";
 import { localizeNodeDefinitions } from "@/i18n/node-catalog";
@@ -108,9 +110,9 @@ interface EditorNodeData {
   icon?: string;
   inputs?: NodePort[];
   outputs?: NodePort[];
-	// Dynamic modules keep the backend-resolved metadata with the editor node.
-	// It is intentionally omitted when serialising a FlowNode.
-	resolvedDefinition?: NodeDefinition;
+        // Dynamic modules keep the backend-resolved metadata with the editor node.
+        // It is intentionally omitted when serialising a FlowNode.
+        resolvedDefinition?: NodeDefinition;
   lastRun?: NodeRun;
 }
 type EditorNode = FlowNode & { data: EditorNodeData };
@@ -123,6 +125,7 @@ interface CanvasMenu {
   position: { x: number; y: number };
   nodeID?: string;
   edgeID?: string;
+  edgeKind?: string;
   source?: string;
   sourceHandle?: string | null;
 }
@@ -417,6 +420,56 @@ function withExecutionEdges(
   );
 }
 
+// Wire visuals derive from the source pin and are deliberately never
+// persisted, so every path that restores edges rebuilds them the same way.
+function baseEdgeVisuals(pin: NodePort | undefined) {
+  const exec = pin?.kind === "exec";
+  return {
+    animated: exec,
+    markerEnd: exec
+      ? { type: MarkerType.ArrowClosed, color: "#fafafa" }
+      : undefined,
+    style: {
+      stroke: exec ? "#fafafa" : pin?.color || "#71717a",
+      strokeWidth: exec ? 2 : 1.4,
+    },
+  };
+}
+
+function withBaseEdgeStyles(
+  edges: FlowEdge[],
+  nodes: EditorNode[],
+): FlowEdge[] {
+  return edges.map((edge) => ({
+    ...edge,
+    ...baseEdgeVisuals(
+      nodes
+        .find((node) => node.id === edge.source)
+        ?.data.outputs?.find((item) => item.id === edge.sourceHandle),
+    ),
+  }));
+}
+
+// A data reroute mirrors the pin feeding it: the output takes the connected
+// wire's exact type and colour, so downstream validation sees the true type.
+function rerouteFeedingPin(
+  node: EditorNode,
+  nodes: EditorNode[],
+  edges: FlowEdge[],
+): NodePort | undefined {
+  const incoming = edges.find(
+    (edge) =>
+      edge.target === node.id &&
+      edge.targetHandle === "value" &&
+      edge.kind !== "tool",
+  );
+  if (!incoming) return undefined;
+  const pin = nodes
+    .find((item) => item.id === incoming.source)
+    ?.data.outputs?.find((output) => output.id === incoming.sourceHandle);
+  return pin && pin.kind === "data" ? pin : undefined;
+}
+
 const nodeTypes = { neuropipe: NeuropipeNode };
 const edgeTypes = { waypoint: BlueprintWaypointEdge };
 
@@ -481,23 +534,23 @@ function EditorContents({
     sourceHandle: string | null;
   }>();
   const canvasRef = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		const move = (event: Event) => {
-			const detail = (event as CustomEvent<{ edgeID: string; index: number; position: { x: number; y: number } }>).detail;
-			if (!detail) return;
-			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).map((point, index) => index === detail.index ? detail.position : point) }));
-			setDirty(true);
-		};
-		const remove = (event: Event) => {
-			const detail = (event as CustomEvent<{ edgeID: string; index: number }>).detail;
-			if (!detail) return;
-			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).filter((_, index) => index !== detail.index) }));
-			setDirty(true);
-		};
-		window.addEventListener(waypointMoveEvent, move);
-		window.addEventListener(waypointRemoveEvent, remove);
-		return () => { window.removeEventListener(waypointMoveEvent, move); window.removeEventListener(waypointRemoveEvent, remove); };
-	}, []);
+        useEffect(() => {
+                const move = (event: Event) => {
+                        const detail = (event as CustomEvent<{ edgeID: string; index: number; position: { x: number; y: number } }>).detail;
+                        if (!detail) return;
+                        setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).map((point, index) => index === detail.index ? detail.position : point) }));
+                        setDirty(true);
+                };
+                const remove = (event: Event) => {
+                        const detail = (event as CustomEvent<{ edgeID: string; index: number }>).detail;
+                        if (!detail) return;
+                        setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).filter((_, index) => index !== detail.index) }));
+                        setDirty(true);
+                };
+                window.addEventListener(waypointMoveEvent, move);
+                window.addEventListener(waypointRemoveEvent, remove);
+                return () => { window.removeEventListener(waypointMoveEvent, move); window.removeEventListener(waypointRemoveEvent, remove); };
+        }, []);
   const reconnectRef = useRef<ReconnectState>();
   const snapToGrid = gridSnapMode === "on";
   const snapPosition = useCallback(
@@ -525,29 +578,40 @@ function EditorContents({
         desktop.listExecutions(pipelineID),
       ]);
       setPipeline(nextPipeline);
-		const hydrated = withExecutionResults(
-			hydrateNodes(asArray(nextPipeline.draftDefinition?.nodes), definitions),
-			asArray(nextHistory)[0],
-		);
-		setNodes(hydrated);
-		const dynamic = hydrated.filter((node) => backendResolvedNodeTypes.has(node.data.type));
-		if (dynamic.length > 0) {
-			void Promise.all(dynamic.map(async (node) => {
-				const definition = await desktop.resolveNodeDefinition({ id: node.id, type: node.data.type, position: node.position, data: { config: node.data.config } });
-				return { node, definition: localizeNodeDefinitions([definition], i18n.language)[0] ?? definition };
-			})).then((resolved) => {
-				const byID = new Map(resolved.map((item) => [item.node.id, item.definition]));
-				setNodes((current) => current.map((node) => {
-					const definition = byID.get(node.id);
-					return definition ? { ...node, data: { ...node.data, resolvedDefinition: definition, inputs: resolveInputs(definition, node.data.config), outputs: resolveOutputs(definition, node.data.config) } } : node;
-				}));
-			}).catch(() => { /* validation reports the backend resolver error on save/publish */ });
-		}
+                const hydrated = withExecutionResults(
+                        hydrateNodes(asArray(nextPipeline.draftDefinition?.nodes), definitions),
+                        asArray(nextHistory)[0],
+                );
+                setNodes(hydrated);
+                const dynamic = hydrated.filter((node) => backendResolvedNodeTypes.has(node.data.type));
+                if (dynamic.length > 0) {
+                        void Promise.all(dynamic.map(async (node) => {
+                                const definition = await desktop.resolveNodeDefinition({ id: node.id, type: node.data.type, position: node.position, data: { config: node.data.config } });
+                                return { node, definition: localizeNodeDefinitions([definition], i18n.language)[0] ?? definition };
+                        })).then((resolved) => {
+                                const byID = new Map(resolved.map((item) => [item.node.id, item.definition]));
+                                const applyResolved = (node: EditorNode) => {
+                                        const definition = byID.get(node.id);
+                                        return definition ? { ...node, data: { ...node.data, resolvedDefinition: definition, inputs: resolveInputs(definition, node.data.config), outputs: resolveOutputs(definition, node.data.config) } } : node;
+                                };
+                                setNodes((current) => current.map(applyResolved));
+                                // Resolved definitions can change pin colours, so wires that
+                                // originate from them are restyled from the refreshed pins.
+                                setEdges((current) => withExecutionEdges(withBaseEdgeStyles(current, hydrated.map(applyResolved)), asArray(nextHistory)[0]));
+                        }).catch(() => { /* validation reports the backend resolver error on save/publish */ });
+                }
       setEdges(
         withExecutionEdges(
-          asArray(nextPipeline.draftDefinition?.edges),
+          withBaseEdgeStyles(
+            asArray(nextPipeline.draftDefinition?.edges).map((edge) =>
+              edge.waypoints && edge.waypoints.length > 0
+                ? { ...edge, type: "waypoint" }
+                : edge,
+            ),
+            hydrated,
+          ),
           asArray(nextHistory)[0],
-        ).map((edge) => (edge.waypoints && edge.waypoints.length > 0 ? { ...edge, type: "waypoint" } : edge)),
+        ),
       );
       setHistory(asArray(nextHistory));
       setDirty(false);
@@ -562,6 +626,42 @@ function EditorContents({
   useEffect(() => {
     void load();
   }, [load]);
+  // Data reroutes derive their output type from the wire feeding them, so the
+  // pin follows connects, disconnects, and upstream retypes, and downstream
+  // wires re-colour to match. The input pin keeps its single-connection limit;
+  // the output fans out like any node pin.
+  useEffect(() => {
+    if (!nodes.some((node) => node.data.type === "data:reroute")) return;
+    let changed = false;
+    const nextNodes = nodes.map((node) => {
+      if (node.data.type !== "data:reroute") return node;
+      const outputs = node.data.outputs ?? [];
+      const output = outputs[0];
+      if (!output) return node;
+      const feeding = rerouteFeedingPin(node, nodes, edges);
+      const dataType = feeding?.dataType ?? "any";
+      const type = feeding?.type ?? typeSpecFromDataType(dataType);
+      const color = feeding?.color ?? dataPinColor(dataType);
+      if (
+        output.dataType === dataType &&
+        JSON.stringify(output.type) === JSON.stringify(type) &&
+        output.color === color
+      ) {
+        return node;
+      }
+      changed = true;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          outputs: [{ ...output, dataType, type, color }, ...outputs.slice(1)],
+        },
+      };
+    });
+    if (!changed) return;
+    setNodes(nextNodes);
+    setEdges((current) => withBaseEdgeStyles(current, nextNodes));
+  }, [nodes, edges]);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -660,15 +760,7 @@ function EditorContents({
             ...connection,
             id: crypto.randomUUID(),
             kind: pin.kind,
-            animated: pin.kind === "exec",
-            markerEnd:
-              pin.kind === "exec"
-                ? { type: MarkerType.ArrowClosed, color: "#fafafa" }
-                : undefined,
-            style: {
-              stroke: pin.kind === "exec" ? "#fafafa" : pin.color || "#71717a",
-              strokeWidth: pin.kind === "exec" ? 2 : 1.4,
-            },
+            ...baseEdgeVisuals(pin),
           },
           current,
         ),
@@ -736,20 +828,20 @@ function EditorContents({
     (definition: NodeDefinition, position = { x: 280, y: 180 }) => {
       const node = createEditorNode(definition, snapPosition(position));
       setNodes((current) => [...current, node]);
-		if (backendResolvedNodeTypes.has(node.data.type)) {
-			void desktop.resolveNodeDefinition({
-				id: node.id,
-				type: node.data.type,
-				position: node.position,
-				data: { config: node.data.config },
-			}).then((raw) => {
-				const resolved = localizeNodeDefinitions([raw], i18n.language)[0] ?? raw;
-				setNodes((current) => current.map((item) => item.id === node.id ? {
-					...item,
-					data: { ...item.data, resolvedDefinition: resolved, inputs: resolveInputs(resolved, item.data.config), outputs: resolveOutputs(resolved, item.data.config) },
-				} : item));
-			}).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t("editor.saveFailed")));
-		}
+                if (backendResolvedNodeTypes.has(node.data.type)) {
+                        void desktop.resolveNodeDefinition({
+                                id: node.id,
+                                type: node.data.type,
+                                position: node.position,
+                                data: { config: node.data.config },
+                        }).then((raw) => {
+                                const resolved = localizeNodeDefinitions([raw], i18n.language)[0] ?? raw;
+                                setNodes((current) => current.map((item) => item.id === node.id ? {
+                                        ...item,
+                                        data: { ...item.data, resolvedDefinition: resolved, inputs: resolveInputs(resolved, item.data.config), outputs: resolveOutputs(resolved, item.data.config) },
+                                } : item));
+                        }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t("editor.saveFailed")));
+                }
       setSelectedID(node.id);
       setDirty(true);
       return node.id;
@@ -873,6 +965,26 @@ function EditorContents({
       setBusy("");
     }
   };
+  const stop = async () => {
+    if (!pipeline) return;
+    try {
+      setBusy("stop");
+      await desktop.cancelPipelineExecution(pipeline.id);
+      await onRefresh();
+      try {
+        const nextHistory = asArray(await desktop.listExecutions(pipeline.id));
+        setHistory(nextHistory);
+        applyExecution(nextHistory[0]);
+        setEdges((current) => withExecutionEdges(current, nextHistory[0]));
+      } catch {
+        /* refresh history in background */
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("editor.runFailed"));
+    } finally {
+      setBusy("");
+    }
+  };
   const run = async () => {
     if (!pipeline) return;
     const trigger =
@@ -924,15 +1036,27 @@ function EditorContents({
   const updateConfigValues = (values: Record<string, unknown>) => {
     if (!selectedID) return;
     const selectedNode = nodes.find((node) => node.id === selectedID);
+    // Choosing an agent chat mode supersedes the legacy history toggle so a
+    // stale saved flag cannot resurrect chat-history behaviour.
+    if (
+      values.chatMode !== undefined &&
+      (selectedNode?.data.type === "llm:agent" || selectedNode?.data.type === "llm:coding_agent")
+    ) {
+      const { pullChatHistory: _legacy, ...rest } = values;
+      values = rest;
+      if (selectedNode.data.config.pullChatHistory !== undefined) {
+        values = { pullChatHistory: undefined, ...values };
+      }
+    }
     const nextConfig = selectedNode
       ? normalizeNodeConfig(selectedNode.data.type, {
           ...selectedNode.data.config,
           ...values,
         })
       : undefined;
-	// The backend resolves Twitch event ports from the selected EventSub type.
-	// Keep existing wires until that authoritative resolution finishes; this
-	// prevents a field edit from silently deleting graph data edges.
+        // The backend resolves Twitch event ports from the selected EventSub type.
+        // Keep existing wires until that authoritative resolution finishes; this
+        // prevents a field edit from silently deleting graph data edges.
     const removedOutputIDs = nextConfig && selectedNode?.data.type !== "twitch:event"
       ? (selectedNode!.data.outputs ?? [])
           .filter((output) =>
@@ -941,6 +1065,17 @@ function EditorContents({
             ),
           )
           .map((output) => output.id)
+      : [];
+        // Toggle-driven input pins (agent chat history) drop their wires the
+        // same way removed outputs do, so no edge targets a vanished handle.
+    const removedInputIDs = nextConfig && selectedNode
+      ? (selectedNode.data.inputs ?? [])
+          .filter((input) =>
+            !resolveInputs(selectedDefinition, nextConfig).some(
+              (next) => next.id === input.id,
+            ),
+          )
+          .map((input) => input.id)
       : [];
     setNodes((current) =>
       current.map((node) => {
@@ -960,30 +1095,34 @@ function EditorContents({
         };
       }),
     );
-		// Nodes with backend-owned dynamic contracts re-resolve after every config
-		// change so the canvas, compatibility highlighting, and runtime share one
-		// port shape. Twitch picks ports by event type; global variables pick the
-		// global-variable pins by the selected declaration and operation.
-		if (selectedNode && backendResolvedNodeTypes.has(selectedNode.data.type) && nextConfig) {
-		void desktop.resolveNodeDefinition({
-			id: selectedNode.id,
-			type: selectedNode.data.type,
-			position: selectedNode.position,
-			data: { config: nextConfig },
-		}).then((raw) => {
-			const resolved = localizeNodeDefinitions([raw], i18n.language)[0] ?? raw;
-			setNodes((current) => current.map((node) => node.id === selectedNode.id ? {
-				...node,
-			data: { ...node.data, resolvedDefinition: resolved, inputs: resolveInputs(resolved, nextConfig), outputs: resolveOutputs(resolved, nextConfig) },
-			} : node));
-		}).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t("editor.saveFailed")));
-	}
-    if (removedOutputIDs.length > 0) {
+                // Nodes with backend-owned dynamic contracts re-resolve after every config
+                // change so the canvas, compatibility highlighting, and runtime share one
+                // port shape. Twitch picks ports by event type; global variables pick the
+                // global-variable pins by the selected declaration and operation.
+                if (selectedNode && backendResolvedNodeTypes.has(selectedNode.data.type) && nextConfig) {
+                void desktop.resolveNodeDefinition({
+                        id: selectedNode.id,
+                        type: selectedNode.data.type,
+                        position: selectedNode.position,
+                        data: { config: nextConfig },
+                }).then((raw) => {
+                        const resolved = localizeNodeDefinitions([raw], i18n.language)[0] ?? raw;
+                        setNodes((current) => current.map((node) => node.id === selectedNode.id ? {
+                                ...node,
+                        data: { ...node.data, resolvedDefinition: resolved, inputs: resolveInputs(resolved, nextConfig), outputs: resolveOutputs(resolved, nextConfig) },
+                        } : node));
+                }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : t("editor.saveFailed")));
+        }
+    if (removedOutputIDs.length > 0 || removedInputIDs.length > 0) {
       setEdges((current) =>
         current.filter(
           (edge) =>
             edge.source !== selectedID ||
             !removedOutputIDs.includes(edge.sourceHandle ?? "out"),
+        ).filter(
+          (edge) =>
+            edge.target !== selectedID ||
+            !removedInputIDs.includes(edge.targetHandle ?? "in"),
         ),
       );
     }
@@ -1053,6 +1192,7 @@ function EditorContents({
     nodeID?: string,
     connection?: { source: string; sourceHandle: string | null },
     edgeID?: string,
+    edgeKind?: string,
   ) => {
     event.preventDefault();
     const position = flow?.screenToFlowPosition({
@@ -1073,6 +1213,7 @@ function EditorContents({
       position,
       nodeID,
       edgeID,
+      edgeKind,
       source: connection?.source,
       sourceHandle: connection?.sourceHandle,
     });
@@ -1082,14 +1223,53 @@ function EditorContents({
     setEdges((current) => current.filter((edge) => edge.id !== edgeID));
     setDirty(true);
   }, []);
+  // Inserting a reroute splits the wire with a compact reroute node: the
+  // node's pins behave exactly like node pins, so the reroute can later fan
+  // out to several targets. Graphs saved with legacy wire waypoints keep
+  // rendering those as before.
   const insertReroute = useCallback(
     (edgeID: string, position: { x: number; y: number }) => {
       const edge = edges.find((item) => item.id === edgeID);
-      if (!edge) return;
-      setEdges((current) => current.map((item) => item.id === edgeID ? { ...item, waypoints: [...(item.waypoints ?? []), position] } : item));
+      if (!edge || !edge.source || !edge.target) return;
+      if (edge.kind === "tool") return;
+      const definition = definitions.find(
+        (item) => item.type === (edge.kind === "exec" ? "flow:reroute" : "data:reroute"),
+      );
+      const rerouteInput = definition?.inputs.find((pin) => pin.kind === (edge.kind === "exec" ? "exec" : "data"));
+      const rerouteOutput = definition?.outputs.find((pin) => pin.kind === (edge.kind === "exec" ? "exec" : "data"));
+      if (!definition || !rerouteInput || !rerouteOutput) return;
+      const rerouteID = addNode(definition, position);
+      const sourcePin = nodes
+        .find((node) => node.id === edge.source)
+        ?.data.outputs?.find((pin) => pin.id === edge.sourceHandle);
+      setEdges((current) => {
+        const existing = current.find((item) => item.id === edgeID);
+        if (!existing) return current;
+        return [
+          ...current.filter((item) => item.id !== edgeID),
+          {
+            id: crypto.randomUUID(),
+            source: existing.source,
+            sourceHandle: existing.sourceHandle,
+            target: rerouteID,
+            targetHandle: rerouteInput.id,
+            kind: existing.kind,
+            ...baseEdgeVisuals(sourcePin),
+          },
+          {
+            id: crypto.randomUUID(),
+            source: rerouteID,
+            sourceHandle: rerouteOutput.id,
+            target: existing.target,
+            targetHandle: existing.targetHandle,
+            kind: existing.kind,
+            ...baseEdgeVisuals(rerouteOutput),
+          },
+        ];
+      });
       setDirty(true);
     },
-    [definitions, edges, snapPosition],
+    [addNode, definitions, edges, nodes],
   );
   const addFromMenu = (definition: NodeDefinition) => {
     if (!menu) return;
@@ -1111,14 +1291,7 @@ function EditorContents({
             target: id,
             targetHandle: target.id,
             kind: pin.kind,
-            animated: pin.kind === "exec",
-            markerEnd:
-              pin.kind === "exec"
-                ? { type: MarkerType.ArrowClosed, color: "#fafafa" }
-                : undefined,
-            style: {
-              stroke: pin.kind === "exec" ? "#fafafa" : pin.color || "#71717a",
-            },
+            ...baseEdgeVisuals(pin),
           },
         ]);
         setDirty(true);
@@ -1134,8 +1307,11 @@ function EditorContents({
     const sourcePin = source?.data.outputs?.find(
       (pin) => pin.id === menu?.sourceHandle,
     );
-    return filteredDefinitions.filter(
+    // The menu filters the full catalog: the node library's search box must
+    // not narrow what the canvas context menu offers.
+    return definitions.filter(
       (definition) =>
+        !contextOnlyNodeTypes.has(definition.type) &&
         `${definition.label} ${definition.category} ${definition.description}`
           .toLowerCase()
           .includes(menuSearch.toLowerCase()) &&
@@ -1143,7 +1319,7 @@ function EditorContents({
           definition.inputs.some((input) => compatiblePins(sourcePin, input))),
     );
   }, [
-    filteredDefinitions,
+    definitions,
     menu?.source,
     menu?.sourceHandle,
     menuSearch,
@@ -1255,11 +1431,17 @@ function EditorContents({
             {t("editor.save")}
           </Button>
           <Tooltip content={t("editor.runTitle")} side="bottom" size="body" className="max-w-72 px-3 py-2 text-zinc-300">
-            <Button size="sm" variant="outline" onClick={() => void run()} disabled={busy !== ""}>
+            <Button size="sm" variant="outline" onClick={() => void run()} disabled={busy !== "" || asArray(history)[0]?.status === "running"}>
               {busy === "run" ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
               {t("editor.runDraft")}
             </Button>
           </Tooltip>
+          {asArray(history)[0]?.status === "running" ? (
+            <Button size="sm" variant="danger" onClick={() => void stop()} disabled={busy !== "" && busy !== "stop"}>
+              {busy === "stop" ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
+              {t("pipelines.stop")}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             onClick={() => void publish()}
@@ -1345,7 +1527,7 @@ function EditorContents({
                 openCanvasMenu(event, nodeID);
               }}
               onEdgeContextMenu={(event, edge) =>
-                openCanvasMenu(event, undefined, undefined, edge.id)
+                openCanvasMenu(event, undefined, undefined, edge.id, edge.kind)
               }
               onPaneClick={() => {
                 setSelectedID(undefined);
@@ -1654,6 +1836,7 @@ function Inspector({
     const value =
       node?.data.config[field.visibleWhen] ??
       definition?.defaultConfig?.[field.visibleWhen];
+    if (field.visibleWhen === "chatMode") return value === "history";
     return value === true || value === "true";
   });
   const capabilities = asArray(definition?.capabilities);
@@ -1844,7 +2027,7 @@ function ConfigControl({
           onValueChange={onChange}
           ariaLabel={field.label}
         />
-      ) : field.kind === "select" || field.kind === "wire-representation" ? (
+      ) : field.kind === "select" || field.kind === "wire-representation" || field.kind === "chat-mode" ? (
         <Select
           value={stringValue}
           onValueChange={onChange}
@@ -1894,6 +2077,8 @@ function ConfigControl({
           sourceFields={sourceFields}
           onChange={onChange}
         />
+      ) : field.kind === "html-extractions" ? (
+        <HtmlExtractionsEditor value={resolvedValue} onChange={onChange} />
       ) : field.kind === "object-fields" ? (
         <ObjectFieldsEditor value={resolvedValue} onChange={onChange} />
       ) : field.kind === "json-schema" ? (
@@ -2475,10 +2660,10 @@ function hydrateNodes(
         type,
         label: definition?.label,
         icon: definition?.icon,
-		inputs: resolveInputs(definition, config),
-		outputs: resolveOutputs(definition, config),
-		resolvedDefinition: definition,
-		config,
+                inputs: resolveInputs(definition, config),
+                outputs: resolveOutputs(definition, config),
+                resolvedDefinition: definition,
+                config,
       },
     } as EditorNode;
   });
@@ -2501,7 +2686,7 @@ function createEditorNode(
       icon: definition.icon,
       inputs: resolveInputs(definition, config),
       outputs: resolveOutputs(definition, config),
-		resolvedDefinition: definition,
+                resolvedDefinition: definition,
       config,
     },
   };

@@ -4,12 +4,16 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
   fieldOutputsFromValue,
+  htmlExtractionsFromValue,
   nextMappingID,
   objectFieldsFromValue,
   type FieldOutputValue,
+  type HtmlExtractionValue,
+  type HtmlReturnMode,
   type ObjectFieldValue,
 } from "@/lib/blueprint-dynamic-pins";
 import type { DataField, DataType } from "@/lib/types";
@@ -242,6 +246,69 @@ export function ObjectFieldsEditor({
       <Button type="button" variant="ghost" size="sm" onClick={() => onChange([...fields, { id: nextMappingID(fields), label: `${t("editor.input")} ${fields.length + 1}`, key: "", dataType: "any" }])}>
         <Plus className="size-3.5" />
         {t("objectMappings.addInput")}
+      </Button>
+    </MappingShell>
+  );
+}
+
+export function HtmlExtractionsEditor({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (value: HtmlExtractionValue[]) => void;
+}) {
+  const { t } = useTranslation();
+  const extractions = htmlExtractionsFromValue(value);
+  const update = (index: number, patch: Partial<HtmlExtractionValue>) => {
+    onChange(extractions.map((item, current) => (current === index ? { ...item, ...patch } : item)));
+  };
+  const modeOptions = useMemo(
+    () => (["text", "html", "attribute"] as const).map((mode) => ({
+      value: mode,
+      label: t(`htmlExtractions.mode_${mode}`),
+    })),
+    [t],
+  );
+  return (
+    <MappingShell>
+      {extractions.map((extraction, index) => (
+        <div key={extraction.id} className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+          <MappingHeader title={t("htmlExtractions.extraction")} index={index} canRemove={extractions.length > 1} onRemove={() => onChange(extractions.filter((_, current) => current !== index))} />
+          <MappingTextField label={t("editor.pinName")} value={extraction.label} placeholder={t("editor.output")} ariaLabel={`${t("htmlExtractions.extraction")} ${index + 1} ${t("editor.pinName")}`} onChange={(label) => update(index, { label })} />
+          <MappingTextField label={t("htmlExtractions.selector")} value={extraction.selector} placeholder={t("htmlExtractions.exampleSelector")} ariaLabel={`${t("htmlExtractions.extraction")} ${index + 1} ${t("htmlExtractions.selector")}`} mono onChange={(selector) => update(index, { selector })} />
+          <label className="mb-2 block">
+            <span className="mb-1 block text-[10px] font-medium text-zinc-500">
+              {t("htmlExtractions.returnValue")}
+            </span>
+            <Select
+              value={extraction.mode}
+              onValueChange={(mode) => update(index, { mode: mode as HtmlReturnMode })}
+              options={modeOptions}
+              ariaLabel={`${t("htmlExtractions.extraction")} ${index + 1} ${t("htmlExtractions.returnValue")}`}
+            />
+          </label>
+          {extraction.mode === "attribute" ? (
+            <MappingTextField label={t("htmlExtractions.attributeName")} value={extraction.attribute} placeholder="href" ariaLabel={`${t("htmlExtractions.extraction")} ${index + 1} ${t("htmlExtractions.attributeName")}`} mono onChange={(attribute) => update(index, { attribute })} />
+          ) : null}
+          <div className="flex h-9 items-center justify-between rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5">
+            <span className="text-xs text-zinc-500">
+              {t("htmlExtractions.returnAll")}
+            </span>
+            <Switch
+              checked={extraction.returnAll}
+              onCheckedChange={(checked) => update(index, { returnAll: checked })}
+              label={t("htmlExtractions.returnAll")}
+            />
+          </div>
+          <p className="mt-1.5 text-[10px] text-zinc-600">
+            {extraction.returnAll ? t("editor.list") : t("editor.text")}
+          </p>
+        </div>
+      ))}
+      <Button type="button" variant="ghost" size="sm" onClick={() => onChange([...extractions, { id: nextMappingID(extractions), label: `${t("editor.output")} ${extractions.length + 1}`, selector: "", mode: "text", attribute: "", returnAll: false }])}>
+        <Plus className="size-3.5" />
+        {t("htmlExtractions.addExtraction")}
       </Button>
     </MappingShell>
   );

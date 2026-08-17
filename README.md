@@ -31,18 +31,20 @@ The built-in **Documentation** tab contains detailed guides and a reference page
 
 ## Build from source
 
-To develop or build Neuropipe yourself, install Go 1.26+, Bun, and the [Wails prerequisites](https://wails.io/docs/gettingstarted/installation/). Then run:
+To develop or build Neuropipe yourself, install Go 1.26+, Bun, and the [Wails v3 prerequisites](https://v3.wails.io/gettingstarted/installation/). Then install the Wails v3 CLI and run:
 
 ```bash
 git clone https://github.com/FlameInTheDark/neuropipe.git
 cd neuropipe
-go run github.com/wailsapp/wails/v2/cmd/wails@v2.12.0 dev
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
+wails3 dev
 ```
 
 To create a production Windows build:
 
 ```bash
-go run github.com/wailsapp/wails/v2/cmd/wails@v2.12.0 build -platform windows/amd64 -nsis
+wails3 generate syso -arch amd64 -icon build/icon.ico -manifest build/wails.exe.manifest -info build/info.json
+go build -tags production -trimpath -ldflags "-s -w -H windowsgui" -o build/bin/neuropipe.exe
 ```
 
 The executable and installer are written to `build/bin`.

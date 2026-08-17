@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download, Maximize2, Minus, Square, X } from "lucide-react";
-import {
-	EventsOn,
-  Quit,
-  WindowIsMaximised,
-  WindowMinimise,
-  WindowToggleMaximise,
-} from "../../wailsjs/runtime/runtime";
+import { Application, Events, Window } from "@wailsio/runtime";
 import appIcon from "@/assets/appicon.png";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useUIStore } from "@/stores/ui";
@@ -21,7 +15,7 @@ export function TitleBar() {
   const { t } = useTranslation();
 
   const syncMaximised = useCallback(() => {
-    void WindowIsMaximised()
+    void Window.IsMaximised()
       .then(setMaximised)
       .catch(() => setMaximised(false));
   }, []);
@@ -35,14 +29,15 @@ export function TitleBar() {
     void desktop.getUpdateAvailability().then((value) => {
       if (active && value.available) setUpdate(value);
     }).catch(() => undefined);
-    const stop = EventsOn("app.update.available", (value: UpdateAvailability) => {
+    const stop = Events.On("app.update.available", (event) => {
+      const value = (event?.data ?? event) as UpdateAvailability | undefined;
       if (value?.available) setUpdate(value);
     });
     return () => { active = false; stop(); };
   }, []);
 
   const toggleMaximise = () => {
-    WindowToggleMaximise();
+    void Window.ToggleMaximise();
     window.setTimeout(syncMaximised, 80);
   };
 
@@ -72,7 +67,7 @@ export function TitleBar() {
             <span>{t('titlebar.updateAvailable', { version: update.version })}</span>
           </button>
         </Tooltip> : null}
-        <button type="button" className="window-control" onClick={WindowMinimise} aria-label={t('titlebar.minimise')}>
+        <button type="button" className="window-control" onClick={() => { void Window.Minimise(); }} aria-label={t('titlebar.minimise')}>
           <Minus className="size-4" strokeWidth={2} />
         </button>
         <button
@@ -83,7 +78,7 @@ export function TitleBar() {
         >
           {maximised ? <Square className="size-3" /> : <Maximize2 className="size-3.5" />}
         </button>
-        <button type="button" className="window-control window-control-close" onClick={Quit} aria-label={t('titlebar.close')}>
+        <button type="button" className="window-control window-control-close" onClick={() => { void Application.Quit(); }} aria-label={t('titlebar.close')}>
           <X className="size-4" />
         </button>
       </div>

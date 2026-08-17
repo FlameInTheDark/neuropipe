@@ -26,6 +26,9 @@ func TestRegisterReportsStrictMatchContract(t *testing.T) {
 	if got := definition.Outputs[2]; got.Type == nil || !typespec.Assignable(*got.Type, regex.MatchListType()) || !typespec.Assignable(regex.MatchListType(), *got.Type) {
 		t.Fatalf("matches output type = %#v, want list[RegexMatch]", got.Type)
 	}
+	if fields := definition.Outputs[2].Fields; len(fields) == 0 {
+		t.Fatal("matches output must document its RegexMatch fields for the editor")
+	}
 }
 
 func TestEvaluateExtractsRepeatedAndZeroWidthMatches(t *testing.T) {

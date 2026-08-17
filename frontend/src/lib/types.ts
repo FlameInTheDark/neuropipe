@@ -65,7 +65,7 @@ export interface Pipeline {
   status: PipelineStatus;
   draftDefinition: FlowDefinition;
   publishedRevision: number;
-	/** True when the editable draft differs from the revision triggers execute. */
+        /** True when the editable draft differs from the revision triggers execute. */
   hasUnpublishedChanges: boolean;
   migrationIssue?: string;
   createdAt: string;
@@ -92,8 +92,8 @@ export interface TriggerBinding {
   nodeId: string;
   revision: number;
   kind: TriggerKind;
-	  nodeType?: string;
-	  config?: Record<string, unknown>;
+          nodeType?: string;
+          config?: Record<string, unknown>;
   label: string;
   icon: string;
   color: string;
@@ -147,7 +147,7 @@ export interface NodeDefinition {
   color: string;
   mode: NodeExecutionMode;
   triggerKind?: TriggerKind;
-	portContractOwned?: boolean;
+        portContractOwned?: boolean;
   inputs: NodePort[];
   outputs: NodePort[];
   fields: ConfigField[];
@@ -423,7 +423,7 @@ export interface Settings {
   llamaRuntime: LlamaRuntimeSettings;
   api: APISettings;
   metrics: MetricsSettings;
-	  twitch: TwitchSettings;
+          twitch: TwitchSettings;
 }
 export type TwitchIdentityStatus = "connected" | "expired" | "reconnect-required" | "revoked";
 export type TwitchConnectionMethod = "device-code" | "manual";
@@ -609,4 +609,23 @@ export interface ChatPipeline {
   icon: string;
   color: string;
   revision: number;
+}
+
+/** InputDialogRequest mirrors the Go nodes.InputRequest struct emitted by
+ * the dialog service when a Display Input Dialog node fires. */
+export interface InputDialogRequest {
+  id: string;
+  title: string;
+  message: string;
+  label: string;
+  inputType: "text" | "number" | string;
+  continueLabel: string;
+  cancelLabel: string;
+  placeholder: string;
+}
+
+/** InputDialogResponse is sent back to the Go side when the React modal closes. */
+export interface InputDialogResponse {
+  canceled: boolean;
+  value: string;
 }

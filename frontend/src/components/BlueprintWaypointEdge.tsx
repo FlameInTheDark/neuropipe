@@ -16,6 +16,10 @@ export const waypointRemoveEvent = "neuropipe:remove-wire-waypoint";
 
 const waypointCoordinateLimit = 50_000;
 
+// Matches React Flow's default bezier curvature so segments leaving or
+// entering a waypoint bow exactly like a direct pin-to-pin connection.
+const wireCurvature = 0.25;
+
 interface Point {
   x: number;
   y: number;
@@ -160,11 +164,13 @@ function bezierPath(
 }
 
 /**
- * Builds a cubic Hermite spline through source → waypoints → target. End
- * tangents follow the pins' natural directions so the wire exits and enters
- * exactly like the default bezier edge; each waypoint's tangent is the
- * bisector of its adjacent segments, which keeps the curve smooth through
- * every handle without loops or overshoot.
+ * Routes source → waypoints → target as one curve per segment. Only the first
+ * and last segments bend: the first leaves the source pin along its handle
+ * direction and the last enters the target pin along its handle direction,
+ * exactly like a direct pin-to-pin bezier. Waypoint-to-waypoint and
+ * waypoint-to-target runs that are already straight render as straight lines —
+ * each segment simply travels along its own direction, and adjacent segments
+ * share that direction at the join so bends stay smooth.
  */
 function waypointPath(
   points: Point[],
@@ -173,48 +179,33 @@ function waypointPath(
 ): string {
   if (points.length < 2) return "";
   const last = points.length - 1;
-  const tangents: Point[] = new Array(points.length);
-  tangents[0] = directionFor(sourcePosition ?? Position.Right);
-  tangents[last] = reverse(directionFor(targetPosition ?? Position.Left));
-  for (let index = 1; index < last; index++) {
-    tangents[index] = bisector(
-      points[index - 1],
-      points[index],
-      points[index + 1],
-    );
-  }
   const segments: string[] = [`M${points[0].x},${points[0].y}`];
   for (let index = 0; index < last; index++) {
     const start = points[index];
     const end = points[index + 1];
     const length = Math.hypot(end.x - start.x, end.y - start.y);
     if (length < 0.001) continue;
-    // Capped at half the segment so short hops bend instead of overshooting.
-    const control = Math.min(length / 2, Math.max(12, length / 3));
+    const travel = unit({ x: end.x - start.x, y: end.y - start.y });
+    const startDir = index === 0
+      ? directionFor(sourcePosition ?? Position.Right)
+      : travel;
+    const endDir = index === last
+      ? reverse(directionFor(targetPosition ?? Position.Left))
+      : travel;
+    // The same curvature factor React Flow's default bezier uses for direct
+    // pin-to-pin wires, so a rerouted wire bends no more than a direct one.
+    const control = length * wireCurvature;
     const c1 = {
-      x: start.x + tangents[index].x * control,
-      y: start.y + tangents[index].y * control,
+      x: start.x + startDir.x * control,
+      y: start.y + startDir.y * control,
     };
     const c2 = {
-      x: end.x - tangents[index + 1].x * control,
-      y: end.y - tangents[index + 1].y * control,
+      x: end.x - endDir.x * control,
+      y: end.y - endDir.y * control,
     };
     segments.push(`C${c1.x},${c1.y} ${c2.x},${c2.y} ${end.x},${end.y}`);
   }
   return segments.join(" ");
-}
-
-/** Direction a bisector at a waypoint: average of normalized segment directions. */
-function bisector(previous: Point, point: Point, next: Point): Point {
-  const incoming = unit({ x: point.x - previous.x, y: point.y - previous.y });
-  const outgoing = unit({ x: next.x - point.x, y: next.y - point.y });
-  const sum = { x: incoming.x + outgoing.x, y: incoming.y + outgoing.y };
-  if (Math.hypot(sum.x, sum.y) < 0.001) {
-    // The wire doubles back on itself at this waypoint; turn perpendicular to
-    // the incoming direction for a smooth U-turn instead of a loop.
-    return { x: -incoming.y, y: incoming.x };
-  }
-  return unit(sum);
 }
 
 function directionFor(position: Position): Point {

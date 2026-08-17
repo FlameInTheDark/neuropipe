@@ -138,6 +138,21 @@ func WithSQLExecutor(executor nodes.SQLExecutor) EngineOption {
 	return func(engine *Engine) { engine.databases = executor }
 }
 
+// WithDialogOpener enables Display Message and Display Question nodes by
+// exposing a focused native-dialog opener to running graphs. A nil opener
+// keeps the engine usable in headless tests and turns dialog calls into
+// explicit node errors.
+func WithDialogOpener(opener nodes.DialogOpener) EngineOption {
+	return func(engine *Engine) { engine.dialogs = opener }
+}
+
+// WithInputDialogOpener enables the Display Input Dialog node by exposing the
+// styled input-dialog opener to running graphs. A nil opener keeps the engine
+// usable in headless tests and turns input-dialog calls into explicit errors.
+func WithInputDialogOpener(opener nodes.InputDialogOpener) EngineOption {
+	return func(engine *Engine) { engine.inputDialogs = opener }
+}
+
 // ValidationError explains why a definition cannot be published.
 type ValidationError struct {
 	Message string `json:"message"`

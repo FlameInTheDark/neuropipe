@@ -53,7 +53,7 @@ type Manager struct {
 
 // NewManager creates a provider manager from persisted settings.
 func NewManager(settings domain.Settings, secrets SecretResolver, options ...ManagerOption) *Manager {
-	manager := &Manager{settings: settings, secrets: secrets, http: &http.Client{Timeout: 90 * time.Second}, limiter: newLimiter(settings.MaxConcurrentLLMRuns)}
+	manager := &Manager{settings: settings, secrets: secrets, http: &http.Client{}, limiter: newLimiter(settings.MaxConcurrentLLMRuns)}
 	for _, option := range options {
 		option(manager)
 	}
@@ -492,7 +492,14 @@ func (m *Manager) postJSON(ctx context.Context, provider domain.ProviderConfig, 
 	if err != nil {
 		return fmt.Errorf("encode provider request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(provider.BaseURL, path), bytes.NewReader(data))
+	// Derive a per-request timeout from the caller's context. The parent
+	// context may have a 30-minute deadline (from the execution service);
+	// we cap each LLM call at 15 minutes so a single stuck inference does
+	// not consume the entire execution budget. If the parent context has
+	// a shorter deadline, that takes precedence.
+	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	request, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint(provider.BaseURL, path), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -564,8 +571,16 @@ func parseResponse(content string) pipeline.ChatResponse {
 	return response
 }
 
+// endpoint joins a provider base URL with an API path. OpenAI-compatible
+// providers are conventionally configured with a versioned base such as
+// https://openrouter.ai/api/v1, so a path's leading "/v1" is never appended
+// twice.
 func endpoint(baseURL, path string) string {
-	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + path
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
+		path = strings.TrimPrefix(path, "/v1")
+	}
+	return base + path
 }
 
 func defaultText(value, fallback string) string {

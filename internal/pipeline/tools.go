@@ -54,11 +54,17 @@ func (s *blueprintState) executeConnectedToolAgent(node domain.FlowNode, config,
 	if node.Type == "llm:coding_agent" {
 		prompt = "Coding task:\n" + text(merged, "task") + "\n\nWorkspace: " + text(merged, "workspace")
 	}
-	messages := make([]domain.ChatMessage, 0, 2+len(tools)*2)
-	if prompt != "" {
-		messages = append(messages, domain.ChatMessage{Role: domain.ChatRoleSystem, Content: prompt})
+	history, err := s.engine.agentHistory(s.ctx, node, merged)
+	if err != nil {
+		return nil, err
 	}
-	messages = append(messages, domain.ChatMessage{Role: domain.ChatRoleUser, Content: promptWithInput(prompt, Packet(inputs))})
+	messages := agentHistoryMessages(prompt, history)
+	if history == nil {
+		// One-message mode: the composed task is the single user turn. In
+		// chat-history mode the conversation already ends with the user's
+		// latest message, which the agent answers directly.
+		messages = append(messages, domain.ChatMessage{Role: domain.ChatRoleUser, Content: promptWithInput(prompt, Packet(inputs))})
+	}
 	definitions := make([]domain.ChatToolDefinition, 0, len(tools))
 	byName := make(map[string]connectedTool, len(tools))
 	for _, tool := range tools {
@@ -70,7 +76,14 @@ func (s *blueprintState) executeConnectedToolAgent(node domain.FlowNode, config,
 	if err != nil {
 		return nil, err
 	}
-	for turn := 0; turn < maxTurns; turn++ {
+	status, err := s.engine.chatStatusReporter(s.ctx, node, merged)
+	if err != nil {
+		return nil, err
+	}
+	for turn := 0; maxTurns < 0 || turn < maxTurns; turn++ {
+		if err := reportModelStatus(status, chatStatusThinking); err != nil {
+			return nil, err
+		}
 		response, err := assistant.Converse(s.ctx, domain.AssistantChatRequest{
 			Messages: messages,
 			Tools:    definitions,
@@ -88,6 +101,15 @@ func (s *blueprintState) executeConnectedToolAgent(node domain.FlowNode, config,
 			tool, found := byName[call.Name]
 			if !found {
 				return nil, fmt.Errorf("LLM requested an unavailable tool")
+			}
+			// Chat readers see the published function name, not the generated
+			// tool-call identifier.
+			displayName := tool.function.Name
+			if displayName == "" {
+				displayName = call.Name
+			}
+			if err := reportModelStatus(status, toolStatusText(displayName)); err != nil {
+				return nil, err
 			}
 			result, err := s.runConnectedTool(node, tool, call.Arguments)
 			if err != nil {
@@ -529,7 +551,13 @@ func toolFailureResult(err error) map[string]any {
 	return map[string]any{"error": "The tool could not complete the request. Try a different supported action or finish without this tool."}
 }
 
+// configuredToolTurns resolves the agent's tool-turn budget. Unlimited turns
+// return -1 so long-running tasks keep going until the model stops calling
+// tools or the execution is cancelled.
 func configuredToolTurns(config map[string]any) (int, error) {
+	if boolValue(config["unlimitedTurns"]) {
+		return -1, nil
+	}
 	value, exists := config["maxTurns"]
 	if !exists || value == nil {
 		return 8, nil

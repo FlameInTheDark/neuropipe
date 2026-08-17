@@ -13,7 +13,7 @@ import { usePersistedChoice, usePersistedValue } from '@/lib/preferences'
 import type { MetricsBreakdown, MetricsFilter, MetricsKPI, MetricsOverview, PipelineSummary, RunStatus, TriggerKind } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/ui'
-import { EventsOn } from '../../wailsjs/runtime/runtime'
+import { Events } from '@wailsio/runtime'
 import { useTranslation } from 'react-i18next'
 
 type RangePreset = 'today' | '7d' | '30d' | '90d' | '12mo' | 'custom'
@@ -175,7 +175,7 @@ export function MetricsView({ pipelines }: { pipelines: PipelineSummary[] }) {
   }, [filter, setError, t])
 
   useEffect(() => { void refresh() }, [refresh])
-  useEffect(() => EventsOn('metrics.updated', () => { void refresh() }), [refresh])
+  useEffect(() => Events.On('metrics.updated', () => { void refresh() }), [refresh])
 
   const modelOptions = useMemo(() => {
     const available = list(overview?.models)

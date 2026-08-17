@@ -1,0 +1,64 @@
+# Wails v3 project configuration. The `info` section feeds the Windows
+# info.json / .syso generator and the macOS Info.plist. The `dev_mode`
+# section is what `wails3 dev` reads to know what to watch and which
+# commands to run.
+# When you update `info` or `fileAssociations`, run
+# `wails3 task common:update:build-assets` to update the assets.
+# Note that this will overwrite any changes you have made to the assets.
+version: '3'
+
+# This information is used to generate the build assets.
+info:
+  companyName: "FlameInTheDark"
+  productName: "Neuropipe"
+  productIdentifier: "com.flameinthedark.neuropipe"
+  description: "Neuropipe"
+  copyright: "(c) 2025, FlameInTheDark"
+  comments: "Local automation workspace"
+  version: "0.1.0"
+
+# Dev mode configuration. `wails3 dev` reads this to know what to watch,
+# what to ignore, and which commands to run on startup and on file change.
+# The execute commands delegate to the Taskfile tasks (which handle the
+# `dir: frontend` switch internally) rather than using `dir:` here, because
+# the dev command resolves config relative to each execute's working dir.
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - bin
+      - build
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: wails3 task common:install:frontend:deps
+      type: once
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: go mod tidy
+      type: blocking
+    - cmd: del rsrc_windows_amd64.syso 2>nul
+      type: once
+    - cmd: wails3 generate syso -arch amd64 -icon build/icon.ico -manifest build/wails.exe.manifest -info build/info.json
+      type: once
+    - cmd: go build -o bin\neuropipe.exe
+      type: blocking
+    - cmd: .\bin\neuropipe.exe
+      type: primary
+
+# File Associations
+# Neuropipe does not register any file extensions.
+fileAssociations: []
+
+# Other data
+other: []

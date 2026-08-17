@@ -21,9 +21,11 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/gettype"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/getvariable"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/greaterthan"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/htmlextract"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/jsonparse"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/jsonquery"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/length"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/randomnumber"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexmatch"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexreplace"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexsplit"
@@ -46,6 +48,10 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/setvariable"
 	switchnode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/switch"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/while"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displayinput"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displaymessage"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displayquestion"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/download"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/listdirectory"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/readfile"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/writefile"
@@ -80,6 +86,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 		cast.Register,
 		typeassert.Register,
 		jsonquery.Register,
+		htmlextract.Register,
 		equals.Register,
 		greaterthan.Register,
 		jsonparse.Register,
@@ -96,6 +103,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 		regexmatch.Register,
 		regexreplace.Register,
 		regexsplit.Register,
+		randomnumber.Register,
 		date.Register,
 		branch.Register,
 		sequence.Register,
@@ -119,6 +127,10 @@ func RegisterAll(registrar nodes.Registrar) error {
 		listdirectory.Register,
 		readfile.Register,
 		writefile.Register,
+		download.Register,
+		displaymessage.Register,
+		displayquestion.Register,
+		displayinput.Register,
 		event.Register,
 		sendchatmessage.Register,
 		split.Register,

@@ -30,6 +30,14 @@ jobs:
         with:
           bun-version: "1.2.22"
 
+      - name: Ensure frontend/dist exists for go:embed
+        shell: pwsh
+        run: |
+          if (-not (Test-Path frontend/dist)) {
+            New-Item -ItemType Directory -Path frontend/dist -Force
+            '<!DOCTYPE html><html><head><title>Neuropipe</title></head><body><div id="root"></div></body></html>' | Out-File -FilePath frontend/dist/index.html -Encoding utf8
+          }
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: bun install --frozen-lockfile
@@ -42,10 +50,22 @@ jobs:
         working-directory: frontend
         run: bun run build
 
+      - name: Install Wails v3 CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
+
+      - name: Generate syso for Windows version info
+        shell: pwsh
+        run: |
+          wails3 generate syso -arch amd64 -icon build/icon.ico -manifest build/wails.exe.manifest -info build/info.json
+
       - name: Vet Go code
+        env:
+          CGO_ENABLED: "1"
         run: go vet ./...
 
       - name: Test Go code with the race detector
+        env:
+          CGO_ENABLED: "1"
         run: go test -race ./...
 
   release:

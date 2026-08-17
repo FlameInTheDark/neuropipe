@@ -58,6 +58,11 @@ jobs:
         working-directory: frontend
         run: bun install --frozen-lockfile
 
+      - name: Build frontend
+        if: steps.release.outputs.has_release == 'true'
+        working-directory: frontend
+        run: bun run build
+
       - name: Install and expose NSIS
         if: steps.release.outputs.has_release == 'true'
         shell: pwsh
@@ -78,12 +83,37 @@ jobs:
           $nsisDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & (Join-Path $nsisDirectory 'makensis.exe') /VERSION
 
+      - name: Install Wails v3 CLI
+        if: steps.release.outputs.has_release == 'true'
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
+
+      - name: Generate Wails v3 syso and bindings
+        if: steps.release.outputs.has_release == 'true'
+        shell: pwsh
+        run: |
+          wails3 generate syso -arch amd64 -icon build/icon.ico -manifest build/wails.exe.manifest -info build/info.json
+          wails3 generate bindings
+
       - name: Build production artifacts
         if: steps.release.outputs.has_release == 'true'
+        env:
+          CGO_ENABLED: "1"
         run: >-
-          go run github.com/wailsapp/wails/v2/cmd/wails@v2.12.0 build
-          -platform windows/amd64 -nsis -trimpath
-          -ldflags "-s -w -X main.appVersion=${{ steps.release.outputs.tag }}"
+          go build -tags production -trimpath
+          -ldflags "-s -w -H windowsgui -X main.appVersion=${{ steps.release.outputs.tag }}"
+          -o build/bin/neuropipe.exe
+
+      - name: Build NSIS installer (optional)
+        if: steps.release.outputs.has_release == 'true'
+        shell: pwsh
+        run: |
+          if (Test-Path build/windows/installer.nsi) {
+            $nsis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if (-not $nsis) { throw 'makensis.exe not found after NSIS install step' }
+            & makensis.exe build/windows/installer.nsi
+          } else {
+            Write-Host 'Skipping NSIS installer: build/windows/installer.nsi not found'
+          }
 
       - name: Find release artifacts
         if: steps.release.outputs.has_release == 'true'
@@ -91,20 +121,18 @@ jobs:
         shell: pwsh
         run: |
           $buildDirectory = Join-Path $PWD 'build/bin'
-          $binary = Get-ChildItem -Path $buildDirectory -File -Filter 'neuropipe.exe' | Select-Object -First 1
-          $installer = Get-ChildItem -Path $buildDirectory -File -Filter '*-installer.exe' | Select-Object -First 1
-
-          if (-not $binary -or -not $installer) {
-            $files = if (Test-Path $buildDirectory) {
-              Get-ChildItem -Path $buildDirectory -File | ForEach-Object { $_.FullName }
-            } else {
-              @('<build/bin does not exist>')
-            }
-            throw "Expected both neuropipe.exe and an NSIS installer. Build output:`n$($files -join "`n")"
+          if (-not (Test-Path $buildDirectory)) {
+            throw "Build directory $buildDirectory does not exist"
           }
-
+          $binary = Get-ChildItem -Path $buildDirectory -File -Filter 'neuropipe.exe' | Select-Object -First 1
+          if (-not $binary) {
+            throw "neuropipe.exe not found in $buildDirectory"
+          }
           "binary=$($binary.FullName)" >> $env:GITHUB_OUTPUT
-          "installer=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          $installer = Get-ChildItem -Path $buildDirectory -File -Filter '*-installer.exe' | Select-Object -First 1
+          if ($installer) {
+            "installer=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Attach executable and installer to GitHub release
         if: steps.release.outputs.has_release == 'true'
@@ -112,7 +140,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ steps.release.outputs.tag }}" `
-            "${{ steps.artifacts.outputs.binary }}#Neuropipe-${{ steps.release.outputs.tag }}-windows-amd64.exe" `
-            "${{ steps.artifacts.outputs.installer }}#Neuropipe-${{ steps.release.outputs.tag }}-windows-amd64-installer.exe" `
-            --clobber
+          $binary = '${{ steps.artifacts.outputs.binary }}'
+          $installer = '${{ steps.artifacts.outputs.installer }}'
+          $tag = '${{ steps.release.outputs.tag }}'
+          $assets = @("$binary#Neuropipe-$tag-windows-amd64.exe")
+          if ($installer) {
+            $assets += "$installer#Neuropipe-$tag-windows-amd64-installer.exe"
+          }
+          gh release upload $tag @assets --clobber

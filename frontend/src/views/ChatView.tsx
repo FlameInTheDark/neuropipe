@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, ChevronDown, ChevronRight, CircleStop, Clock3, Loader2, MessageCircle, Pencil, Plus, Send, ShieldAlert, Trash2, Workflow } from 'lucide-react'
-import { EventsOn } from '../../wailsjs/runtime/runtime'
+import { Events } from '@wailsio/runtime'
 import { LucideIcon } from '@/components/LucideIconPicker'
 import { MarkdownContent } from '@/components/MarkdownContent'
 import { PageHeader } from '@/components/PageHeader'
@@ -111,9 +111,9 @@ export function ChatView() {
   useEffect(() => { void load() }, []) // Initial data fetch is deliberately independent from view filtering.
   useEffect(() => {
     const refresh = () => { if (selectedID) void loadDetails(selectedID); void desktop.listChatConversations().then(setConversations).catch(() => undefined) }
-    const stopChat = EventsOn('chat.updated', refresh)
-    const stopRun = EventsOn('chat.run.updated', refresh)
-    const stopApproval = EventsOn('chat.approval.requested', refresh)
+    const stopChat = Events.On('chat.updated', refresh)
+    const stopRun = Events.On('chat.run.updated', refresh)
+    const stopApproval = Events.On('chat.approval.requested', refresh)
     return () => { stopChat(); stopRun(); stopApproval() }
   }, [loadDetails, selectedID])
   useEffect(() => { feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' }) }, [messages, runs])

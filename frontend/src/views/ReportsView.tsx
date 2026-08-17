@@ -16,7 +16,7 @@ import { cn, formatDate } from '@/lib/utils'
 import { useConfirmationStore } from '@/stores/confirmation'
 import { useUIStore } from '@/stores/ui'
 import { useTranslation } from 'react-i18next'
-import { EventsOn } from '../../wailsjs/runtime/runtime'
+import { Events } from '@wailsio/runtime'
 
 type ReportView = 'split' | 'posts'
 type ReportSort = 'newest' | 'oldest' | 'tag'
@@ -43,21 +43,21 @@ function reportPreview(markdown: string, fallback: string): string {
 }
 
 function dateTimeBoundary(value: string, endOfDay = false): number | undefined {
-	const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value)
-	const dateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)
-	if (!dateOnly && !dateTime) return undefined
-	const time = Date.parse(dateOnly ? `${value}T${endOfDay ? '23:59:59.999' : '00:00:00'}` : value)
+        const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value)
+        const dateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)
+        if (!dateOnly && !dateTime) return undefined
+        const time = Date.parse(dateOnly ? `${value}T${endOfDay ? '23:59:59.999' : '00:00:00'}` : value)
   return Number.isNaN(time) ? undefined : time
 }
 
 function ReportTags({ report, onSelect }: { report: Report; onSelect: (tag: string) => void }) {
   if (report.tags.length === 0) return null
-  return <div className="mt-3 flex flex-wrap gap-1.5">{report.tags.map((tag) => <button key={tag.toLowerCase()} type="button" onClick={() => onSelect(tag)} className="inline-flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-[10px] font-medium text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"><Tag className="size-3" />{tag}</button>)}</div>
+  return <div className="mt-3 flex flex-wrap gap-1.5">{report.tags.map((tag) => <button key={tag.toLowerCase()} type="button" onClick={() => onSelect(tag)} className="relative inline-flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-[10px] font-medium text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"><Tag className="size-3" />{tag}</button>)}</div>
 }
 
 function ReportMetadata({ report, onOpenPipeline }: { report: Report; onOpenPipeline: () => void }) {
   const { t } = useTranslation()
-  return <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-zinc-500"><span className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{t('reports.created', { date: formatDate(report.createdAt) })}</span><span className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{t('reports.pipelineStarted', { date: formatDate(report.executionStartedAt) })}</span><button type="button" onClick={onOpenPipeline} className="flex items-center gap-1.5 hover:text-zinc-200"><Workflow className="size-3.5" />{report.pipelineName}</button></div>
+  return <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-zinc-500"><span className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{t('reports.created', { date: formatDate(report.createdAt) })}</span><span className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{t('reports.pipelineStarted', { date: formatDate(report.executionStartedAt) })}</span><button type="button" onClick={onOpenPipeline} className="relative flex items-center gap-1.5 hover:text-zinc-200"><Workflow className="size-3.5" />{report.pipelineName}</button></div>
 }
 
 export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefresh: () => Promise<void> }) {
@@ -107,7 +107,7 @@ export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefre
     void onRefresh()
   }, [onRefresh])
 
-  useEffect(() => EventsOn('reports.updated', () => { void onRefresh() }), [onRefresh])
+  useEffect(() => Events.On('reports.updated', () => { void onRefresh() }), [onRefresh])
 
   useEffect(() => {
     if (selectedID && filteredReports.some((report) => report.id === selectedID)) return
@@ -155,8 +155,8 @@ export function ReportsView({ reports, onRefresh }: { reports: Report[]; onRefre
         </div>
         {filteredReports.length === 0 ? <div className="surface flex h-48 flex-col items-center justify-center rounded-xl text-center"><Search className="mb-3 size-5 text-zinc-600" /><p className="text-sm font-medium text-zinc-300">{t('reports.noMatching')}</p><p className="mt-1 text-xs text-zinc-500">{t('reports.noMatchingDescription')}</p><Button className="mt-4" size="sm" variant="outline" onClick={clearFilters}>{t('reports.clearFilters')}</Button></div> : view === 'split' ? <div className="grid h-[calc(100%-4.5rem)] min-h-0 gap-5 lg:grid-cols-[minmax(19rem,.85fr)_minmax(0,1.5fr)]">
           <div className="surface muted-scroll min-h-0 overflow-y-auto rounded-xl p-2">
-            {filteredReports.map((report) => <article key={report.id} onContextMenu={(event) => reportMenu(report, event)} className={cn('rounded-lg border border-transparent p-3 transition-colors', selected?.id === report.id ? 'border-zinc-700 bg-zinc-900' : 'hover:bg-zinc-900/70')}>
-              <button type="button" className="w-full text-left" onClick={() => setSelectedID(report.id)} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); openMenu(contextMenuPointFromElement(event.currentTarget), report) }} aria-current={selected?.id === report.id ? 'true' : undefined}>
+            {filteredReports.map((report) => <article key={report.id} onContextMenu={(event) => reportMenu(report, event)} className={cn('relative rounded-lg border border-transparent p-3 transition-colors', selected?.id === report.id ? 'border-zinc-700 bg-zinc-900' : 'hover:bg-zinc-900/70')}>
+              <button type="button" className="w-full text-left after:absolute after:inset-0 after:rounded-lg" onClick={() => setSelectedID(report.id)} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); openMenu(contextMenuPointFromElement(event.currentTarget), report) }} aria-current={selected?.id === report.id ? 'true' : undefined}>
                 <h2 className="truncate text-sm font-medium text-zinc-100">{report.title}</h2>
                 <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-zinc-500">{reportPreview(report.markdown, t('reports.noContent'))}</p>
               </button>

@@ -27,3 +27,19 @@ Use **Base64 Encode** and **Base64 Decode** to explicitly select text or byte-sl
 ## Git
 
 **Purpose:** run a focused Git operation. **Pins:** Exec input/output, Operation/Repository inputs, Result object. **Configure:** supported operation and repository. **Produces:** operation and output. **Capability:** Git. **Failure:** repository and command failures are recorded. **Example:** Cron Trigger → Git status → Create Report.
+
+## Download from Web
+
+**Purpose:** download a file from a URL into a local directory. **Pins:** Exec input/output, URL and Location inputs, Result object (path, bytes, status). **Configure:** URL and destination directory. **Produces:** absolute path of the saved file, byte count, and HTTP status. **Capability:** network and file write. **Failure:** invalid URLs, HTTP errors, and write failures stop the run. **Example:** Button Trigger → Download from Web → Desktop Notification.
+
+## Display Message
+
+**Purpose:** show a native dialog window with an OK button and block until dismissed. **Pins:** Exec input/output, Title and Message inputs, Result object. **Configure:** title and message. **Produces:** the title/message that were shown and a Dismissed flag. **Capability:** none. **Failure:** platform dialog errors stop the run. **Example:** Button Trigger → Display Message (Title: Done, Message: Pipeline finished).
+
+## Display Question
+
+**Purpose:** show a native dialog with Yes/No buttons and branch on the user's choice. **Pins:** Exec input, Yes and No exec outputs, Result object. **Configure:** title and question text. **Produces:** the chosen `choice` value (`yes` or `no`). **Capability:** none. **Failure:** platform dialog errors stop the run. **Example:** Button Trigger → Display Question → Yes → HTTP Request, No → Desktop Notification.
+
+## Display Input Dialog
+
+**Purpose:** show a styled dialog with an input field and Continue/Cancel buttons. **Pins:** Exec input, Continue and Canceled exec outputs, Value and Result data outputs. **Configure:** title, message, field label, and input type (text or number). **Produces:** the typed Value (nil when cancelled) and a Canceled flag. **Capability:** none. **Failure:** invalid number input fails the run; cancellation routes from the Canceled pin with a nil Value. **Example:** Button Trigger → Display Input Dialog (number) → Continue → Math: Add.

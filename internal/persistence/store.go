@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,8 +116,8 @@ CREATE TABLE IF NOT EXISTS trigger_bindings (
   node_id TEXT NOT NULL,
   revision INTEGER NOT NULL,
   kind TEXT NOT NULL,
-	  node_type TEXT NOT NULL DEFAULT '',
-	  config_json TEXT NOT NULL DEFAULT '{}',
+          node_type TEXT NOT NULL DEFAULT '',
+          config_json TEXT NOT NULL DEFAULT '{}',
   label TEXT NOT NULL,
   icon TEXT NOT NULL,
   color TEXT NOT NULL,
@@ -1257,30 +1258,36 @@ func (s *Store) MarkExecutionRunning(ctx context.Context, id string) error {
 
 // CompleteExecution persists redacted node records and final status.
 func (s *Store) CompleteExecution(ctx context.Context, execution domain.Execution) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("start completion transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	// Update the execution status in its own transaction first. This must
+	// succeed even when individual node-run inserts fail, otherwise the
+	// execution would stay "running" forever in the DB when a node output
+	// cannot be encoded.
 	finished := time.Now().UTC()
-	if _, err := statements(tx).Update("executions").Set("status", execution.Status).Set("finished_at", stamp(finished)).Set("error", execution.Error).Where(squirrel.Eq{"id": execution.ID}).ExecContext(ctx); err != nil {
+	if _, err := statements(s.db).Update("executions").Set("status", execution.Status).Set("finished_at", stamp(finished)).Set("error", execution.Error).Where(squirrel.Eq{"id": execution.ID}).ExecContext(ctx); err != nil {
 		return fmt.Errorf("complete execution: %w", err)
 	}
+	// Clear any previously-stored node runs so a re-completion (e.g. after a
+	// retry) does not hit a UNIQUE constraint on (execution_id, ordinal).
+	if _, err := statements(s.db).Delete("node_runs").Where(squirrel.Eq{"execution_id": execution.ID}).ExecContext(ctx); err != nil {
+		return fmt.Errorf("clear stale node runs: %w", err)
+	}
+	// Insert node runs individually. A failure on one run must not roll back
+	// the status update above or discard other runs that encoded successfully.
 	for ordinal, run := range execution.NodeRuns {
 		input, err := encode(run.Input)
 		if err != nil {
-			return err
+			slog.Warn("encode node run input failed; skipping", "executionId", execution.ID, "nodeId", run.NodeID, "err", err)
+			continue
 		}
 		output, err := encode(run.Output)
 		if err != nil {
-			return err
+			slog.Warn("encode node run output failed; skipping", "executionId", execution.ID, "nodeId", run.NodeID, "err", err)
+			continue
 		}
-		if _, err := statements(tx).Insert("node_runs").Columns("execution_id", "ordinal", "node_id", "node_type", "status", "input_json", "output_json", "error", "started_at", "finished_at").Values(execution.ID, ordinal, run.NodeID, run.NodeType, run.Status, input, output, run.Error, stamp(run.StartedAt), stamp(run.FinishedAt)).ExecContext(ctx); err != nil {
-			return fmt.Errorf("save node run: %w", err)
+		if _, err := statements(s.db).Insert("node_runs").Columns("execution_id", "ordinal", "node_id", "node_type", "status", "input_json", "output_json", "error", "started_at", "finished_at").Values(execution.ID, ordinal, run.NodeID, run.NodeType, run.Status, input, output, run.Error, stamp(run.StartedAt), stamp(run.FinishedAt)).ExecContext(ctx); err != nil {
+			slog.Warn("save node run failed; skipping", "executionId", execution.ID, "nodeId", run.NodeID, "err", err)
+			continue
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit execution: %w", err)
 	}
 	return nil
 }

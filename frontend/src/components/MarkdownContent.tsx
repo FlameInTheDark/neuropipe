@@ -3,7 +3,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
+import { Browser } from "@wailsio/runtime";
 import type { ReactNode } from "react";
 
 const permittedSchemes = new Set(["http:", "https:"]);
@@ -114,7 +114,7 @@ function components(baseURL?: string, onDocumentLink?: (id: string, anchor?: str
           href={target}
           onClick={(event) => {
             event.preventDefault();
-            BrowserOpenURL(target);
+            Browser.OpenURL(target);
           }}
           className="break-all text-zinc-100 underline decoration-zinc-500 underline-offset-4 hover:decoration-zinc-200"
         >

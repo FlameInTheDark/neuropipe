@@ -694,6 +694,15 @@ func (s *blueprintState) JavaScriptHost() nodes.JavaScriptHost {
 // action node without exposing the concrete engine or desktop service.
 func (s *blueprintState) TwitchChatSender() nodes.TwitchChatSender { return s.engine.twitch }
 
+// DialogOpener implements the focused runtime port consumed by Display Message
+// and Display Question nodes without exposing the concrete engine or dialog
+// service to node modules.
+func (s *blueprintState) DialogOpener() nodes.DialogOpener { return s.engine.dialogs }
+
+// InputDialogOpener implements the focused runtime port consumed by the
+// Display Input Dialog node.
+func (s *blueprintState) InputDialogOpener() nodes.InputDialogOpener { return s.engine.inputDialogs }
+
 // Return implements nodes.ReturnSignaler.
 func (s *blueprintState) Return(value map[string]any) {
 	s.result.Returned = true

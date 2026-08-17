@@ -9,7 +9,6 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/updatecheck"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -104,6 +103,8 @@ func (d *Desktop) OpenUpdateRelease() error {
 	if err != nil || target.Scheme != "https" || !strings.EqualFold(target.Hostname(), "github.com") {
 		return fmt.Errorf("available update has an invalid release URL")
 	}
-	wailsruntime.BrowserOpenURL(d.context(), target.String())
-	return nil
+	if d.app == nil {
+		return fmt.Errorf("application is not initialised")
+	}
+	return d.app.Browser.OpenURL(target.String())
 }

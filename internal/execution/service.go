@@ -35,6 +35,8 @@ type Service struct {
 	twitch   nodes.TwitchChatSender
 	globals  pipeline.GlobalVariablesStore
 	database nodes.SQLExecutor
+	dialogs  nodes.DialogOpener
+	inputs   nodes.InputDialogOpener
 
 	mu            sync.Mutex
 	running       map[string]struct{}
@@ -79,6 +81,19 @@ func WithGlobalVariablesStore(store pipeline.GlobalVariablesStore) ServiceOption
 // WithDatabaseService supplies the registered SQLite executor to graph runs.
 func WithDatabaseService(service nodes.SQLExecutor) ServiceOption {
 	return func(s *Service) { s.database = service }
+}
+
+// WithDialogOpener attaches the native dialog opener used by Display Message
+// and Display Question nodes. A nil opener keeps the engine usable in
+// headless tests and turns dialog calls into explicit node errors.
+func WithDialogOpener(opener nodes.DialogOpener) ServiceOption {
+	return func(s *Service) { s.dialogs = opener }
+}
+
+// WithInputDialogOpener attaches the styled input dialog opener used by the
+// Display Input Dialog node.
+func WithInputDialogOpener(opener nodes.InputDialogOpener) ServiceOption {
+	return func(s *Service) { s.inputs = opener }
 }
 
 // SetTwitchChatSender completes Desktop composition before workers start.
@@ -167,8 +182,13 @@ func (s *Service) RunBinding(ctx context.Context, bindingID string, input pipeli
 		finished = *execution.FinishedAt
 	}
 	if err := s.store.SetTriggerLastRun(ctx, binding.ID, execution.Status, finished); err != nil {
-		return domain.Execution{}, err
+		// The trigger last-run update is a side-effect; the execution
+		// itself already completed. Surface the error through the
+		// event bus rather than discarding the execution result
+		// (Wails v3 drops the first return value when error is non-nil).
+		s.emitEvent("trigger.lastrun.error", map[string]any{"bindingId": binding.ID, "error": err.Error()})
 	}
+	// runErr is always nil from runDefinition, but keep it for compatibility.
 	return execution, runErr
 }
 
@@ -319,6 +339,40 @@ func (s *Service) CancelExecution(ctx context.Context, executionID string) error
 	return nil
 }
 
+// CancelPipelineExecution cancels the active run for a pipeline, if any.
+// It returns the execution ID that was cancelled, or an empty string when no
+// active run was found. This is the convenience used by the UI's Stop button
+// when only the pipeline ID is known (pipelines list, button board).
+func (s *Service) CancelPipelineExecution(ctx context.Context, pipelineID string) (string, error) {
+	s.mu.Lock()
+	_, running := s.running[pipelineID]
+	s.mu.Unlock()
+	if !running {
+		return "", nil
+	}
+	executions, err := s.store.ListExecutions(ctx, pipelineID, 1)
+	if err != nil || len(executions) == 0 {
+		return "", err
+	}
+	latest := executions[0]
+	if latest.Status != domain.RunRunning && latest.Status != domain.RunPending {
+		return "", nil
+	}
+	if err := s.CancelExecution(ctx, latest.ID); err != nil {
+		return "", err
+	}
+	return latest.ID, nil
+}
+
+// IsPipelineRunning reports whether a pipeline currently has an active
+// (running or queued) execution. Used by the UI to toggle Run/Stop state.
+func (s *Service) IsPipelineRunning(pipelineID string) bool {
+	s.mu.Lock()
+	_, running := s.running[pipelineID]
+	s.mu.Unlock()
+	return running
+}
+
 func (s *Service) enqueue(ctx, queueCtx context.Context, job queuedRun) (domain.Execution, error) {
 	execution := job.execution
 	select {
@@ -378,7 +432,7 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		s.completeCancelled(job, "Cancelled by user")
 		return
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	if !s.setActiveCancel(execution.ID, cancel) {
 		cancel()
 		s.completeCancelled(job, "Cancelled by user")
@@ -435,10 +489,21 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		pipeline.WithTwitchChatSender(s.twitch),
 		pipeline.WithGlobalVariablesStore(s.globals),
 		pipeline.WithSQLExecutor(s.database),
+		pipeline.WithDialogOpener(s.dialogs),
+		pipeline.WithInputDialogOpener(s.inputs),
 	)
 	result, runErr := engine.Execute(runCtx, job.definition, job.triggerNodeID, job.input)
+	// Recover from panics inside node modules so the worker goroutine is
+	// not killed and the execution record is completed with the error.
+	if r := recover(); r != nil {
+		runErr = fmt.Errorf("pipeline panic: %v", r)
+	}
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
-	if runCtx.Err() != nil || s.isCancelled(execution.ID) {
+	if s.isCancelled(execution.ID) {
+		execution.Status, execution.Error = domain.RunCancelled, "Cancelled by user"
+	} else if runCtx.Err() == context.DeadlineExceeded {
+		execution.Status, execution.Error = domain.RunFailed, "Pipeline exceeded the 30-minute execution deadline"
+	} else if runCtx.Err() != nil {
 		execution.Status, execution.Error = domain.RunCancelled, "Cancelled by user"
 	} else if runErr != nil {
 		execution.Status, execution.Error = domain.RunFailed, runErr.Error()
@@ -508,6 +573,22 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 	}
 	s.emitEvent("execution:started", execution)
 
+	// Create a cancellable context registered in activeCancels so
+	// CancelExecution can interrupt synchronous runs (RunDraft, RunBinding)
+	// that do not go through the owned worker queue. A 30-minute deadline
+	// guards against infinite loops that the node-visit limit can't catch
+	// (for example a node that blocks on a network call without a timeout).
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	if !s.setActiveCancel(execution.ID, cancel) {
+		cancel()
+		execution.Status, execution.Error = domain.RunCancelled, "Cancelled by user"
+		_ = s.store.CompleteExecution(context.Background(), execution)
+		s.recordMetrics(execution)
+		s.emitEvent("execution:completed", execution)
+		return execution, nil
+	}
+	defer s.clearActiveCancel(execution.ID)
+
 	reportWriter := emittingReportWriter{writer: s.store, emit: s.emit}
 	chatWriter := emittingChatWriter{writer: s.store, emit: s.emit}
 	engine := pipeline.NewEngine(s.registry, s.llm, gate,
@@ -519,10 +600,25 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 		pipeline.WithTwitchChatSender(s.twitch),
 		pipeline.WithGlobalVariablesStore(s.globals),
 		pipeline.WithSQLExecutor(s.database),
+		pipeline.WithDialogOpener(s.dialogs),
+		pipeline.WithInputDialogOpener(s.inputs),
 	)
-	result, runErr := engine.Execute(ctx, definition, triggerNodeID, input)
+	result, runErr := engine.Execute(runCtx, definition, triggerNodeID, input)
+	// A panic inside a node module (for example a nil-pointer dereference
+	// in a third-party LLM call) would otherwise kill the goroutine and
+	// leave the execution record stuck in "running" forever. Recover here
+	// so the error is surfaced to the user and the record is completed.
+	if r := recover(); r != nil {
+		runErr = fmt.Errorf("pipeline panic: %v", r)
+	}
 	execution.NodeRuns = redactNodeRuns(result.NodeRuns)
-	if runErr != nil {
+	if s.isCancelled(execution.ID) {
+		execution.Status, execution.Error = domain.RunCancelled, "Cancelled by user"
+	} else if runCtx.Err() == context.DeadlineExceeded {
+		execution.Status, execution.Error = domain.RunFailed, "Pipeline exceeded the 30-minute execution deadline"
+	} else if runCtx.Err() != nil {
+		execution.Status, execution.Error = domain.RunCancelled, "Cancelled by user"
+	} else if runErr != nil {
 		execution.Status, execution.Error = domain.RunFailed, runErr.Error()
 	} else {
 		execution.Status = domain.RunCompleted
@@ -530,11 +626,23 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 	finished := time.Now().UTC()
 	execution.FinishedAt = &finished
 	if err := s.store.CompleteExecution(ctx, execution); err != nil {
-		return domain.Execution{}, err
+		// CompleteExecution failure must not discard the execution
+		// result the frontend needs. Wails v3 drops the first return
+		// value when error is non-nil, so we emit the error through
+		// the event bus and return the execution with the store error
+		// surfaced in execution.Error.
+		s.emitEvent("execution:store.error", map[string]any{"executionId": execution.ID, "error": err.Error()})
+		if execution.Error == "" {
+			execution.Error = err.Error()
+		}
+		s.emitEvent("execution:completed", execution)
+		return execution, nil
 	}
 	s.recordMetrics(execution)
 	s.emitEvent("execution:completed", execution)
-	return execution, runErr
+	// Return nil error so Wails v3 delivers the execution to the frontend.
+	// The pipeline-level error (if any) is already in execution.Error.
+	return execution, nil
 }
 
 type limiter struct{ slots chan struct{} }

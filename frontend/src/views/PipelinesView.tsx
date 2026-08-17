@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, Copy, Loader2, MoreHorizontal, Plus, Search, Trash2, Workflow } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, ArrowRight, Copy, Loader2, MoreHorizontal, Plus, Search, Square, Trash2, Workflow } from 'lucide-react'
 import { ContextMenu, contextMenuPointFromElement, contextMenuPosition, type ContextMenuPoint, type ContextMenuPosition } from '@/components/ContextMenu'
 import { EmptyState } from '@/components/EmptyState'
 import { LucideIcon } from '@/components/LucideIconPicker'
@@ -27,8 +27,51 @@ export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSum
   const [name, setName] = useState('')
   const [menu, setMenu] = useState<PipelineMenu>()
   const [actionID, setActionID] = useState('')
+  const [runningPipelines, setRunningPipelines] = useState<Record<string, boolean>>({})
   const requestConfirmation = useConfirmationStore((state) => state.ask)
   const filtered = useMemo(() => pipelines.filter((pipeline) => `${pipeline.name} ${pipeline.description}`.toLowerCase().includes(query.toLowerCase())), [pipelines, query])
+
+  // Poll running state for pipelines that have button triggers. The backend
+  // tracks active runs in a mutex-protected map; this lightweight poll keeps
+  // the Stop button in sync without requiring a Wails event per status change.
+  useEffect(() => {
+    if (pipelines.length === 0) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const results = await Promise.all(
+          pipelines.map(async (pipeline) => ({
+            id: pipeline.id,
+            running: await desktop.isPipelineRunning(pipeline.id),
+          })),
+        )
+        if (cancelled) return
+        const next: Record<string, boolean> = {}
+        for (const result of results) {
+          if (result.running) next[result.id] = true
+        }
+        setRunningPipelines(next)
+      } catch {
+        // ignore polling errors — the UI just won't show running state
+      }
+    }
+    void poll()
+    const interval = window.setInterval(poll, 2000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [pipelines])
+
+  const stopPipeline = async (pipeline: PipelineSummary) => {
+    try {
+      setActionID(pipeline.id)
+      await desktop.cancelPipelineExecution(pipeline.id)
+      await onRefresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t('pipelines.stopFailed'))
+    } finally {
+      setActionID('')
+      setRunningPipelines((current) => { const next = { ...current }; delete next[pipeline.id]; return next })
+    }
+  }
 
   const create = async () => {
     try {
@@ -103,7 +146,7 @@ export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSum
         {filtered.map((pipeline) => <div
           key={pipeline.id}
           onContextMenu={(event) => { event.preventDefault(); openMenu(event, pipeline) }}
-          className="group grid grid-cols-[minmax(0,1fr)_130px_110px_42px] items-center border-b border-zinc-800 px-4 py-4 transition-colors last:border-0 hover:bg-zinc-900"
+          className="group relative grid grid-cols-[minmax(0,1fr)_130px_110px_42px] items-center border-b border-zinc-800 px-4 py-4 transition-colors last:border-0 hover:bg-zinc-900"
         >
           <button
             type="button"
@@ -113,7 +156,11 @@ export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSum
               event.preventDefault()
               openMenu(contextMenuPointFromElement(event.currentTarget), pipeline)
             }}
-            className="flex min-w-0 items-center gap-3 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+            // The button's pseudo-element stretches across the whole row (the
+            // row is its positioned ancestor) so every part of it opens the
+            // pipeline; later positioned row actions stack above it and keep
+            // their own clicks.
+            className="flex min-w-0 items-center gap-3 rounded text-left outline-none after:absolute after:inset-0 after:rounded focus-visible:ring-2 focus-visible:ring-zinc-500"
           >
             <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-zinc-800" style={{ color: pipeline.iconColor, backgroundColor: pipeline.iconBackground }}><LucideIcon name={pipeline.icon} className="size-4" /></span>
             <span className="min-w-0"><span className="block truncate text-sm font-medium text-zinc-100">{pipeline.name}</span>
@@ -122,18 +169,34 @@ export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSum
           </button>
           <span><span className={pipeline.status === 'active' ? 'rounded bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300' : pipeline.status === 'legacy' ? 'rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-300' : 'rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400'}>{pipeline.status === 'active' ? t('pipelines.published', { version: pipeline.publishedRevision }) : pipeline.status === 'legacy' ? t('pipelines.legacy') : t('pipelines.draft')}</span></span>
           <span className="text-xs text-zinc-500">{formatDate(pipeline.updatedAt)}</span>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="size-7 p-0 text-zinc-500 hover:text-zinc-100 focus-visible:text-zinc-100"
-            onClick={(event) => openMenu(contextMenuPointFromElement(event.currentTarget), pipeline)}
-            aria-label={t('pipelines.options', { name: pipeline.name })}
-            aria-haspopup="menu"
-            aria-expanded={menu?.pipeline.id === pipeline.id}
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
+          <div className="relative flex items-center justify-end gap-1">
+            {runningPipelines[pipeline.id] ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="danger"
+                className="h-7 px-2 text-xs"
+                disabled={actionID === pipeline.id}
+                onClick={(event) => { event.stopPropagation(); void stopPipeline(pipeline) }}
+                aria-label={t('pipelines.stop')}
+              >
+                {actionID === pipeline.id ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
+                {t('pipelines.stop')}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-zinc-500 hover:text-zinc-100 focus-visible:text-zinc-100"
+              onClick={(event) => openMenu(contextMenuPointFromElement(event.currentTarget), pipeline)}
+              aria-label={t('pipelines.options', { name: pipeline.name })}
+              aria-haspopup="menu"
+              aria-expanded={menu?.pipeline.id === pipeline.id}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </div>
         </div>)}
       </div>}
       {pipelines.length > 0 && filtered.length === 0 && <div className="py-16 text-center text-sm text-zinc-500"><Copy className="mx-auto mb-3 size-5" />{t('pipelines.noMatches', { query })}</div>}

@@ -14,6 +14,7 @@ export interface BlueprintContextMenuState {
   position: { x: number; y: number };
   nodeID?: string;
   edgeID?: string;
+  edgeKind?: string;
   source?: string;
 }
 
@@ -69,7 +70,7 @@ export function BlueprintContextMenu({
         positionMode="absolute"
         onClose={onClose}
       >
-        {onInsertReroute ? (
+        {onInsertReroute && menu.edgeKind !== "tool" ? (
           <button
             autoFocus
             role="menuitem"

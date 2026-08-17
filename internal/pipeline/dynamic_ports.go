@@ -42,6 +42,7 @@ func definitionForNode(definition domain.NodeDefinition, node domain.FlowNode) (
 			return definition, err
 		}
 		definition.Outputs = append(ports, definition.Outputs...)
+		definition.Inputs = filterChatContextPins(node, config, definition.Inputs)
 	case "data:get_field", "data:break_object":
 		ports, err := getFieldOutputPorts(config, definition.DefaultConfig)
 		if err != nil {
@@ -85,6 +86,8 @@ func definitionForNode(definition domain.NodeDefinition, node domain.FlowNode) (
 			outputs[index].Color = dataTypeColor(outputs[index].DataType)
 		}
 		definition.Outputs = outputs
+	case "llm:prompt", "llm:extract", "llm:boolean", "llm:summarize", "llm:agent", "llm:coding_agent":
+		definition.Inputs = filterChatContextPins(node, config, definition.Inputs)
 	case "data:build_object":
 		// Graphs saved before configurable Build Object inputs retain their
 		// explicit Key/Value pins until a user upgrades the node in the editor.
@@ -98,6 +101,33 @@ func definitionForNode(definition domain.NodeDefinition, node domain.FlowNode) (
 		definition.Inputs = ports
 	}
 	return definition, nil
+}
+
+// filterNodePort returns the ports without the named pin, sharing the original
+// slice whenever the pin is absent so callers keep ownership semantics.
+func filterNodePort(ports []domain.NodePort, id string) []domain.NodePort {
+	filtered := make([]domain.NodePort, 0, len(ports))
+	for _, port := range ports {
+		if port.ID == id {
+			continue
+		}
+		filtered = append(filtered, port)
+	}
+	return filtered
+}
+
+// filterChatContextPins hides the toggle-gated chat pins of LLM nodes: the
+// Chat Run ID pin exists only while status updates are enabled, and the Chat
+// ID pin only in the agents' chat-history mode. The editor mirrors this so
+// validation and connections always agree.
+func filterChatContextPins(node domain.FlowNode, config map[string]any, inputs []domain.NodePort) []domain.NodePort {
+	if !boolValue(config["updateChatStatus"]) {
+		inputs = filterNodePort(inputs, "chatRunId")
+	}
+	if (node.Type == "llm:agent" || node.Type == "llm:coding_agent") && !chatHistoryMode(config) {
+		inputs = filterNodePort(inputs, "chatId")
+	}
+	return inputs
 }
 
 func typeAssertOutputSpec(config, defaults map[string]any) (domain.TypeSpec, error) {

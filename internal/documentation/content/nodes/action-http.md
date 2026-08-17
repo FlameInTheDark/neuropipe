@@ -11,6 +11,10 @@ Calls an HTTP endpoint and makes a text or JSON response available to the graph.
   separate request headers.
 - Turn on **Use custom User-Agent** to reveal the User-Agent field. It replaces
   any `User-Agent` set in the header list.
+- **Remove scripts** strips `script` and `noscript` elements from an HTML
+  response body; **Remove styles** strips `style` elements and
+  `link rel="stylesheet"` references. Both leave the body byte-identical for
+  non-HTML responses such as JSON.
 
 The node runs only when its Exec input is pulsed. Header data is configuration,
 not a data pin, so it cannot cause a request by itself.

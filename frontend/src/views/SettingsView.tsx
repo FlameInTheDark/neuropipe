@@ -13,14 +13,15 @@ import {
   FolderOpen,
   HardDrive,
   KeyRound,
-	Link,
+        Link,
   Loader2,
   Network,
   Package,
   Play,
   PlugZap,
   RefreshCw,
-	Radio,
+        HelpCircle,
+  Radio,
   Save,
   Search,
   Server,
@@ -30,8 +31,9 @@ import {
   Trash2,
   Workflow,
 } from "lucide-react";
-import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
+import { Browser, Events } from "@wailsio/runtime";
 import { PageHeader } from "@/components/PageHeader";
+import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,16 +64,15 @@ import type {
   ProviderConfig,
   SecretMetadata,
   Settings,
-	TwitchDeviceAuthorization,
-	TwitchIdentity,
-	TwitchEventDescriptor,
+        TwitchDeviceAuthorization,
+        TwitchIdentity,
+        TwitchEventDescriptor,
   TwitchStatus,
-	TriggerBinding,
+        TriggerBinding,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useConfirmationStore } from "@/stores/confirmation";
 import { useUIStore } from "@/stores/ui";
-import { EventsOn } from "../../wailsjs/runtime/runtime";
 import i18n from "@/i18n";
 import { languages, type AppLanguage } from "@/i18n/resources";
 import { useTranslation } from "react-i18next";
@@ -88,7 +89,7 @@ type SettingsCategory =
   | "models"
   | "runtime"
   | "api"
-	| "twitch"
+        | "twitch"
   | "execution"
   | "metrics"
   | "extensions"
@@ -239,11 +240,11 @@ function normalizeSettings(settings: Settings): Settings {
       sampleIntervalSeconds: settings.metrics?.sampleIntervalSeconds ?? 30,
       priceRates: asArray(settings.metrics?.priceRates),
     },
-		twitch: {
-			clientId: settings.twitch?.clientId ?? "",
-			defaultBotIdentityId: settings.twitch?.defaultBotIdentityId ?? "",
-			identities: asArray(settings.twitch?.identities),
-		},
+                twitch: {
+                        clientId: settings.twitch?.clientId ?? "",
+                        defaultBotIdentityId: settings.twitch?.defaultBotIdentityId ?? "",
+                        identities: asArray(settings.twitch?.identities),
+                },
   };
 }
 
@@ -610,12 +611,12 @@ export function SettingsView({
   const [installedModels, setInstalledModels] = useState<LocalModel[]>([]);
   const [apiStatus, setAPIStatus] = useState<APIStatus | null>(null);
   const [twitchStatus, setTwitchStatus] = useState<TwitchStatus | null>(null);
-	const [twitchTriggers, setTwitchTriggers] = useState<TriggerBinding[]>([]);
-	const [twitchCatalog, setTwitchCatalog] = useState<TwitchEventDescriptor[]>([]);
-	const [deviceAuthorization, setDeviceAuthorization] = useState<TwitchDeviceAuthorization | null>(null);
-	const [connectDialogOpen, setConnectDialogOpen] = useState(false);
-	const [reconnectIdentity, setReconnectIdentity] = useState<TwitchIdentity | null>(null);
-	const [manualDialogOpen, setManualDialogOpen] = useState(false);
+        const [twitchTriggers, setTwitchTriggers] = useState<TriggerBinding[]>([]);
+        const [twitchCatalog, setTwitchCatalog] = useState<TwitchEventDescriptor[]>([]);
+        const [deviceAuthorization, setDeviceAuthorization] = useState<TwitchDeviceAuthorization | null>(null);
+        const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+        const [reconnectIdentity, setReconnectIdentity] = useState<TwitchIdentity | null>(null);
+        const [manualDialogOpen, setManualDialogOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const [modelSort, setModelSort] = useState<ModelSort>("recommended");
   const [modelResults, setModelResults] = useState<ModelSearchResult[]>([]);
@@ -671,14 +672,16 @@ export function SettingsView({
 
   useEffect(() => setDraft(normalizeSettings(settings)), [settings]);
   useEffect(() => {
-    const stopRuntime = EventsOn(
+    const stopRuntime = Events.On(
       "runtime.install.progress",
-      (value: unknown) => {
+      (event: unknown) => {
+        const value = (event as { data?: unknown })?.data ?? event;
         const progress = normalizeInstallProgress(value);
         if (progress) setRuntimeInstallProgress(progress);
       },
     );
-    const stopModel = EventsOn("model.install.progress", (value: unknown) => {
+    const stopModel = Events.On("model.install.progress", (event: unknown) => {
+      const value = (event as { data?: unknown })?.data ?? event;
       const progress = normalizeInstallProgress(value);
       if (progress) setModelInstallProgress(progress);
     });
@@ -697,9 +700,9 @@ export function SettingsView({
           nextCatalog,
           nextModels,
           nextAPI,
-		  nextTwitch,
-		  nextTwitchTriggers,
-		  nextTwitchCatalog,
+                  nextTwitch,
+                  nextTwitchTriggers,
+                  nextTwitchCatalog,
         ] = await Promise.all([
           desktop.listSecrets(),
           desktop.listPlugins(),
@@ -707,9 +710,9 @@ export function SettingsView({
           desktop.getLlamaRuntimeCatalogStatus(),
           desktop.listInstalledLlamaModels(),
           desktop.getAPIStatus(),
-		  desktop.getTwitchStatus(),
-		  desktop.listTwitchTriggers(),
-		  desktop.listTwitchEventCatalog(),
+                  desktop.getTwitchStatus(),
+                  desktop.listTwitchTriggers(),
+                  desktop.listTwitchEventCatalog(),
         ]);
         setSecrets(asArray(nextSecrets));
         setPlugins(asArray(nextPlugins));
@@ -717,9 +720,9 @@ export function SettingsView({
         setRuntimeCatalog(nextCatalog);
         setInstalledModels(asArray(nextModels));
         setAPIStatus(nextAPI);
-		setTwitchStatus(nextTwitch);
-		setTwitchTriggers(asArray(nextTwitchTriggers));
-		setTwitchCatalog(asArray(nextTwitchCatalog));
+                setTwitchStatus(nextTwitch);
+                setTwitchTriggers(asArray(nextTwitchTriggers));
+                setTwitchCatalog(asArray(nextTwitchCatalog));
       } catch (reason) {
         setError(errorMessage(reason, "Unable to load Settings"));
       }
@@ -1023,14 +1026,14 @@ export function SettingsView({
       setBusy("");
     }
   };
-	const startTwitchDeviceAuthorization = async (label: string, scopes: string[]) => {
+        const startTwitchDeviceAuthorization = async (label: string, scopes: string[]) => {
     try {
       setBusy("twitch-connect");
       const next = normalizeSettings(draft);
       await desktop.saveSettings(next);
       setDraft(next);
       onSettingsChange(next);
-		setDeviceAuthorization(await desktop.startTwitchDeviceAuthorization({ identityId: reconnectIdentity?.id, label, scopes }));
+                setDeviceAuthorization(await desktop.startTwitchDeviceAuthorization({ identityId: reconnectIdentity?.id, label, scopes }));
     } catch (reason) {
       setError(errorMessage(reason, t("twitch.connectFailed")));
     } finally { setBusy(""); }
@@ -1048,12 +1051,12 @@ export function SettingsView({
     if (!(await ask({ title: t("twitch.removeTitle"), description: t("twitch.removeDescription", { name: identity.label }), confirmLabel: t("twitch.remove") }))) return;
     try { setBusy(`twitch-remove-${identity.id}`); await desktop.removeTwitchIdentity(identity.id); const next=normalizeSettings(await desktop.getSettings()); setDraft(next); onSettingsChange(next); } catch(reason) { setError(errorMessage(reason,t("twitch.removeFailed"))); } finally { setBusy(""); }
   };
-	const setTwitchTriggerEnabled = async (binding: TriggerBinding, enabled: boolean) => {
-		try { setBusy(`twitch-trigger-${binding.id}`); await desktop.setTwitchTriggerEnabled(binding.id, enabled); setTwitchTriggers(asArray(await desktop.listTwitchTriggers())); } catch (reason) { setError(errorMessage(reason, t("twitch.triggerUpdateFailed"))); } finally { setBusy(""); }
-	};
-	const trustTwitchTrigger = async (binding: TriggerBinding) => {
-		try { setBusy(`twitch-trust-${binding.id}`); await desktop.trustTwitchTrigger(binding.id); setTwitchTriggers(asArray(await desktop.listTwitchTriggers())); } catch (reason) { setError(errorMessage(reason, t("twitch.triggerTrustFailed"))); } finally { setBusy(""); }
-	};
+        const setTwitchTriggerEnabled = async (binding: TriggerBinding, enabled: boolean) => {
+                try { setBusy(`twitch-trigger-${binding.id}`); await desktop.setTwitchTriggerEnabled(binding.id, enabled); setTwitchTriggers(asArray(await desktop.listTwitchTriggers())); } catch (reason) { setError(errorMessage(reason, t("twitch.triggerUpdateFailed"))); } finally { setBusy(""); }
+        };
+        const trustTwitchTrigger = async (binding: TriggerBinding) => {
+                try { setBusy(`twitch-trust-${binding.id}`); await desktop.trustTwitchTrigger(binding.id); setTwitchTriggers(asArray(await desktop.listTwitchTriggers())); } catch (reason) { setError(errorMessage(reason, t("twitch.triggerTrustFailed"))); } finally { setBusy(""); }
+        };
   const updateProvider = (
     key: "baseUrl" | "model" | "apiKeyRef",
     value: string,
@@ -1120,6 +1123,7 @@ export function SettingsView({
           {category === "provider" ? (
             <ProviderPanel
               provider={activeProvider}
+              secrets={secrets}
               onProviderKind={selectProvider}
               onChange={updateProvider}
             />
@@ -1183,9 +1187,9 @@ export function SettingsView({
               onRotate={() => void rotateToken()}
             />
           ) : null}
-		  {category === "twitch" ? (
-			<TwitchPanel draft={draft} setDraft={setDraft} status={twitchStatus} triggers={twitchTriggers} busy={busy} onConnect={() => { setReconnectIdentity(null); setConnectDialogOpen(true); }} onReconnect={(identity) => { setReconnectIdentity(identity); setConnectDialogOpen(true); }} onManual={() => setManualDialogOpen(true)} onRemove={(identity) => void removeTwitchIdentity(identity)} onEnable={(binding, enabled) => void setTwitchTriggerEnabled(binding, enabled)} onTrust={(binding) => void trustTwitchTrigger(binding)} />
-		  ) : null}
+                  {category === "twitch" ? (
+                        <TwitchPanel draft={draft} setDraft={setDraft} status={twitchStatus} triggers={twitchTriggers} busy={busy} onConnect={() => { setReconnectIdentity(null); setConnectDialogOpen(true); }} onReconnect={(identity) => { setReconnectIdentity(identity); setConnectDialogOpen(true); }} onManual={() => setManualDialogOpen(true)} onRemove={(identity) => void removeTwitchIdentity(identity)} onEnable={(binding, enabled) => void setTwitchTriggerEnabled(binding, enabled)} onTrust={(binding) => void trustTwitchTrigger(binding)} />
+                  ) : null}
           {category === "execution" ? (
             <ExecutionPanel draft={draft} setDraft={setDraft} />
           ) : null}
@@ -1229,8 +1233,8 @@ export function SettingsView({
       {apiToken ? (
         <TokenDialog token={apiToken} onClose={() => setAPIToken("")} />
       ) : null}
-	  <TwitchConnectDialog open={connectDialogOpen} identity={reconnectIdentity} catalog={twitchCatalog} authorization={deviceAuthorization} pending={busy === "twitch-connect"} onStart={startTwitchDeviceAuthorization} onClose={() => { if (deviceAuthorization) void desktop.cancelTwitchDeviceAuthorization(deviceAuthorization.id); setDeviceAuthorization(null); setReconnectIdentity(null); setConnectDialogOpen(false); }} />
-	  <TwitchManualDialog open={manualDialogOpen} pending={busy === "twitch-manual"} onSave={addTwitchManualIdentity} onClose={() => setManualDialogOpen(false)} />
+          <TwitchConnectDialog open={connectDialogOpen} identity={reconnectIdentity} catalog={twitchCatalog} authorization={deviceAuthorization} pending={busy === "twitch-connect"} onStart={startTwitchDeviceAuthorization} onClose={() => { if (deviceAuthorization) void desktop.cancelTwitchDeviceAuthorization(deviceAuthorization.id); setDeviceAuthorization(null); setReconnectIdentity(null); setConnectDialogOpen(false); }} />
+          <TwitchManualDialog open={manualDialogOpen} pending={busy === "twitch-manual"} onSave={addTwitchManualIdentity} onClose={() => setManualDialogOpen(false)} />
     </section>
   );
 }
@@ -1239,26 +1243,26 @@ function TwitchPanel({
   draft,
   setDraft,
   status,
-	triggers,
+        triggers,
   busy,
-	onConnect,
-	onReconnect,
+        onConnect,
+        onReconnect,
   onManual,
   onRemove,
-	onEnable,
-	onTrust,
+        onEnable,
+        onTrust,
 }: {
   draft: Settings;
-	setDraft: Dispatch<SetStateAction<Settings>>;
+        setDraft: Dispatch<SetStateAction<Settings>>;
   status: TwitchStatus | null;
-	triggers: TriggerBinding[];
+        triggers: TriggerBinding[];
   busy: string;
-	onConnect: () => void;
-	onReconnect: (identity: TwitchIdentity) => void;
+        onConnect: () => void;
+        onReconnect: (identity: TwitchIdentity) => void;
   onManual: () => void;
   onRemove: (identity: TwitchIdentity) => void;
-	onEnable: (binding: TriggerBinding, enabled: boolean) => void;
-	onTrust: (binding: TriggerBinding) => void;
+        onEnable: (binding: TriggerBinding, enabled: boolean) => void;
+        onTrust: (binding: TriggerBinding) => void;
 }) {
   const { t } = useTranslation();
   const connected = status?.connected ?? false;
@@ -1280,27 +1284,27 @@ function TwitchPanel({
         </div>
       </SectionCard>
       <SectionCard title={t("twitch.identities")} help={t("twitch.identitiesHelp")}>
-		<div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 flex flex-wrap gap-2">
           <Button size="sm" onClick={onConnect} disabled={!draft.twitch.clientId.trim()}>
             <Link className="size-3.5" />{t("twitch.connect")}
           </Button>
           <Button size="sm" variant="outline" onClick={onManual}>{t("twitch.manualToken")}</Button>
-		</div>
-		{draft.twitch.identities.length > 0 ? <label className="mt-4 block text-xs font-medium text-zinc-300">{t("twitch.defaultBotIdentity")}<Select className="mt-2 max-w-sm" value={draft.twitch.defaultBotIdentityId ?? ""} onValueChange={(defaultBotIdentityId) => setDraft((current) => ({ ...current, twitch: { ...current.twitch, defaultBotIdentityId } }))} options={draft.twitch.identities.filter((identity) => identity.status === "connected").map((identity) => ({ value: identity.id, label: identity.label }))} placeholder={t("twitch.defaultBotIdentityPlaceholder")} ariaLabel={t("twitch.defaultBotIdentity")} /></label> : null}
+                </div>
+                {draft.twitch.identities.length > 0 ? <label className="mt-4 block text-xs font-medium text-zinc-300">{t("twitch.defaultBotIdentity")}<Select className="mt-2 max-w-sm" value={draft.twitch.defaultBotIdentityId ?? ""} onValueChange={(defaultBotIdentityId) => setDraft((current) => ({ ...current, twitch: { ...current.twitch, defaultBotIdentityId } }))} options={draft.twitch.identities.filter((identity) => identity.status === "connected").map((identity) => ({ value: identity.id, label: identity.label }))} placeholder={t("twitch.defaultBotIdentityPlaceholder")} ariaLabel={t("twitch.defaultBotIdentity")} /></label> : null}
         <div className="mt-4 space-y-2">
           {draft.twitch.identities.length === 0 ? <p className="rounded-md border border-dashed border-zinc-800 px-3 py-4 text-xs text-zinc-500">{t("twitch.noIdentities")}</p> : draft.twitch.identities.map((identity) => (
             <div key={identity.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2.5">
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-zinc-200">{identity.label}</p><p className="truncate text-xs text-zinc-500">{identity.login} · {identity.scopes.join(", ") || t("twitch.noScopes")}</p></div>
               <span className={cn("rounded px-2 py-1 text-[10px] font-medium", identity.status === "connected" ? "bg-emerald-500/10 text-emerald-300" : "bg-amber-500/10 text-amber-300")}>{identity.status === "connected" ? t("twitch.connected") : t("twitch.reconnectRequired")}</span>
-				<Button size="sm" variant="outline" onClick={() => onReconnect(identity)} disabled={busy === "twitch-connect"}>{t("twitch.reconnect")}</Button>
-				<Button size="sm" variant="ghost" aria-label={t("twitch.removeIdentity", { name: identity.label })} onClick={() => onRemove(identity)} disabled={busy === `twitch-remove-${identity.id}`}><Trash2 className="size-3.5" /></Button>
+                                <Button size="sm" variant="outline" onClick={() => onReconnect(identity)} disabled={busy === "twitch-connect"}>{t("twitch.reconnect")}</Button>
+                                <Button size="sm" variant="ghost" aria-label={t("twitch.removeIdentity", { name: identity.label })} onClick={() => onRemove(identity)} disabled={busy === `twitch-remove-${identity.id}`}><Trash2 className="size-3.5" /></Button>
             </div>
           ))}
         </div>
       </SectionCard>
-	  <SectionCard title={t("twitch.triggers")} help={t("twitch.triggersHelp")}>
-		<div className="mt-4 space-y-2">{triggers.length === 0 ? <p className="text-xs text-zinc-500">{t("twitch.noTriggers")}</p> : triggers.map((binding) => <div key={binding.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3"><span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{binding.label}</span>{!binding.trusted ? <Button size="sm" variant="outline" onClick={() => onTrust(binding)} disabled={busy === `twitch-trust-${binding.id}`}>{t("twitch.trust")}</Button> : <Switch checked={binding.enabled} onCheckedChange={(enabled) => onEnable(binding, enabled)} label={t("twitch.enableTrigger", { name: binding.label })} />}</div>)}</div>
-	  </SectionCard>
+          <SectionCard title={t("twitch.triggers")} help={t("twitch.triggersHelp")}>
+                <div className="mt-4 space-y-2">{triggers.length === 0 ? <p className="text-xs text-zinc-500">{t("twitch.noTriggers")}</p> : triggers.map((binding) => <div key={binding.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3"><span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{binding.label}</span>{!binding.trusted ? <Button size="sm" variant="outline" onClick={() => onTrust(binding)} disabled={busy === `twitch-trust-${binding.id}`}>{t("twitch.trust")}</Button> : <Switch checked={binding.enabled} onCheckedChange={(enabled) => onEnable(binding, enabled)} label={t("twitch.enableTrigger", { name: binding.label })} />}</div>)}</div>
+          </SectionCard>
     </div>
   );
 }
@@ -1311,7 +1315,7 @@ function TwitchConnectDialog({ open, identity, catalog, authorization, pending, 
   const scopes = [...new Set(["user:read:chat", "user:write:chat", ...catalog.flatMap((event) => event.requiredScopes)])];
   return <Dialog open={open} title={t("twitch.connectTitle")} description={t("twitch.connectDescription")} onOpenChange={(next) => { if (!next) onClose(); }} className="max-w-lg">
     <div className="space-y-4 p-5">
-      {authorization ? <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 p-4"><p className="text-xs text-violet-200">{t("twitch.verificationCode")}</p><p className="mt-2 font-mono text-2xl font-semibold tracking-[.2em] text-zinc-100">{authorization.userCode}</p><p className="mt-3 text-xs leading-5 text-zinc-400">{t("twitch.openVerification", { url: authorization.verificationUri })}</p><Button size="sm" className="mt-3" onClick={() => void BrowserOpenURL(authorization.verificationUri)}><ExternalLink className="size-3.5" />{t("twitch.openTwitch")}</Button></div> : <label className="block text-xs font-medium text-zinc-300">{t("twitch.identityLabel")}<Input autoFocus value={label || identity?.label || ""} onChange={(event) => setLabel(event.target.value)} placeholder={t("twitch.identityLabelPlaceholder")} className="mt-2" /></label>}
+      {authorization ? <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 p-4"><p className="text-xs text-violet-200">{t("twitch.verificationCode")}</p><p className="mt-2 font-mono text-2xl font-semibold tracking-[.2em] text-zinc-100">{authorization.userCode}</p><p className="mt-3 text-xs leading-5 text-zinc-400">{t("twitch.openVerification", { url: authorization.verificationUri })}</p><Button size="sm" className="mt-3" onClick={() => void Browser.OpenURL(authorization.verificationUri)}><ExternalLink className="size-3.5" />{t("twitch.openTwitch")}</Button></div> : <label className="block text-xs font-medium text-zinc-300">{t("twitch.identityLabel")}<Input autoFocus value={label || identity?.label || ""} onChange={(event) => setLabel(event.target.value)} placeholder={t("twitch.identityLabelPlaceholder")} className="mt-2" /></label>}
     </div>
     <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-4"><Button variant="outline" onClick={onClose}>{t("common.cancel")}</Button>{!authorization ? <Button onClick={() => onStart(label, scopes)} disabled={pending}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Link className="size-4" />}{t("twitch.startAuthorization")}</Button> : null}</div>
   </Dialog>;
@@ -1324,13 +1328,29 @@ function TwitchManualDialog({ open, pending, onSave, onClose }: { open: boolean;
 
 function ProviderPanel({
   provider,
+  secrets,
   onProviderKind,
   onChange,
 }: {
   provider: ProviderConfig;
+  secrets: SecretMetadata[];
   onProviderKind: (kind: ProviderConfig["kind"]) => void;
   onChange: (key: "baseUrl" | "model" | "apiKeyRef", value: string) => void;
 }) {
+  const { t } = useTranslation();
+  // Saved secrets become a pick list; a reference to a deleted secret stays
+  // selectable so nothing is silently cleared.
+  const secretOptions = useMemo(() => {
+    const names = secrets.map((secret) => secret.name).filter(Boolean);
+    const current = provider.apiKeyRef ?? "";
+    if (current && !names.includes(current)) {
+      names.unshift(current);
+    }
+    return [
+      { value: "", label: t("settings.noApiKey") },
+      ...names.map((name) => ({ value: name, label: name })),
+    ];
+  }, [secrets, provider.apiKeyRef, t]);
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <SectionCard
@@ -1384,12 +1404,27 @@ function ProviderPanel({
                 onChange={(value) => onChange("model", value)}
                 placeholder="Model ID"
               />
-              <Field
-                label="Saved API key"
-                value={provider.apiKeyRef ?? ""}
-                onChange={(value) => onChange("apiKeyRef", value)}
-                placeholder="Secret name"
-              />
+              <label className="text-xs text-zinc-500">
+                <span className="inline-flex items-center gap-1">
+                  Saved API key
+                  <Tooltip content={t("settings.apiKeyHelp")} side="top" size="body">
+                    <span
+                      tabIndex={0}
+                      aria-label="Saved API key"
+                      className="inline-flex cursor-help text-zinc-600 outline-none hover:text-zinc-300 focus-visible:text-zinc-200"
+                    >
+                      <HelpCircle className="size-3.5" />
+                    </span>
+                  </Tooltip>
+                </span>
+                <Select
+                  className="mt-1.5"
+                  value={provider.apiKeyRef ?? ""}
+                  onValueChange={(value) => onChange("apiKeyRef", value)}
+                  options={secretOptions}
+                  ariaLabel="Saved API key"
+                />
+              </label>
             </>
           ) : null}
           {provider.kind === "llamacpp" ? (
@@ -1653,7 +1688,7 @@ function ModelDetailPane({
               size="sm"
               variant="outline"
               onClick={() =>
-                BrowserOpenURL(`https://huggingface.co/${detail.id}`)
+                void Browser.OpenURL(`https://huggingface.co/${detail.id}`)
               }
             >
               Open on Hugging Face
@@ -2444,15 +2479,30 @@ function Field({
   value,
   onChange,
   placeholder,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  hint?: string;
 }) {
   return (
     <label className="text-xs text-zinc-500">
-      {label}
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {hint ? (
+          <Tooltip content={hint} side="top" size="body">
+            <span
+              tabIndex={0}
+              aria-label={label}
+              className="inline-flex cursor-help text-zinc-600 outline-none hover:text-zinc-300 focus-visible:text-zinc-200"
+            >
+              <HelpCircle className="size-3.5" />
+            </span>
+          </Tooltip>
+        ) : null}
+      </span>
       <Input
         className="mt-1.5"
         value={value}

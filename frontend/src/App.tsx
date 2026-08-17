@@ -18,7 +18,10 @@ import { FunctionEditor } from '@/views/FunctionEditor'
 import { VariablesView } from '@/views/VariablesView'
 import { DatabasesView } from '@/views/DatabasesView'
 import { DocumentationDialog } from '@/components/DocumentationWorkspace'
-import { EventsOn } from '../wailsjs/runtime/runtime'
+import { InputDialogHost } from '@/components/InputDialogHost'
+import { Events } from '@wailsio/runtime'
+import { cancelInputDialog, dispatchInputDialogRequest } from '@/stores/input-dialog'
+import type { InputDialogRequest } from '@/lib/types'
 
 const PipelineEditor = lazy(() => import('@/views/PipelineEditor').then((module) => ({ default: module.PipelineEditor })))
 const ReportsView = lazy(() => import('@/views/ReportsView').then((module) => ({ default: module.ReportsView })))
@@ -97,7 +100,25 @@ export function App() {
     return () => document.removeEventListener('contextmenu', disableBrowserContextMenu)
   }, [])
 
-  useEffect(() => EventsOn('app.open.settings', () => setScreen('settings')), [setScreen])
+  useEffect(() => Events.On('app.open.settings', () => setScreen('settings')), [setScreen])
+
+  useEffect(() => {
+    const offRequest = Events.On('dialog.input.request', (event) => {
+      const request = (event?.data ?? event) as InputDialogRequest | undefined
+      if (request && request.id) {
+        dispatchInputDialogRequest(request)
+      }
+    })
+    const offCancel = Events.On('dialog.input.cancel', (event) => {
+      const payload = (event?.data ?? event) as { id?: string } | string | undefined
+      const id = typeof payload === 'string' ? payload : payload?.id ?? ''
+      if (id) cancelInputDialog(id)
+    })
+    return () => {
+      offRequest()
+      offCancel()
+    }
+  }, [])
 
   useEffect(() => {
     void desktop.configureTrayMenu({
@@ -128,5 +149,5 @@ export function App() {
     }
   }
 
-  return <div className={sidebarCollapsed ? "app-window app-window-sidebar-collapsed" : "app-window"}><TitleBar /><Sidebar /><main className="app-content min-w-0 min-h-0 overflow-hidden">{error && <div className="absolute right-5 top-14 z-50 flex max-w-md items-center gap-3 rounded-lg border border-red-500/30 bg-zinc-900 px-3 py-2 text-sm text-red-200 shadow-2xl"><AlertCircle className="size-4 shrink-0" /><span>{error}</span><Button size="sm" variant="ghost" onClick={() => setError()}>{t('app.dismiss')}</Button></div>}{content()}</main>{documentationDialog ? <DocumentationDialog documentID={documentationDialog.documentID} anchor={documentationDialog.anchor} onClose={closeDocumentation} /> : null}</div>
+  return <div className={sidebarCollapsed ? "app-window app-window-sidebar-collapsed" : "app-window"}><TitleBar /><Sidebar /><main className="app-content min-w-0 min-h-0 overflow-hidden">{error && <div className="absolute right-5 top-14 z-50 flex max-w-md items-center gap-3 rounded-lg border border-red-500/30 bg-zinc-900 px-3 py-2 text-sm text-red-200 shadow-2xl"><AlertCircle className="size-4 shrink-0" /><span>{error}</span><Button size="sm" variant="ghost" onClick={() => setError()}>{t('app.dismiss')}</Button></div>}{content()}</main>{documentationDialog ? <DocumentationDialog documentID={documentationDialog.documentID} anchor={documentationDialog.anchor} onClose={closeDocumentation} /> : null}<InputDialogHost /></div>
 }

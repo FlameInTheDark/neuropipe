@@ -188,7 +188,9 @@ func builtins() []domain.NodeDefinition {
 				httpHeadersField(),
 				customUserAgentToggleField(),
 				visibleWhen(field("userAgent", "User-Agent", "http-user-agent", "Neuropipe/0.1", true), "useCustomUserAgent"),
-			}, map[string]any{"method": "GET", "headers": []any{}, "useCustomUserAgent": false, "userAgent": ""}, domain.CapabilityNetwork),
+				field("stripScripts", "Remove scripts", "boolean", "", false),
+				field("stripStyles", "Remove styles", "boolean", "", false),
+			}, map[string]any{"method": "GET", "headers": []any{}, "useCustomUserAgent": false, "userAgent": "", "stripScripts": false, "stripStyles": false}, domain.CapabilityNetwork),
 		node("action:terminal", "Local", "Run Terminal Command", "Run PowerShell, Windows PowerShell, or cmd in an approved workspace.", "terminal", "#c4b5fd", flowInput, flowOutput,
 			[]domain.ConfigField{selectField("shell", "Shell", []string{"PowerShell", "Windows PowerShell", "cmd"}), field("command", "Command", "textarea", "Get-Date", true), field("workingDirectory", "Working directory", "string", "C:\\Work", false)}, map[string]any{"shell": "PowerShell"}, domain.CapabilityTerminal),
 		node("action:notification", "Local", "Desktop Notification", "Show a Windows toast-style desktop notification.", "bell", "#c4b5fd", flowInput, flowOutput,
@@ -201,19 +203,19 @@ func builtins() []domain.NodeDefinition {
 			[]domain.ConfigField{field("pipelineId", "Pipeline", "string", "", true)}, map[string]any{}),
 
 		node("llm:prompt", "AI", "LLM Prompt", "Generate text with the selected provider and model.", "sparkles", "#f472b6", flowInput, flowOutput,
-			[]domain.ConfigField{field("prompt", "Prompt", "textarea", "Summarise the connected input.", true), field("model", "Model override", "string", "", false)}, map[string]any{}),
+			[]domain.ConfigField{field("prompt", "Prompt", "textarea", "Summarise the connected input.", true), field("model", "Model override", "string", "", false), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"updateChatStatus": false, "chatRunId": ""}),
 		node("llm:extract", "AI", "Structured Extract", "Extract schema-shaped JSON from the current packet.", "braces", "#f472b6", flowInput, flowOutput,
-			[]domain.ConfigField{field("prompt", "Instructions", "textarea", "Extract the requested fields.", true), schemaField("schema", "Fields to extract")}, map[string]any{"schema": objectSchema()}),
+			[]domain.ConfigField{field("prompt", "Instructions", "textarea", "Extract the requested fields.", true), schemaField("schema", "Fields to extract"), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"schema": objectSchema(), "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:boolean", "AI", "LLM Boolean Router", "Call a constrained route function and emit exactly one decision branch.", "circle-help", "#f472b6", flowInput, []domain.NodePort{port("true", "True", "flow", "#34d399"), port("false", "False", "flow", "#f87171"), port("error", "Error", "flow", "#fb7185")},
-			[]domain.ConfigField{field("prompt", "Question", "textarea", "Is the connected input ready?", true)}, map[string]any{}),
+			[]domain.ConfigField{field("prompt", "Question", "textarea", "Is the connected input ready?", true), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"updateChatStatus": false, "chatRunId": ""}),
 		node("llm:choice", "AI", "LLM Choice Router", "Choose one configured option through constrained structured output.", "list-checks", "#f472b6", flowInput, []domain.NodePort{port("error", "Error", "flow", "#fb7185")},
-			[]domain.ConfigField{field("prompt", "Question", "textarea", "Choose the best option.", true), routeOptionsField("options", "Options")}, map[string]any{"options": routeOptions("option-a", "Option A", "option-b", "Option B")}),
+			[]domain.ConfigField{field("prompt", "Question", "textarea", "Choose the best option.", true), routeOptionsField("options", "Options"), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"options": routeOptions("option-a", "Option A", "option-b", "Option B"), "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:summarize", "AI", "Summarize", "Create a concise summary of input data.", "align-left", "#f472b6", flowInput, flowOutput,
-			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Summarise the input for a busy reader.", true)}, map[string]any{}),
+			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Summarise the input for a busy reader.", true), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"updateChatStatus": false, "chatRunId": ""}),
 		node("llm:agent", "AI", "Agent", "A tool-using agent with only explicitly connected tools.", "bot", "#f472b6", append(append([]domain.NodePort{}, flowInput...), llmToolInput), flowOutput,
-			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Complete the task using the connected tools.", true), field("maxTurns", "Maximum turns", "number", "8", true)}, map[string]any{"maxTurns": 8.0}),
+			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Complete the task using the connected tools.", true), chatModeField(), field("maxTurns", "Maximum turns", "number", "8", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"maxTurns": 8.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:coding_agent", "AI", "Coding Agent", "An agent preset for scoped file, Git, and terminal workspaces.", "code-2", "#f472b6", append(append([]domain.NodePort{}, flowInput...), llmToolInput), flowOutput,
-			[]domain.ConfigField{field("task", "Task", "textarea", "", true), field("workspace", "Workspace", "string", "C:\\Work\\repo", true), field("maxTurns", "Maximum turns", "number", "12", true)}, map[string]any{"maxTurns": 12.0}, domain.CapabilityFileRead, domain.CapabilityFileWrite, domain.CapabilityTerminal, domain.CapabilityGit),
+			[]domain.ConfigField{field("task", "Task", "textarea", "", true), field("workspace", "Workspace", "string", "C:\\Work\\repo", true), chatModeField(), field("maxTurns", "Maximum turns", "number", "12", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"maxTurns": 12.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}, domain.CapabilityFileRead, domain.CapabilityFileWrite, domain.CapabilityTerminal, domain.CapabilityGit),
 		node("visual:comment", "Canvas", "Comment", "A canvas-only note for documenting a Blueprint-style graph.", "message-square-text", "#71717a", nil, nil,
 			[]domain.ConfigField{field("title", "Title", "string", "New comment", true), field("body", "Body", "textarea", "Describe this section of the pipeline.", false)}, map[string]any{"title": "New comment", "body": ""}),
 	}
@@ -386,7 +388,7 @@ func fieldDataType(kind string) domain.DataType {
 }
 
 func isConfigurationOnlyField(kind string) bool {
-	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "type-spec" || kind == "wire-representation" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent" || kind == "javascript-editor"
+	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "type-spec" || kind == "wire-representation" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent" || kind == "javascript-editor" || kind == "boolean" || kind == "chat-mode"
 }
 
 func field(name, label, kind, placeholder string, required bool) domain.ConfigField {
@@ -415,6 +417,27 @@ func httpHeadersField() domain.ConfigField {
 
 func customUserAgentToggleField() domain.ConfigField {
 	return domain.ConfigField{Name: "useCustomUserAgent", Label: "Use custom User-Agent", Kind: "http-user-agent-toggle"}
+}
+
+// chatModeField selects how the agent receives its conversation: a single
+// composed message, or the prior turns of a chat conversation by ID.
+func chatModeField() domain.ConfigField {
+	return domain.ConfigField{Name: "chatMode", Label: "Mode", Kind: "chat-mode", Required: true, Options: []domain.Option{
+		{Value: "message", Label: "One message"},
+		{Value: "history", Label: "Chat history"},
+	}}
+}
+
+// unlimitedTurnsToggleField removes the tool-turn budget for long-running
+// agent tasks; cancellation remains the only stop condition.
+func unlimitedTurnsToggleField() domain.ConfigField {
+	return domain.ConfigField{Name: "unlimitedTurns", Label: "Unlimited turns", Kind: "boolean"}
+}
+
+// chatStatusToggleField lets an LLM node publish live progress to the chat run
+// that triggered it. The revealed Chat Run ID pin carries the run to update.
+func chatStatusToggleField() domain.ConfigField {
+	return domain.ConfigField{Name: "updateChatStatus", Label: "Update chat status", Kind: "boolean"}
 }
 
 func visibleWhen(configField domain.ConfigField, name string) domain.ConfigField {

@@ -20,6 +20,17 @@ export interface ObjectFieldValue {
   dataType: DataType;
 }
 
+export type HtmlReturnMode = "text" | "html" | "attribute";
+
+export interface HtmlExtractionValue {
+  id: string;
+  label: string;
+  selector: string;
+  mode: HtmlReturnMode;
+  attribute: string;
+  returnAll: boolean;
+}
+
 export type SwitchComparator =
   | "equals"
   | "not_equals"
@@ -251,6 +262,33 @@ export function objectFieldsFromValue(value: unknown): ObjectFieldValue[] {
   });
 }
 
+function isHtmlReturnMode(value: unknown): value is HtmlReturnMode {
+  return value === "text" || value === "html" || value === "attribute";
+}
+
+export function htmlExtractionsFromValue(value: unknown): HtmlExtractionValue[] {
+  const parsed = parseStructuredValue(value);
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  return parsed.flatMap((item, index) => {
+    if (!isRecord(item) || typeof item.id !== "string") return [];
+    const id = item.id.trim();
+    if (!id || seen.has(id)) return [];
+    seen.add(id);
+    return [{
+      id,
+      label:
+        typeof item.label === "string" && item.label.trim()
+          ? item.label.trim()
+          : `Value ${index + 1}`,
+      selector: typeof item.selector === "string" ? item.selector : "",
+      mode: isHtmlReturnMode(item.mode) ? item.mode : "text",
+      attribute: typeof item.attribute === "string" ? item.attribute : "",
+      returnAll: item.returnAll === true,
+    }];
+  });
+}
+
 export function nextMappingID<T extends { id: string }>(mappings: readonly T[]) {
   const used = new Set(mappings.map((mapping) => mapping.id));
   for (let index = mappings.length + 1; ; index += 1) {
@@ -283,6 +321,36 @@ export function resolveConfigDrivenInputs(
     return inputs.map((pin) =>
       pin.id === "content" ? textBytesPin(pin, representation) : pin,
     );
+  }
+  if (
+    definition.type === "llm:prompt" ||
+    definition.type === "llm:extract" ||
+    definition.type === "llm:boolean" ||
+    definition.type === "llm:choice" ||
+    definition.type === "llm:summarize" ||
+    definition.type === "llm:agent" ||
+    definition.type === "llm:coding_agent"
+  ) {
+    let pins = [...inputs];
+    const statusOn =
+      (config.updateChatStatus ?? definition.defaultConfig?.updateChatStatus) ===
+        true ||
+      config.updateChatStatus === "true";
+    if (!statusOn) {
+      pins = pins.filter((pin) => pin.id !== "chatRunId");
+    }
+    if (definition.type === "llm:agent" || definition.type === "llm:coding_agent") {
+      const mode = config.chatMode ?? definition.defaultConfig?.chatMode;
+      // Graphs saved with the earlier boolean toggle migrate through its value;
+      // an explicit one-message default must not mask it.
+      const legacy = config.pullChatHistory;
+      const historyMode =
+        mode === "history" || legacy === true || legacy === "true";
+      if (!historyMode) {
+        pins = pins.filter((pin) => pin.id !== "chatId");
+      }
+    }
+    return pins;
   }
   if (definition.type !== "data:build_object" || config.fields === undefined) {
     return [...inputs];
@@ -380,6 +448,27 @@ export function resolveConfigDrivenOutputs(
     return outputs.map((pin) =>
       pin.id === "value" ? { ...pin, dataType, type, color: dataPinColor(dataType) } : pin,
     );
+  }
+  if (definition.type === "data:html_extract") {
+    const extractions = htmlExtractionsFromValue(
+      config.extractions ?? definition.defaultConfig?.extractions,
+    );
+    return extractions.map((extraction) => {
+      const dataType: DataType = extraction.returnAll ? "list" : "text";
+      const type: TypeSpec = extraction.returnAll
+        ? { kind: "list", element: { kind: "string" } }
+        : { kind: "string" };
+      return {
+        id: extraction.id,
+        label: extraction.label,
+        kind: "data",
+        direction: "output",
+        dataType,
+        type,
+        color: dataPinColor(dataType),
+        maxConnections: 1,
+      };
+    });
   }
   if (
     definition.type !== "data:get_field" &&

@@ -92,7 +92,9 @@ func StringListPin(id, label string) domain.NodePort {
 	}
 }
 
-// MatchListPin creates an exact list of named RegexMatch records.
+// MatchListPin creates an exact list of named RegexMatch records. Its known
+// fields mirror the record contract so the editor can show and auto-configure
+// what each match contains.
 func MatchListPin(id, label string) domain.NodePort {
 	typeSpec := MatchListType()
 	return domain.NodePort{
@@ -102,8 +104,26 @@ func MatchListPin(id, label string) domain.NodePort {
 		Direction:      domain.PinOutput,
 		DataType:       domain.DataList,
 		Type:           &typeSpec,
+		Fields:         MatchFields(),
 		Color:          "#facc15",
 		MaxConnections: 1,
+	}
+}
+
+// MatchFields documents the RegexMatch record through dotted paths, including
+// the nested capture entries, for pin tooltips and auto-configuration.
+func MatchFields() []domain.DataField {
+	return []domain.DataField{
+		{Path: "text", Label: "text", DataType: domain.DataText, Description: "Full text of this match."},
+		{Path: "startByte", Label: "startByte", DataType: domain.DataNumber, Description: "UTF-8 byte offset where the match starts."},
+		{Path: "endByte", Label: "endByte", DataType: domain.DataNumber, Description: "UTF-8 byte offset where the match ends."},
+		{Path: "captures", Label: "captures", DataType: domain.DataList, Description: "One RegexCapture per capturing group."},
+		{Path: "captures.index", Label: "captures.index", DataType: domain.DataNumber, Description: "One-based group index.", Optional: true},
+		{Path: "captures.name", Label: "captures.name", DataType: domain.DataText, Description: "Named group name, empty when unnamed.", Optional: true},
+		{Path: "captures.matched", Label: "captures.matched", DataType: domain.DataBoolean, Description: "False when an optional group did not participate.", Optional: true},
+		{Path: "captures.text", Label: "captures.text", DataType: domain.DataText, Description: "Captured text, empty when unmatched.", Optional: true},
+		{Path: "captures.startByte", Label: "captures.startByte", DataType: domain.DataNumber, Description: "UTF-8 byte offset where the capture starts, -1 when unmatched.", Optional: true},
+		{Path: "captures.endByte", Label: "captures.endByte", DataType: domain.DataNumber, Description: "UTF-8 byte offset where the capture ends, -1 when unmatched.", Optional: true},
 	}
 }
 

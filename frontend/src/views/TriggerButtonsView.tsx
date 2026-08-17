@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Play, Workflow } from "lucide-react";
+import { Loader2, Play, Square, Workflow } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { LucideIcon } from "@/components/LucideIconPicker";
 import { PageHeader } from "@/components/PageHeader";
@@ -33,6 +33,7 @@ export function TriggerButtonsView({
   const { t } = useTranslation();
   const { setError, setScreen } = useUIStore();
   const [feedback, setFeedback] = useState<Record<string, ButtonFeedback>>({});
+  const [runningPipelines, setRunningPipelines] = useState<Record<string, boolean>>({});
   const timers = useRef(new Map<string, number>());
 
   useEffect(
@@ -42,6 +43,35 @@ export function TriggerButtonsView({
     },
     [],
   );
+
+  // Poll running state so the button toggles to Stop when the pipeline is
+  // active, regardless of whether the run was started from this board, the
+  // editor, or a schedule.
+  useEffect(() => {
+    if (buttons.length === 0) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const results = await Promise.all(
+          buttons.map(async (binding) => ({
+            id: binding.pipelineId,
+            running: await desktop.isPipelineRunning(binding.pipelineId),
+          })),
+        )
+        if (cancelled) return
+        const next: Record<string, boolean> = {}
+        for (const result of results) {
+          if (result.running) next[result.id] = true
+        }
+        setRunningPipelines(next)
+      } catch {
+        // ignore polling errors
+      }
+    }
+    void poll()
+    const interval = window.setInterval(poll, 2000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [buttons])
 
   const finishFeedback = (id: string, status: "success" | "failure") => {
     const previous = timers.current.get(id);
@@ -73,6 +103,16 @@ export function TriggerButtonsView({
     }
   };
 
+  const stop = async (binding: TriggerBinding) => {
+    try {
+      await desktop.cancelPipelineExecution(binding.pipelineId);
+      setRunningPipelines((current) => { const next = { ...current }; delete next[binding.pipelineId]; return next })
+      await onRefresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("board.stopFailed"));
+    }
+  };
+
   return (
     <section className="flex h-full min-h-0 flex-col">
       <PageHeader
@@ -100,13 +140,18 @@ export function TriggerButtonsView({
                 name === binding.label
                   ? binding.hotkey || t("board.buttonTrigger")
                   : binding.label;
+              const isRunning = Boolean(runningPipelines[binding.pipelineId]);
+              const handleClick = () => {
+                if (isRunning) void stop(binding);
+                else void run(binding);
+              };
               return (
                 <button
                   key={binding.id}
                   type="button"
-                  disabled={state !== "idle"}
-                  aria-label={t("board.run", { name })}
-                  onClick={() => void run(binding)}
+                  disabled={state !== "idle" && !isRunning}
+                  aria-label={isRunning ? t("board.stop", { name }) : t("board.run", { name })}
+                  onClick={handleClick}
                   className="group min-w-0 text-center outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:ring-offset-4 focus-visible:ring-offset-zinc-950 disabled:cursor-wait"
                 >
                   <span
@@ -114,6 +159,7 @@ export function TriggerButtonsView({
                       "relative mx-auto flex size-20 items-center justify-center overflow-hidden rounded-xl border border-white/15 shadow-lg shadow-black/35 transition-transform duration-150 group-hover:-translate-y-0.5 group-active:translate-y-0 sm:size-24",
                       state === "success" && "trigger-button-success",
                       state === "failure" && "trigger-button-failure",
+                      isRunning && "trigger-button-running",
                     )}
                     style={{
                       backgroundColor: pipeline?.iconBackground || binding.color || "#fafafa",
@@ -121,9 +167,9 @@ export function TriggerButtonsView({
                     }}
                   >
                     <LucideIcon name={pipeline?.icon || binding.icon} className="size-9 stroke-[1.9]" />
-                    {state === "running" ? (
+                    {(state === "running" || isRunning) ? (
                       <span className="absolute inset-0 flex items-center justify-center bg-black/55">
-                        <Loader2 className="size-7 animate-spin text-white" />
+                        {isRunning ? <Square className="size-7 text-white" /> : <Loader2 className="size-7 animate-spin text-white" />}
                       </span>
                     ) : null}
                   </span>
@@ -131,7 +177,7 @@ export function TriggerButtonsView({
                     {name}
                   </span>
                   <span className="mt-1 block truncate text-[11px] text-zinc-600">
-                    {detail}
+                    {isRunning ? t("board.running") : detail}
                   </span>
                 </button>
               );

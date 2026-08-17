@@ -4,7 +4,6 @@ import (
 	"sync/atomic"
 
 	"github.com/FlameInTheDark/neuropipe/internal/localization"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const openSettingsEvent = "app.open.settings"
@@ -19,7 +18,8 @@ type TrayMenuLabels struct {
 }
 
 // TrayActions is the narrow application-facing contract used by the native
-// tray adapter. It keeps the adapter independent from Wails and Desktop.
+// tray adapter. It keeps the adapter independent from the Wails application
+// and Desktop.
 type TrayActions interface {
 	Show()
 	OpenSettings()
@@ -53,9 +53,8 @@ func (c *TrayController) Quit() {
 
 func (c *TrayController) Quitting() bool { return c.quitting.Load() }
 
-// SystemTray is the platform boundary used by the Wails bootstrap. The
-// Windows implementation owns its native event loop; unsupported platforms
-// supply a no-op implementation so close never hides an inaccessible app.
+// SystemTray is the platform boundary used by the Wails bootstrap. The Wails
+// v3 SystemTrayManager owns the native notification-area icon and menu.
 type SystemTray interface {
 	Start()
 	Stop()
@@ -75,12 +74,12 @@ type trayLabelSink interface {
 	SetLabels(TrayMenuLabels)
 }
 
-type desktopTrayActions struct{ desktop *Desktop }
+type desktopTrayActions struct {
+	desktop *Desktop
+}
 
 func (a desktopTrayActions) Show() {
-	ctx := a.desktop.context()
-	wailsruntime.WindowShow(ctx)
-	wailsruntime.WindowUnminimise(ctx)
+	a.desktop.showMainWindow()
 }
 
 func (a desktopTrayActions) OpenSettings() {
@@ -89,11 +88,11 @@ func (a desktopTrayActions) OpenSettings() {
 }
 
 func (a desktopTrayActions) Hide() {
-	wailsruntime.WindowHide(a.desktop.context())
+	a.desktop.hideMainWindow()
 }
 
 func (a desktopTrayActions) Quit() {
-	wailsruntime.Quit(a.desktop.context())
+	a.desktop.quitApp()
 }
 
 func defaultTrayMenuLabels(language string) TrayMenuLabels {

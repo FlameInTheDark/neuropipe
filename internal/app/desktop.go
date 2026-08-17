@@ -22,6 +22,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	chatservice "github.com/FlameInTheDark/neuropipe/internal/chat"
 	databaseservice "github.com/FlameInTheDark/neuropipe/internal/databases"
+	"github.com/FlameInTheDark/neuropipe/internal/dialogs"
 	documentation "github.com/FlameInTheDark/neuropipe/internal/documentation"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/execution"
@@ -43,18 +44,23 @@ import (
 	twitchservice "github.com/FlameInTheDark/neuropipe/internal/twitch"
 	"github.com/FlameInTheDark/neuropipe/internal/updatecheck"
 	variablesservice "github.com/FlameInTheDark/neuropipe/internal/variables"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const (
 	runtimeInstallProgressEvent = "runtime.install.progress"
 	modelInstallProgressEvent   = "model.install.progress"
 	managedLlamaProviderID      = "llama-managed"
+	// mainWindowName is the Name assigned to the primary WebviewWindow in
+	// main.go. It is used by tray actions to look up the window for
+	// show/hide without depending on a Wails v2 context.
+	mainWindowName = "main"
 )
 
 // Desktop is the only object bound to the Wails renderer.
 type Desktop struct {
 	ctx                    context.Context
+	app                    *application.App
 	dataRoot               string
 	store                  *persistence.Store
 	registry               *catalog.Registry
@@ -86,6 +92,7 @@ type Desktop struct {
 	update                 domain.UpdateAvailability
 	updateCancel           context.CancelFunc
 	updateWG               sync.WaitGroup
+	dialogs                *dialogs.Service
 }
 
 // New composes the desktop application from local dependencies.
@@ -149,11 +156,20 @@ func New(version string) (*Desktop, error) {
 	desktop.llama = localruntime.NewLlamaManager()
 	desktop.metrics = metrics.NewService(store, desktop.emit, metrics.NewProcessSampler(), desktop.llama.PID)
 	desktop.providers = llm.NewManager(settings, vault, llm.WithUsageRecorder(desktop.metrics))
+	desktop.dialogs = dialogs.New(nil, func(event string, payload ...any) {
+		if len(payload) > 0 {
+			desktop.emit(event, payload[0])
+		} else {
+			desktop.emit(event, nil)
+		}
+	})
 	desktop.runs = execution.NewService(store, registry, desktop.providers, desktop.emit,
 		execution.WithNotificationSender(notifications.NewToastSender("Neuropipe")),
 		execution.WithMetricsRecorder(desktop.metrics),
 		execution.WithGlobalVariablesStore(variables),
 		execution.WithDatabaseService(databases),
+		execution.WithDialogOpener(dialogs.NewOpenerAdapter(desktop.dialogs)),
+		execution.WithInputDialogOpener(dialogs.NewInputAdapter(desktop.dialogs)),
 	)
 	desktop.runs.SetMaxConcurrentRuns(settings.MaxConcurrentRuns)
 	desktop.twitch = twitchservice.New(vault, store, desktop.runs, desktop.saveTwitchIdentity, desktop.emit)
@@ -167,26 +183,38 @@ func New(version string) (*Desktop, error) {
 	return desktop, nil
 }
 
-// Startup stores the Wails context and activates registered local triggers.
-func (d *Desktop) Startup(ctx context.Context) {
-	d.ctx = ctx
-	d.startUpdateChecks(ctx)
-	d.variables.Start(ctx)
-	d.runs.Start(ctx)
-	d.chat.Start(ctx)
-	d.metrics.Start(ctx, d.settings.Metrics)
+// Startup stores the Wails v3 application reference and activates registered
+// local triggers. The app is used for native dialogs, event emission, window
+// control, and the global shortcut manager.
+func (d *Desktop) Startup(app *application.App) {
+	d.app = app
+	d.ctx = app.Context()
+	if d.dialogs != nil {
+		d.dialogs.SetApp(app)
+	}
+	if d.hotkeys != nil {
+		d.hotkeys.SetApp(app)
+	}
+	if tray, ok := d.trayMenu.(*wailsSystemTray); ok && tray != nil {
+		tray.SetApp(app)
+	}
+	d.startUpdateChecks(d.ctx)
+	d.variables.Start(d.ctx)
+	d.runs.Start(d.ctx)
+	d.chat.Start(d.ctx)
+	d.metrics.Start(d.ctx, d.settings.Metrics)
 	_, _ = d.plugins.Reload()
-	_ = d.refreshFunctionRegistry(ctx)
-	_ = d.store.PurgeExecutions(ctx, d.settings.RetentionDays)
-	_ = d.metrics.Purge(ctx)
-	_ = d.scheduler.Start(ctx)
-	if err := d.hotkeys.Start(ctx); err != nil {
+	_ = d.refreshFunctionRegistry(d.ctx)
+	_ = d.store.PurgeExecutions(d.ctx, d.settings.RetentionDays)
+	_ = d.metrics.Purge(d.ctx)
+	_ = d.scheduler.Start(d.ctx)
+	if err := d.hotkeys.Start(d.ctx); err != nil {
 		d.emit("hotkeys.status.error", err.Error())
 	}
-	if err := d.api.Configure(ctx, d.GetSettings().API); err != nil {
+	if err := d.api.Configure(d.ctx, d.GetSettings().API); err != nil {
 		d.emit("api.status.error", err.Error())
 	}
-	d.twitch.Start(ctx)
+	d.twitch.Start(d.ctx)
 	if d.settings.LlamaRuntime.AutoStart {
 		_, _ = d.StartLlamaRuntime()
 	}
@@ -235,11 +263,21 @@ func (d *Desktop) DebugDatabase(request domain.SQLDebugRequest) (domain.SQLResul
 }
 
 func (d *Desktop) ChooseDatabaseFile() (string, error) {
-	return wailsruntime.OpenFileDialog(d.context(), wailsruntime.OpenDialogOptions{Title: "Select SQLite database", Filters: []wailsruntime.FileFilter{{DisplayName: "SQLite database", Pattern: "*.db;*.sqlite;*.sqlite3"}}})
+	dialog := d.app.Dialog.OpenFile().
+		SetTitle("Select SQLite database").
+		AddFilter("SQLite database", "*.db;*.sqlite;*.sqlite3")
+	return dialog.PromptForSingleSelection()
 }
 
 func (d *Desktop) ChooseDatabaseCreateFile() (string, error) {
-	return wailsruntime.SaveFileDialog(d.context(), wailsruntime.SaveDialogOptions{Title: "Create SQLite database", DefaultFilename: "database.sqlite", Filters: []wailsruntime.FileFilter{{DisplayName: "SQLite database", Pattern: "*.db;*.sqlite;*.sqlite3"}}})
+	dialog := d.app.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
+		Title:    "Create SQLite database",
+		Filename: "database.sqlite",
+		Filters: []application.FileFilter{
+			{DisplayName: "SQLite database", Pattern: "*.db;*.sqlite;*.sqlite3"},
+		},
+	})
+	return dialog.PromptForSingleSelection()
 }
 
 func (d *Desktop) ListPipelines() ([]domain.PipelineSummary, error) {
@@ -512,8 +550,25 @@ func (d *Desktop) SetScheduleEnabled(id string, enabled bool) error {
 	return d.scheduler.Reload(d.context())
 }
 
+// RunTrigger starts a published trigger binding from the Trigger board or
+// Pipelines list. When the pipeline is already running, the call is redirected
+// to CancelPipelineExecution so a second click stops the active run.
 func (d *Desktop) RunTrigger(id string) (domain.Execution, error) {
 	return d.runs.RunBinding(d.context(), id, pipeline.Packet{"trigger": "button"}, false)
+}
+
+// CancelPipelineExecution stops the active run for a pipeline. Returns the
+// execution ID that was cancelled, or an empty string when no active run was
+// found. Used by the Pipelines list, Pipeline editor, and Trigger board when
+// the user clicks Stop.
+func (d *Desktop) CancelPipelineExecution(pipelineID string) (string, error) {
+	return d.runs.CancelPipelineExecution(d.context(), pipelineID)
+}
+
+// IsPipelineRunning reports whether a pipeline currently has an active
+// (running or queued) execution. The UI uses this to toggle Run/Stop state.
+func (d *Desktop) IsPipelineRunning(pipelineID string) bool {
+	return d.runs.IsPipelineRunning(pipelineID)
 }
 
 // RunPipelineDraft performs an explicit, manual editor run using the current
@@ -868,10 +923,12 @@ func (d *Desktop) ChooseContentDirectory() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	selected, err := wailsruntime.OpenDirectoryDialog(d.context(), wailsruntime.OpenDialogOptions{
-		Title:            "Select Neuropipe content folder",
-		DefaultDirectory: current,
-	})
+	dialog := d.app.Dialog.OpenFile().
+		SetTitle("Select Neuropipe content folder").
+		SetDirectory(current).
+		CanChooseDirectories(true).
+		CanChooseFiles(false)
+	selected, err := dialog.PromptForSingleSelection()
 	if err != nil || strings.TrimSpace(selected) == "" {
 		return selected, err
 	}
@@ -1164,6 +1221,17 @@ func (d *Desktop) ListPlugins() []domain.PluginStatus { return d.plugins.Status(
 
 func (d *Desktop) RediscoverPlugins() ([]domain.PluginStatus, error) { return d.plugins.Reload() }
 
+// ResolveInputDialog completes a pending input dialog request from the React
+// layer. The renderer calls this Wails-bound method after the user closes the
+// styled input modal. It returns false when the request is unknown or already
+// resolved so late responses are silently ignored.
+func (d *Desktop) ResolveInputDialog(id string, response dialogs.InputResponse) bool {
+	if d.dialogs == nil {
+		return false
+	}
+	return d.dialogs.ResolveInput(id, response)
+}
+
 func (d *Desktop) context() context.Context {
 	if d.ctx != nil {
 		return d.ctx
@@ -1172,8 +1240,48 @@ func (d *Desktop) context() context.Context {
 }
 
 func (d *Desktop) emit(event string, payload any) {
-	if d.ctx != nil {
-		wailsruntime.EventsEmit(d.ctx, event, payload)
+	if d.app != nil {
+		d.app.Event.Emit(event, payload)
+	}
+}
+
+// showMainWindow reveals the main webview window. The Wails v3 Window manager
+// looks up the window by name; "main" is the name assigned in main.go when
+// the window is created.
+func (d *Desktop) showMainWindow() {
+	if d.app == nil {
+		return
+	}
+	if window, ok := d.app.Window.GetByName(mainWindowName); ok {
+		window.Show()
+		window.UnMinimise()
+		window.Focus()
+	}
+}
+
+// hideMainWindow hides the main webview window without quitting the
+// application. Used by the tray's Hide action and the close-to-tray lifecycle.
+func (d *Desktop) hideMainWindow() {
+	if d.app == nil {
+		return
+	}
+	if window, ok := d.app.Window.GetByName(mainWindowName); ok {
+		window.Hide()
+	}
+}
+
+// HideMainWindow is the exported counterpart to hideMainWindow. It is called
+// from main.go's ShouldQuit hook to keep the application running when the user
+// has chosen to hide to the tray.
+func (d *Desktop) HideMainWindow() {
+	d.hideMainWindow()
+}
+
+// quitApp asks the Wails v3 application to terminate. Wails owns the shutdown
+// sequence, including shutdown hooks and service shutdown notifications.
+func (d *Desktop) quitApp() {
+	if d.app != nil {
+		d.app.Quit()
 	}
 }
 

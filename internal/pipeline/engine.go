@@ -13,6 +13,7 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
+	"github.com/FlameInTheDark/neuropipe/internal/htmlutil"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes"
 )
 
@@ -48,6 +49,8 @@ type Engine struct {
 	twitch        nodes.TwitchChatSender
 	globals       GlobalVariablesStore
 	databases     nodes.SQLExecutor
+	dialogs       nodes.DialogOpener
+	inputDialogs  nodes.InputDialogOpener
 	variables     Packet
 }
 
@@ -203,7 +206,17 @@ func (e *Engine) executeHTTP(ctx context.Context, config map[string]any, input P
 	if err != nil {
 		return nil, fmt.Errorf("read HTTP response: %w", err)
 	}
-	output := Packet{"status": response.StatusCode, "body": string(data), "headers": response.Header}
+	responseBody := string(data)
+	stripScripts := boolValue(config["stripScripts"])
+	stripStyles := boolValue(config["stripStyles"])
+	if (stripScripts || stripStyles) && isHTMLResponse(response.Header.Get("Content-Type"), responseBody) {
+		responseBody, err = htmlutil.Clean(responseBody, stripScripts, stripStyles)
+		if err != nil {
+			return nil, fmt.Errorf("clean HTML response: %w", err)
+		}
+		data = []byte(responseBody)
+	}
+	output := Packet{"status": response.StatusCode, "body": responseBody, "headers": response.Header}
 	var decoded any
 	if json.Unmarshal(data, &decoded) == nil {
 		output["json"] = decoded
@@ -217,6 +230,17 @@ func (e *Engine) executeHTTP(ctx context.Context, config map[string]any, input P
 type httpHeader struct {
 	Name  string
 	Value string
+}
+
+// isHTMLResponse reports whether cleaning toggles may treat the payload as
+// HTML: an HTML content type wins, and markup-sniffing covers servers that
+// answer without a content type.
+func isHTMLResponse(contentType, body string) bool {
+	if contentType != "" {
+		return strings.Contains(strings.ToLower(contentType), "html")
+	}
+	trimmed := strings.ToLower(strings.TrimSpace(body))
+	return strings.HasPrefix(trimmed, "<!doctype html") || strings.HasPrefix(trimmed, "<html")
 }
 
 func configuredHTTPHeaders(value any) []httpHeader {
@@ -324,6 +348,20 @@ func (e *Engine) executeLLM(ctx context.Context, node domain.FlowNode, config ma
 	if node.Type == "llm:coding_agent" {
 		prompt = "Coding task:\n" + text(config, "task") + "\n\nWorkspace: " + text(config, "workspace")
 	}
+	if node.Type == "llm:agent" || node.Type == "llm:coding_agent" {
+		if history, err := e.agentHistory(ctx, node, config); err != nil {
+			return nil, err
+		} else if history != nil {
+			return e.converseAgent(ctx, node, config, prompt, history, input)
+		}
+	}
+	status, err := e.chatStatusReporter(ctx, node, config)
+	if err != nil {
+		return nil, err
+	}
+	if err := reportModelStatus(status, chatStatusThinking); err != nil {
+		return nil, err
+	}
 	request := ChatRequest{Prompt: promptWithInput(prompt, input), Model: text(config, "model"), Metrics: e.llmMetricContext(node)}
 	if node.Type == "llm:extract" {
 		request.Schema = jsonObject(config["schema"])
@@ -339,9 +377,42 @@ func (e *Engine) executeLLM(ctx context.Context, node domain.FlowNode, config ma
 	return Result{"out": {mergePacket(input, output)}}, nil
 }
 
+// converseAgent runs an agent without connected tools as a multi-turn chat:
+// the system prompt (instructions or coding task) followed by the loaded
+// conversation, whose final user message the agent answers directly.
+func (e *Engine) converseAgent(ctx context.Context, node domain.FlowNode, config map[string]any, prompt string, history []domain.ChatMessage, input Packet) (Result, error) {
+	assistant, supported := e.llm.(AssistantRunner)
+	if !supported {
+		return nil, fmt.Errorf("the configured LLM provider does not support chat history")
+	}
+	status, err := e.chatStatusReporter(ctx, node, config)
+	if err != nil {
+		return nil, err
+	}
+	if err := reportModelStatus(status, chatStatusThinking); err != nil {
+		return nil, err
+	}
+	response, err := assistant.Converse(ctx, domain.AssistantChatRequest{
+		Messages: agentHistoryMessages(prompt, history),
+		Model:    text(config, "model"),
+		Metrics:  e.llmMetricContext(node),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return Result{"out": {mergePacket(input, Packet{"llm": map[string]any{"content": response.Content}})}}, nil
+}
+
 func (e *Engine) executeBoolean(ctx context.Context, node domain.FlowNode, config map[string]any, input Packet) (Result, error) {
 	if e.llm == nil {
 		return nil, fmt.Errorf("configure an LLM provider in Settings before running AI nodes")
+	}
+	status, err := e.chatStatusReporter(ctx, node, config)
+	if err != nil {
+		return nil, err
+	}
+	if err := reportModelStatus(status, chatStatusThinking); err != nil {
+		return nil, err
 	}
 	response, err := e.llm.Chat(ctx, ChatRequest{Prompt: promptWithInput(text(config, "prompt"), input), ToolName: "route", ToolChoices: []string{"true", "false"}, Metrics: e.llmMetricContext(node)})
 	if err != nil {
@@ -357,6 +428,13 @@ func (e *Engine) executeBoolean(ctx context.Context, node domain.FlowNode, confi
 func (e *Engine) executeChoice(ctx context.Context, node domain.FlowNode, config map[string]any, input Packet) (Result, error) {
 	if e.llm == nil {
 		return nil, fmt.Errorf("configure an LLM provider in Settings before running AI nodes")
+	}
+	status, err := e.chatStatusReporter(ctx, node, config)
+	if err != nil {
+		return nil, err
+	}
+	if err := reportModelStatus(status, chatStatusThinking); err != nil {
+		return nil, err
 	}
 	optionsConfig := config["options"]
 	options := choiceIDs(optionsConfig)

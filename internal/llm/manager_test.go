@@ -54,3 +54,26 @@ func TestStructuredPromptIncludesChoiceGuidance(t *testing.T) {
 		t.Fatalf("structured prompt does not include all choice guidance: %q", prompt)
 	}
 }
+
+func TestEndpointNeverDuplicatesVersionSegment(t *testing.T) {
+	tests := []struct {
+		baseURL string
+		path    string
+		want    string
+	}{
+		// OpenAI itself is configured without the version segment.
+		{"https://api.openai.com", "/v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+		// Compatible providers are configured with the versioned base.
+		{"https://openrouter.ai/api/v1/", "/v1/chat/completions", "https://openrouter.ai/api/v1/chat/completions"},
+		{"https://api.groq.com/openai/v1", "/v1/models", "https://api.groq.com/openai/v1/models"},
+		{"http://127.0.0.1:1234/v1", "/v1/chat/completions", "http://127.0.0.1:1234/v1/chat/completions"},
+		// Unversioned routes and bases stay untouched.
+		{"http://127.0.0.1:11434/", "/api/generate", "http://127.0.0.1:11434/api/generate"},
+		{" https://api.openai.com/ ", "/v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+	}
+	for _, test := range tests {
+		if got := endpoint(test.baseURL, test.path); got != test.want {
+			t.Fatalf("endpoint(%q, %q) = %q, want %q", test.baseURL, test.path, got, test.want)
+		}
+	}
+}

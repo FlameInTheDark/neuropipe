@@ -1,106 +1,22 @@
-import type { APIStatus, Capability, ChatApproval, ChatConversation, ChatMessage, ChatMode, ChatPipeline, ChatRun, ChatRunEvent, CreateFunctionRequest, CustomFunction, Database, DatabaseSchema, DocumentationDocument, DocumentationEntry, DocumentationReference, DocumentationSearchResult, Execution, FunctionSummary, GlobalVariable, GlobalVariableSummary, InstallProgress, LlamaRuntimeCatalogStatus, LlamaRuntimeInstallRequest, LlamaRuntimeRelease, LlamaRuntimeStatus, LocalModel, MetricsFilter, MetricsOverview, ModelDetail, ModelInstallRequest, ModelSearchRequest, ModelSearchResult, NodeDefinition, Pipeline, PipelineSummary, PluginStatus, Report, SaveDatabaseRequest, SaveGlobalVariableRequest, SecretMetadata, Settings, SQLDebugRequest, SQLResult, TrayMenuLabels, TriggerBinding, TwitchDeviceAuthorization, TwitchDeviceAuthorizationRequest, TwitchEventDescriptor, TwitchIdentity, TwitchManualIdentityRequest, TwitchStatus, UpdateAvailability } from '@/lib/types'
-import i18n from '@/i18n'
+// Bridge between the React renderer and the Wails v3 backend. The Go side
+// registers the Desktop service via application.NewService(desktop) in
+// main.go; Wails v3 exposes every exported method through the named-call API
+// provided by @wailsio/runtime. This module wraps that surface so the rest
+// of the renderer never imports the runtime package directly.
+//
+// Every call delegates to the generated binding shim in
+// frontend/bindings/neuropipe/desktop.js, which uses Call.ByName to dispatch
+// to the bound *Desktop receiver method.
+import i18n from "@/i18n";
+import { desktop as binding } from "../../bindings/neuropipe/desktop.js";
 
-async function call<T>(method: string, ...args: unknown[]): Promise<T> {
-  const binding = window.go?.app?.Desktop?.[method]
-  if (!binding) {
-    throw new Error(i18n.t('app.unavailable'))
-  }
-  return binding(...args) as Promise<T>
-}
+// Re-export the binding object so existing `import { desktop } from '@/lib/bridge'`
+// call sites keep working without touching every file.
+export const desktop = binding;
 
-export const desktop = {
-	getUpdateAvailability: () => call<UpdateAvailability>('GetUpdateAvailability'),
-	openUpdateRelease: () => call<void>('OpenUpdateRelease'),
-  listPipelines: () => call<PipelineSummary[]>('ListPipelines'),
-  createPipeline: (name: string) => call<Pipeline>('CreatePipeline', name),
-  deletePipeline: (id: string) => call<void>('DeletePipeline', id),
-  duplicatePipeline: (id: string) => call<Pipeline>('DuplicatePipeline', id),
-  getPipeline: (id: string) => call<Pipeline>('GetPipeline', id),
-  savePipeline: (pipeline: Pipeline) => call<Pipeline>('SavePipeline', pipeline),
-  publishPipeline: (pipeline: Pipeline) => call<Pipeline>('PublishPipeline', pipeline),
-  listNodes: () => call<NodeDefinition[]>('ListNodeDefinitions'),
-	resolveNodeDefinition: (node: unknown) => call<NodeDefinition>('ResolveNodeDefinition', node),
-  validateJavaScript: (code: string) => call<void>('ValidateJavaScript', code),
-  listDocumentation: (language: string) => call<DocumentationEntry[]>('ListDocumentation', language),
-  getDocumentation: (language: string, id: string) => call<DocumentationDocument>('GetDocumentation', language, id),
-  searchDocumentation: (language: string, query: string) => call<DocumentationSearchResult[]>('SearchDocumentation', language, query),
-  getDocumentationForNode: (nodeType: string) => call<DocumentationReference>('GetDocumentationForNode', nodeType),
-	listFunctions: () => call<FunctionSummary[]>('ListFunctions'),
-	createFunction: (request: CreateFunctionRequest) => call<CustomFunction>('CreateFunction', request),
-	getFunction: (id: string) => call<CustomFunction>('GetFunction', id),
-	saveFunction: (item: CustomFunction) => call<CustomFunction>('SaveFunction', item),
-	publishFunction: (item: CustomFunction) => call<CustomFunction>('PublishFunction', item),
-	deleteFunction: (id: string) => call<void>('DeleteFunction', id),
-	listGlobalVariables: () => call<GlobalVariableSummary[]>('ListGlobalVariables'),
-	createGlobalVariable: (request: SaveGlobalVariableRequest) => call<GlobalVariable>('CreateGlobalVariable', request),
-	updateGlobalVariable: (request: SaveGlobalVariableRequest) => call<GlobalVariable>('UpdateGlobalVariable', request),
-	deleteGlobalVariable: (id: string) => call<void>('DeleteGlobalVariable', id),
-	listDatabases: () => call<Database[]>('ListDatabases'),
-	createDatabase: (request: SaveDatabaseRequest) => call<Database>('CreateDatabase', request),
-	registerDatabase: (request: SaveDatabaseRequest) => call<Database>('RegisterDatabase', request),
-	updateDatabase: (request: SaveDatabaseRequest) => call<Database>('UpdateDatabase', request),
-	deleteDatabase: (id: string) => call<void>('DeleteDatabase', id),
-	inspectDatabase: (id: string) => call<DatabaseSchema>('InspectDatabase', id),
-	debugDatabase: (request: SQLDebugRequest) => call<SQLResult>('DebugDatabase', request),
-	chooseDatabaseFile: () => call<string>('ChooseDatabaseFile'),
-	chooseDatabaseCreateFile: () => call<string>('ChooseDatabaseCreateFile'),
-  listTriggers: () => call<TriggerBinding[]>('ListAllTriggers'),
-  listSchedules: () => call<TriggerBinding[]>('ListSchedules'),
-	listTwitchTriggers: () => call<TriggerBinding[]>('ListTwitchTriggers'),
-	setTwitchTriggerEnabled: (id: string, enabled: boolean) => call<void>('SetTwitchTriggerEnabled', id, enabled),
-	trustTwitchTrigger: (id: string) => call<void>('TrustTwitchTrigger', id),
-  setScheduleEnabled: (id: string, enabled: boolean) => call<void>('SetScheduleEnabled', id, enabled),
-  runTrigger: (id: string) => call<Execution>('RunTrigger', id),
-  runPipelineDraft: (pipelineId: string, triggerNodeId: string) => call<Execution>('RunPipelineDraft', pipelineId, triggerNodeId),
-  listExecutions: (pipelineId: string) => call<Execution[]>('ListExecutions', pipelineId),
-  getExecution: (id: string) => call<Execution>('GetExecution', id),
-  getMetricsOverview: (filter: MetricsFilter) => call<MetricsOverview>('GetMetricsOverview', filter),
-  clearMetrics: () => call<void>('ClearMetrics'),
-  listReports: () => call<Report[]>('ListReports'),
-  deleteReport: (id: string) => call<void>('DeleteReport', id),
-  listChatConversations: () => call<ChatConversation[]>('ListChatConversations'),
-  listChatPipelines: () => call<ChatPipeline[]>('ListChatPipelines'),
-  createChatConversation: (mode: ChatMode, bindingId = '') => call<ChatConversation>('CreateChatConversation', mode, bindingId),
-  saveChatConversation: (conversation: ChatConversation) => call<ChatConversation>('SaveChatConversation', conversation),
-  deleteChatConversation: (id: string) => call<void>('DeleteChatConversation', id),
-  listChatMessages: (conversationId: string) => call<ChatMessage[]>('ListChatMessages', conversationId),
-  listChatRuns: (conversationId: string) => call<ChatRun[]>('ListChatRuns', conversationId),
-  listChatRunEvents: (chatRunId: string) => call<ChatRunEvent[]>('ListChatRunEvents', chatRunId),
-  sendChatMessage: (conversationId: string, text: string) => call<ChatRun>('SendChatMessage', conversationId, text),
-  cancelChatRun: (id: string) => call<void>('CancelChatRun', id),
-  listPendingChatApprovals: (conversationId: string) => call<ChatApproval[]>('ListPendingChatApprovals', conversationId),
-  resolveChatApproval: (id: string, approved: boolean) => call<void>('ResolveChatApproval', id, approved),
-  getCapabilities: (pipelineId: string) => call<Capability[]>('GetRequiredCapabilities', pipelineId),
-  trustRevision: (pipelineId: string, revision: number) => call<void>('TrustPipelineRevision', pipelineId, revision),
-  getSettings: () => call<Settings>('GetSettings'),
-  saveSettings: (settings: Settings) => call<void>('SaveSettings', settings),
-	getTwitchStatus: () => call<TwitchStatus>('GetTwitchStatus'),
-	listTwitchEventCatalog: () => call<TwitchEventDescriptor[]>('ListTwitchEventCatalog'),
-	startTwitchDeviceAuthorization: (request: TwitchDeviceAuthorizationRequest) => call<TwitchDeviceAuthorization>('StartTwitchDeviceAuthorization', request),
-	cancelTwitchDeviceAuthorization: (id: string) => call<void>('CancelTwitchDeviceAuthorization', id),
-	addTwitchManualIdentity: (request: TwitchManualIdentityRequest) => call<TwitchIdentity>('AddTwitchManualIdentity', request),
-	removeTwitchIdentity: (id: string) => call<void>('RemoveTwitchIdentity', id),
-	configureTrayMenu: (labels: TrayMenuLabels) => call<void>('ConfigureTrayMenu', labels),
-  chooseContentDirectory: () => call<string>('ChooseContentDirectory'),
-  getLlamaRuntimeStatus: () => call<LlamaRuntimeStatus>('GetLlamaRuntimeStatus'),
-  startLlamaRuntime: () => call<LlamaRuntimeStatus>('StartLlamaRuntime'),
-  stopLlamaRuntime: () => call<LlamaRuntimeStatus>('StopLlamaRuntime'),
-  listLlamaRuntimeReleases: () => call<LlamaRuntimeRelease[]>('ListLlamaRuntimeReleases'),
-  getLlamaRuntimeCatalogStatus: () => call<LlamaRuntimeCatalogStatus>('GetLlamaRuntimeCatalogStatus'),
-  getInstallProgress: (kind: InstallProgress['kind']) => call<InstallProgress>('GetInstallProgress', kind),
-  installLlamaRuntime: (request: LlamaRuntimeInstallRequest) => call<LlamaRuntimeCatalogStatus>('InstallLlamaRuntime', request),
-  searchLlamaModels: (request: ModelSearchRequest) => call<ModelSearchResult[]>('SearchLlamaModels', request),
-  getLlamaModelDetail: (repository: string) => call<ModelDetail>('GetLlamaModelDetail', repository),
-  listInstalledLlamaModels: () => call<LocalModel[]>('ListInstalledLlamaModels'),
-  installLlamaModel: (request: ModelInstallRequest) => call<LocalModel>('InstallLlamaModel', request),
-  selectInstalledLlamaModel: (path: string) => call<void>('SelectInstalledLlamaModel', path),
-  deleteInstalledLlamaModel: (path: string) => call<void>('DeleteInstalledLlamaModel', path),
-  getAPIStatus: () => call<APIStatus>('GetAPIStatus'),
-  rotateAPIToken: () => call<string>('RotateAPIToken'),
-  listSecrets: () => call<SecretMetadata[]>('ListSecrets'),
-  saveSecret: (name: string, value: string) => call<void>('SaveSecret', name, value),
-  deleteSecret: (name: string) => call<void>('DeleteSecret', name),
-  listPlugins: () => call<PluginStatus[]>('ListPlugins'),
-  rediscoverPlugins: () => call<PluginStatus[]>('RediscoverPlugins'),
+// wailsUnavailable mirrors the v2 i18n key used when the runtime binding is
+// not present (for example, when running the renderer outside Wails in a
+// plain browser). The check is still useful for unit tests.
+export function wailsUnavailable(): Error {
+  return new Error(i18n.t("app.unavailable"));
 }

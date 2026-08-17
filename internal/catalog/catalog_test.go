@@ -231,3 +231,87 @@ func TestObjectNodesExposeOnlyTheirBlueprintContracts(t *testing.T) {
 		t.Fatalf("Break Object configuration = %#v, want configurable outputs", breakObject.Fields)
 	}
 }
+
+func TestAgentChatModeAndTurnControlsStayConfigurationScoped(t *testing.T) {
+	registry := New()
+	for _, nodeType := range []string{"llm:agent", "llm:coding_agent"} {
+		definition, ok := registry.Get(nodeType)
+		if !ok {
+			t.Fatalf("%s definition is missing", nodeType)
+		}
+		modeFound := false
+		unlimitedFound := false
+		for _, configField := range definition.Fields {
+			if configField.Name == "chatMode" {
+				modeFound = true
+				if len(configField.Options) != 2 {
+					t.Fatalf("%s chatMode options = %#v, want message and history", nodeType, configField.Options)
+				}
+			}
+			if configField.Name == "unlimitedTurns" {
+				unlimitedFound = true
+			}
+		}
+		if !modeFound || !unlimitedFound {
+			t.Fatalf("%s fields miss chat mode or unlimited turns", nodeType)
+		}
+		chatID := false
+		for _, input := range definition.Inputs {
+			if input.ID == "chatMode" || input.ID == "unlimitedTurns" {
+				t.Fatalf("%s leaked a mode control as a data pin", nodeType)
+			}
+			if input.ID == "chatId" {
+				chatID = true
+				if input.Required || input.DataType != domain.DataText {
+					t.Fatalf("%s chatId pin = %#v, want optional Text input", nodeType, input)
+				}
+			}
+		}
+		if !chatID {
+			t.Fatalf("%s has no chatId input pin", nodeType)
+		}
+		if mode, _ := definition.DefaultConfig["chatMode"].(string); mode != "message" {
+			t.Fatalf("%s must default to one-message mode", nodeType)
+		}
+		if unlimited, _ := definition.DefaultConfig["unlimitedTurns"].(bool); unlimited {
+			t.Fatalf("%s must default to a capped turn budget", nodeType)
+		}
+	}
+}
+
+func TestLLMChatStatusToggleStaysConfigurationScoped(t *testing.T) {
+	registry := New()
+	for _, nodeType := range []string{"llm:prompt", "llm:extract", "llm:boolean", "llm:choice", "llm:summarize", "llm:agent", "llm:coding_agent"} {
+		definition, ok := registry.Get(nodeType)
+		if !ok {
+			t.Fatalf("%s definition is missing", nodeType)
+		}
+		toggleFound := false
+		for _, configField := range definition.Fields {
+			if configField.Name == "updateChatStatus" {
+				toggleFound = true
+			}
+		}
+		if !toggleFound {
+			t.Fatalf("%s has no chat status toggle", nodeType)
+		}
+		chatRunID := false
+		for _, input := range definition.Inputs {
+			if input.ID == "updateChatStatus" {
+				t.Fatalf("%s leaked the toggle as a data pin", nodeType)
+			}
+			if input.ID == "chatRunId" {
+				chatRunID = true
+				if input.Required || input.DataType != domain.DataText {
+					t.Fatalf("%s chatRunId pin = %#v, want optional Text input", nodeType, input)
+				}
+			}
+		}
+		if !chatRunID {
+			t.Fatalf("%s has no chatRunId input pin", nodeType)
+		}
+		if enabled, _ := definition.DefaultConfig["updateChatStatus"].(bool); enabled {
+			t.Fatalf("%s must default to silent status updates", nodeType)
+		}
+	}
+}
