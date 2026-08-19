@@ -253,14 +253,45 @@ export interface SaveGlobalVariableRequest {
   defaultValue: unknown;
 }
 
+export type DatabaseDriver = "sqlite" | "postgres" | "mysql";
+export type DatabaseStatus = "unknown" | "connected" | "error" | "unverified";
+
 export interface Database {
   id: string;
   name: string;
-  path: string;
+  driver: DatabaseDriver;
+  path?: string;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  passwordRef?: string;
+  schema?: string;
+  sslMode?: string;
+  charset?: string;
+  options?: string;
+  status: DatabaseStatus;
+  lastPingAt?: string;
   createdAt: string;
   updatedAt: string;
 }
-export interface SaveDatabaseRequest { id?: string; name: string; path: string; }
+
+export interface SaveDatabaseRequest {
+  id?: string;
+  name: string;
+  driver: DatabaseDriver;
+  path?: string;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  passwordRef?: string;
+  password?: string;
+  schema?: string;
+  sslMode?: string;
+  charset?: string;
+  options?: string;
+}
 export interface DatabaseSchema { tables: DatabaseTable[]; }
 export interface DatabaseTable { name: string; columns: DatabaseColumn[]; indexes: DatabaseIndex[]; }
 export interface DatabaseColumn { name: string; dataType: string; nullable: boolean; primaryKey: boolean; default?: string; }

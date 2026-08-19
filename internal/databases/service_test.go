@@ -16,7 +16,7 @@ func TestServiceExecuteInspectAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	service := New(store)
+	service := New(store, nil)
 	defer func() { _ = service.Close() }()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "people.sqlite")
@@ -64,7 +64,7 @@ func TestServiceDebugRunsMultipleStatementsAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	service := New(store)
+	service := New(store, nil)
 	defer func() { _ = service.Close() }()
 	registered, err := service.Create(context.Background(), domain.SaveDatabaseRequest{Name: "News", Path: filepath.Join(t.TempDir(), "news.sqlite")})
 	if err != nil {

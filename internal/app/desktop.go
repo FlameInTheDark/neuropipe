@@ -136,7 +136,7 @@ func New(version string) (*Desktop, error) {
 		_ = store.Close()
 		return nil, err
 	}
-	databases := databaseservice.New(store)
+	databases := databaseservice.New(store, vault)
 	getglobalvariablenodes.SetDeclaredType(variables.VariableType)
 	getglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
 	setglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
@@ -241,10 +241,17 @@ func (d *Desktop) ListDatabases() ([]domain.Database, error) {
 	return d.databases.List(d.context())
 }
 
+// CreateDatabase registers a new database. The request payload carries the
+// full dialect-specific metadata; the service branches on driver internally.
+// For SQLite the file is created on disk; for Postgres and MySQL the metadata
+// is persisted and a connection is opened and pinged.
 func (d *Desktop) CreateDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
 	return d.databases.Create(d.context(), request)
 }
 
+// RegisterDatabase records an existing database without creating it. For
+// SQLite the file must already exist; for Postgres/MySQL a connection is
+// opened and pinged.
 func (d *Desktop) RegisterDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
 	return d.databases.Register(d.context(), request)
 }
@@ -254,6 +261,23 @@ func (d *Desktop) UpdateDatabase(request domain.SaveDatabaseRequest) (domain.Dat
 }
 
 func (d *Desktop) DeleteDatabase(id string) error { return d.databases.Delete(d.context(), id) }
+
+// PingDatabase opens (or reuses) a connection to the registered database,
+// runs the dialect's ping query, and persists the resulting status.
+func (d *Desktop) PingDatabase(id string) (domain.DatabaseStatus, error) {
+	return d.databases.Ping(d.context(), id)
+}
+
+// TestDatabase connects with the supplied configuration without persisting
+// anything. It is used by the "Test connection" button in the create modal.
+// If request.Password is set it overrides any passwordRef in the vault.
+func (d *Desktop) TestDatabase(request domain.SaveDatabaseRequest) (domain.DatabaseStatus, error) {
+	item, err := d.databases.BuildDatabase(request)
+	if err != nil {
+		return domain.DatabaseStatusError, err
+	}
+	return d.databases.TestConnection(d.context(), item, strings.TrimSpace(request.Password))
+}
 
 func (d *Desktop) InspectDatabase(id string) (domain.DatabaseSchema, error) {
 	return d.databases.Inspect(d.context(), id)

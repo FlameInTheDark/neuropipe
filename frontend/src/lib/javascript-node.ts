@@ -24,7 +24,7 @@ const reserved = new Set([
   "false", "finally", "for", "function", "if", "implements", "import", "in", "instanceof",
   "interface", "let", "new", "null", "package", "private", "protected", "public", "return",
   "super", "switch", "static", "this", "throw", "true", "try", "typeof", "undefined", "var",
-  "void", "while", "with", "yield", "inputs", "np",
+  "void", "while", "with", "yield", "inputs", "np", "code",
 ]);
 
 const capabilities: readonly JavaScriptCapability[] = ["file-read", "file-write", "network"];

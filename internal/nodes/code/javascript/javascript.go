@@ -33,6 +33,7 @@ const (
 	inputsConfigKey       = "inputs"
 	outputsConfigKey      = "outputs"
 	capabilitiesConfigKey = "capabilities"
+	codeInputPinID        = "code"
 	maxScriptBytes        = 64 * 1024
 	maxScriptDuration     = 5 * time.Second
 )
@@ -41,7 +42,7 @@ var identifierPattern = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
 
 var reservedIdentifiers = map[string]struct{}{
 	"arguments": {}, "await": {}, "break": {}, "case": {}, "catch": {}, "class": {}, "const": {}, "continue": {}, "debugger": {}, "default": {}, "delete": {}, "do": {}, "else": {}, "enum": {}, "eval": {}, "export": {}, "extends": {}, "false": {}, "finally": {}, "for": {}, "function": {}, "if": {}, "implements": {}, "import": {}, "in": {}, "instanceof": {}, "interface": {}, "let": {}, "new": {}, "null": {}, "package": {}, "private": {}, "protected": {}, "public": {}, "return": {}, "static": {}, "super": {}, "switch": {}, "this": {}, "throw": {}, "true": {}, "try": {}, "typeof": {}, "undefined": {}, "var": {}, "void": {}, "while": {}, "with": {}, "yield": {},
-	"inputs": {}, "np": {},
+	"inputs": {}, "np": {}, "code": {},
 }
 
 // New creates the complete JavaScript node module.
@@ -54,6 +55,7 @@ func New() Node {
 func Register(registrar nodes.Registrar) error { return registrar.Register(New()) }
 
 func definition() domain.NodeDefinition {
+	stringType := domain.TypeSpec{Kind: domain.TypeString}
 	return domain.NodeDefinition{
 		Type:        "action:javascript",
 		Category:    "Code",
@@ -64,6 +66,7 @@ func definition() domain.NodeDefinition {
 		Mode:        domain.NodeImpure,
 		Inputs: []domain.NodePort{
 			{ID: "in", Label: "Exec", Kind: domain.PinExec, Direction: domain.PinInput, Color: "#fafafa", MaxConnections: 1},
+			{ID: codeInputPinID, Label: "Code", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataText, Type: &stringType, Color: "#e879f9", MaxConnections: 1, IgnoreConfigFallback: true},
 		},
 		Outputs: []domain.NodePort{
 			{ID: "out", Label: "Then", Kind: domain.PinExec, Direction: domain.PinOutput, Color: "#fafafa", MaxConnections: 1},
@@ -101,7 +104,7 @@ func resolve(node domain.FlowNode) (domain.NodeDefinition, error) {
 	if err != nil {
 		return definition, err
 	}
-	definition.Inputs = append(definition.Inputs[:1:1], ports(inputs, domain.PinInput)...)
+	definition.Inputs = append(definition.Inputs[:2:2], ports(inputs, domain.PinInput)...)
 	definition.Outputs = append(definition.Outputs[:1:1], ports(outputs, domain.PinOutput)...)
 	definition.Capabilities = capabilities
 	if code, ok := config[codeConfigKey].(string); ok && strings.TrimSpace(code) != "" {
@@ -234,6 +237,14 @@ func execute(ctx context.Context, invocation nodes.Invocation, runtime nodes.Run
 		return nodes.ExecutionResult{}, err
 	}
 	code, _ := invocation.Config[codeConfigKey].(string)
+	// The Code input pin overrides the editor value when connected. Falling
+	// back to the editor's configured source keeps the dialog the source of
+	// truth for an unconnected node.
+	if invocation.ConnectedInputs[codeInputPinID] {
+		if wired, ok := invocation.Inputs[codeInputPinID].(string); ok {
+			code = wired
+		}
+	}
 	if strings.TrimSpace(code) == "" {
 		code, _ = definition.DefaultConfig[codeConfigKey].(string)
 	}

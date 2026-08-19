@@ -23,7 +23,7 @@ func TestNodeResolvesTypedDynamicPortsAndCapabilities(t *testing.T) {
 	if got, want := definition.Type, "action:javascript"; got != want {
 		t.Fatalf("definition type = %q, want %q", got, want)
 	}
-	if got, want := len(definition.Inputs), 2; got != want || definition.Inputs[1].ID != "count" || definition.Inputs[1].Type.Kind != domain.TypeInt {
+	if got, want := len(definition.Inputs), 3; got != want || definition.Inputs[1].ID != "code" || definition.Inputs[1].Type.Kind != domain.TypeString || definition.Inputs[2].ID != "count" || definition.Inputs[2].Type.Kind != domain.TypeInt {
 		t.Fatalf("unexpected resolved inputs: %#v", definition.Inputs)
 	}
 	if got, want := len(definition.Outputs), 2; got != want || definition.Outputs[1].ID != "total" || definition.Outputs[1].Type.Kind != domain.TypeInt {
@@ -130,6 +130,50 @@ func TestNodeProvidesScopedVariablesButGuardsFilesystem(t *testing.T) {
 func TestValidateRejectsSyntax(t *testing.T) {
 	if err := Validate("return ("); err == nil {
 		t.Fatal("Validate accepted incomplete JavaScript")
+	}
+}
+
+// When the Code input pin is connected, the wired value must override the
+// editor-configured source so pipelines can supply JavaScript dynamically.
+func TestCodeInputPinOverridesEditor(t *testing.T) {
+	module := New()
+	editorConfig := configFor(
+		"return { message: 'from editor' };",
+		nil,
+		[]any{pin("message", "Message", domain.TypeSpec{Kind: domain.TypeString}, true)},
+		nil,
+	)
+	definition, err := module.Resolve(flowNode(editorConfig))
+	if err != nil {
+		t.Fatalf("resolve JavaScript node: %v", err)
+	}
+	wired := "return { message: 'from wire' };"
+	result, err := module.Execute(context.Background(), nodes.Invocation{
+		Node:            flowNode(editorConfig),
+		Definition:      definition,
+		Config:          editorConfig,
+		Inputs:          map[string]any{codeInputPinID: wired},
+		ConnectedInputs: map[string]bool{codeInputPinID: true},
+	}, struct{}{})
+	if err != nil {
+		t.Fatalf("execute JavaScript node with wired code: %v", err)
+	}
+	if got := result.Outputs["message"]; got != "from wire" {
+		t.Fatalf("wired code did not override editor; got %#v, want %q", got, "from wire")
+	}
+}
+
+// A reserved Code identifier cannot be reused for a dynamic input or output.
+func TestCodeIdentifierIsReserved(t *testing.T) {
+	module := New()
+	_, err := module.Resolve(flowNode(configFor(
+		"return {};",
+		[]any{pin("code", "Code", domain.TypeSpec{Kind: domain.TypeString}, false)},
+		nil,
+		nil,
+	)))
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("reserved 'code' pin error = %v", err)
 	}
 }
 

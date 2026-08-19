@@ -35,8 +35,20 @@ return { message: `${direct}: ${label}` };
 ```
 
 Pin IDs must be valid JavaScript identifiers, such as `userName`, `count`, or
-`filePath`. Names such as `first-name`, `inputs`, and `np` are rejected. A
-missing required input fails the node safely; use `??` only for optional pins.
+`filePath`. Names such as `first-name`, `inputs`, `np`, and `code` are rejected.
+A missing required input fails the node safely; use `??` only for optional pins.
+
+## Supplying the script dynamically
+
+The node always exposes a **Code** input pin. When that pin is connected, the
+wired value (a string) replaces the editor-configured script — letting another
+node (for example an LLM Prompt, an HTTP result, or a file reader) produce the
+JavaScript that this node runs. When the pin is not connected, the script
+authored through **Edit code** is used.
+
+This makes it possible to compose pipelines that generate or transform code at
+run time while still keeping the editor as the source of truth for an unconnected
+node.
 
 ## System API and safety
 

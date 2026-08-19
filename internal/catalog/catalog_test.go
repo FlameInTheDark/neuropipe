@@ -40,7 +40,7 @@ func TestStructuredConfigurationDoesNotBecomeDataPins(t *testing.T) {
 	}
 }
 
-func TestJavaScriptEditorConfigurationDoesNotBecomeDataPin(t *testing.T) {
+func TestJavaScriptExposesCodeInputPinAndEditorField(t *testing.T) {
 	definition, ok := New().Get("action:javascript")
 	if !ok {
 		t.Fatal("JavaScript definition is missing")
@@ -48,10 +48,24 @@ func TestJavaScriptEditorConfigurationDoesNotBecomeDataPin(t *testing.T) {
 	if _, ok := New().Node("action:javascript"); !ok {
 		t.Fatal("JavaScript module is missing")
 	}
-	for _, input := range definition.Inputs {
-		if input.ID == "code" {
-			t.Fatalf("JavaScript exposes editor configuration as a data pin: %#v", definition.Inputs)
+	var codePin *domain.NodePort
+	for index := range definition.Inputs {
+		if definition.Inputs[index].ID == "code" {
+			codePin = &definition.Inputs[index]
+			break
 		}
+	}
+	if codePin == nil {
+		t.Fatalf("JavaScript is missing the Code input pin: %#v", definition.Inputs)
+	}
+	if codePin.Kind != domain.PinData || codePin.Direction != domain.PinInput {
+		t.Fatalf("JavaScript Code pin is not a data input: %#v", codePin)
+	}
+	if codePin.Type == nil || codePin.Type.Kind != domain.TypeString {
+		t.Fatalf("JavaScript Code pin must be a string: %#v", codePin)
+	}
+	if !codePin.IgnoreConfigFallback {
+		t.Fatalf("JavaScript Code pin must opt out of inspector config fallback so the editor value is read explicitly")
 	}
 	if len(definition.Fields) != 1 || definition.Fields[0].Kind != "javascript-editor" {
 		t.Fatalf("JavaScript fields = %#v", definition.Fields)
