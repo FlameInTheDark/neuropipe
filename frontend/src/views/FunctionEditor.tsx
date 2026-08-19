@@ -4,7 +4,6 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   Background,
-  Controls,
   MarkerType,
   Panel,
   ReactFlow,
@@ -22,12 +21,15 @@ import {
   LayoutGrid,
   Loader2,
   Magnet,
+  Maximize2,
   PanelLeft,
   PanelRight,
   Plus,
   Save,
   Trash2,
   UploadCloud,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BlueprintContextMenu } from "@/components/BlueprintContextMenu";
@@ -149,10 +151,21 @@ export function FunctionEditor({
   const [item, setItem] = useState<CustomFunction>();
   const [nodes, setNodes] = useState<EditorNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
-  const [selectedID, setSelectedID] = useState<string>();
+  const [selectedID, setSelectedIDState] = useState<string>();
   const [libraryQuery, setLibraryQuery] = useState("");
-  const [showLibrary, setShowLibrary] = useState(true);
-  const [showInspector, setShowInspector] = useState(true);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [showInspector, setShowInspector] = useState(false);
+  // selectNode / deselectNode wrap raw selection state so the inspector can
+  // auto-open on node click and auto-close on canvas-pane click, mirroring
+  // the pipeline editor's UX.
+  const selectNode = useCallback((id: string) => {
+    setSelectedIDState(id);
+    setShowInspector(true);
+  }, []);
+  const deselectNode = useCallback(() => {
+    setSelectedIDState(undefined);
+  }, []);
+  const setSelectedID = selectNode;
   const [menu, setMenu] = useState<FunctionCanvasMenu>();
   const [menuQuery, setMenuQuery] = useState("");
   const [connecting, setConnecting] = useState<{ source: string; sourceHandle: string | null }>();
@@ -165,23 +178,23 @@ export function FunctionEditor({
   );
   const [flow, setFlow] = useState<ReactFlowInstance<EditorNode, FlowEdge>>();
   const canvasRef = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		const move = (event: Event) => {
-			const detail = (event as CustomEvent<{ edgeID: string; index: number; position: { x: number; y: number } }>).detail;
-			if (!detail) return;
-			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).map((point, index) => index === detail.index ? detail.position : point) }));
-			setDirty(true);
-		};
-		const remove = (event: Event) => {
-			const detail = (event as CustomEvent<{ edgeID: string; index: number }>).detail;
-			if (!detail) return;
-			setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).filter((_, index) => index !== detail.index) }));
-			setDirty(true);
-		};
-		window.addEventListener(waypointMoveEvent, move);
-		window.addEventListener(waypointRemoveEvent, remove);
-		return () => { window.removeEventListener(waypointMoveEvent, move); window.removeEventListener(waypointRemoveEvent, remove); };
-	}, []);
+        useEffect(() => {
+                const move = (event: Event) => {
+                        const detail = (event as CustomEvent<{ edgeID: string; index: number; position: { x: number; y: number } }>).detail;
+                        if (!detail) return;
+                        setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).map((point, index) => index === detail.index ? detail.position : point) }));
+                        setDirty(true);
+                };
+                const remove = (event: Event) => {
+                        const detail = (event as CustomEvent<{ edgeID: string; index: number }>).detail;
+                        if (!detail) return;
+                        setEdges((current) => current.map((edge) => edge.id !== detail.edgeID ? edge : { ...edge, waypoints: (edge.waypoints ?? []).filter((_, index) => index !== detail.index) }));
+                        setDirty(true);
+                };
+                window.addEventListener(waypointMoveEvent, move);
+                window.addEventListener(waypointRemoveEvent, remove);
+                return () => { window.removeEventListener(waypointMoveEvent, move); window.removeEventListener(waypointRemoveEvent, remove); };
+        }, []);
   const reconnectRef = useRef<ReconnectState>();
   const load = useCallback(async () => {
     try {
@@ -202,6 +215,19 @@ export function FunctionEditor({
   useEffect(() => {
     void load();
   }, [load]);
+  // Esc closes whichever floating sidebar currently has focus priority:
+  // inspector first (matches "click node → Esc → back to canvas"), then
+  // library. Mirrors the pipeline editor behavior.
+  useEffect(() => {
+    if (!showInspector && !showLibrary) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (showInspector) setShowInspector(false);
+      else if (showLibrary) setShowLibrary(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showInspector, showLibrary]);
   useEffect(() => {
     if (!item) return;
     setNodes((current) =>
@@ -464,7 +490,7 @@ export function FunctionEditor({
     if (removedIDs.size === 0) return;
     setNodes((current) => current.filter((node) => !removedIDs.has(node.id)));
     setEdges((current) => current.filter((edge) => !removedIDs.has(edge.source) && !removedIDs.has(edge.target)));
-    setSelectedID(undefined);
+    setSelectedIDState(undefined);
     setDirty(true);
   }, [nodes, selectedID]);
   const duplicateSelected = useCallback(() => {
@@ -679,21 +705,8 @@ export function FunctionEditor({
           </Button>
         </div>
       </header>
-      <div
-        className="grid min-h-0 flex-1"
-        style={{ gridTemplateColumns: `${showLibrary ? "246px " : ""}minmax(0,1fr)${showInspector ? " 330px" : ""}` }}
-      >
-        {showLibrary ? (
-          <BlueprintNodeLibrary
-            definitions={filteredDefinitions}
-            search={libraryQuery}
-            onSearch={setLibraryQuery}
-            onAdd={addNode}
-            dragMime="application/neuropipe-function-node"
-            preferenceKey={functionLibraryCollapsedCategoriesKey}
-          />
-        ) : null}
-        <div ref={canvasRef} className="relative min-w-0">
+      <div className="relative min-h-0 flex-1">
+        <div ref={canvasRef} className="absolute inset-0 min-w-0">
           <ReactFlow
             className="select-none"
             nodes={nodes}
@@ -737,7 +750,7 @@ export function FunctionEditor({
             }}
             onEdgeContextMenu={(event, edge) => openMenu(event, undefined, edge.id)}
             onPaneClick={() => {
-              setSelectedID(undefined);
+              deselectNode();
               setMenu(undefined);
             }}
             onPaneContextMenu={(event) => openMenu(event)}
@@ -753,22 +766,23 @@ export function FunctionEditor({
             snapGrid={editorSnapGrid}
           >
             <Background color="#27272a" gap={20} size={1} />
-            <Controls className="blueprint-controls" showInteractive={false} />
-            <Panel position="top-left" className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1">
-              <Tooltip content={t("editor.library")} side="bottom" align="start">
-                <Button size="sm" variant={showLibrary ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowLibrary((value) => !value)} aria-label={t("editor.library")} aria-pressed={showLibrary}>
-                  <PanelLeft className="size-3.5" />
+            <Panel position="bottom-center" className="!m-3 z-30 flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Tooltip content={t("editorActions.zoomIn", "Zoom in")} side="top">
+                <Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => flow?.zoomIn()} aria-label={t("editorActions.zoomIn", "Zoom in")}>
+                  <ZoomIn className="size-3.5" />
                 </Button>
               </Tooltip>
-            </Panel>
-            <Panel position="top-right" className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1">
-              <Tooltip content={t("editorActions.inspector")} side="bottom" align="end">
-                <Button size="sm" variant={showInspector ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowInspector((value) => !value)} aria-label={t("editorActions.inspector")} aria-pressed={showInspector}>
-                  <PanelRight className="size-3.5" />
+              <Tooltip content={t("editorActions.zoomOut", "Zoom out")} side="top">
+                <Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => flow?.zoomOut()} aria-label={t("editorActions.zoomOut", "Zoom out")}>
+                  <ZoomOut className="size-3.5" />
                 </Button>
               </Tooltip>
-            </Panel>
-            <Panel position="bottom-right" className="!m-3 flex gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Tooltip content={t("editorActions.fitView", "Fit view")} side="top">
+                <Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => flow?.fitView()} aria-label={t("editorActions.fitView", "Fit view")}>
+                  <Maximize2 className="size-3.5" />
+                </Button>
+              </Tooltip>
+              <span className="mx-0.5 h-5 w-px shrink-0 bg-zinc-800" aria-hidden="true" />
               <Tooltip content={t("editor.layout")} side="top">
                 <Button size="sm" variant="ghost" className="size-7 p-0" onClick={autoLayout} aria-label={t("editor.layout")}>
                   <LayoutGrid className="size-3.5" />
@@ -779,6 +793,7 @@ export function FunctionEditor({
                   <Magnet className="size-3.5" />
                 </Button>
               </Tooltip>
+              <span className="mx-0.5 h-5 w-px shrink-0 bg-zinc-800" aria-hidden="true" />
               <Tooltip content={t("editorActions.duplicate")} side="top">
                 <Button size="sm" variant="ghost" className="size-7 p-0" aria-label={t("editorActions.duplicate")} onClick={duplicateSelected} disabled={!selectedID}>
                   <Copy className="size-3.5" />
@@ -815,7 +830,35 @@ export function FunctionEditor({
             />
           ) : null}
         </div>
-        {showInspector ? <aside className="muted-scroll min-w-0 overflow-x-hidden overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-4">
+        {/* Floating left sidebar — Node Library. Collapsed by default.
+            When closed: only the toggle button renders at the canvas
+            top-left corner. When open: panel takes the corner and the
+            button attaches to the panel's right edge. */}
+        <div className="pointer-events-none absolute left-3 top-3 bottom-3 z-30 flex items-start gap-2">
+          {showLibrary ? (
+            <div className="pointer-events-auto flex h-full min-h-0 w-72 max-w-[calc(100vw-5rem)] flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl shadow-black/40">
+              <BlueprintNodeLibrary
+                definitions={filteredDefinitions}
+                search={libraryQuery}
+                onSearch={setLibraryQuery}
+                onAdd={addNode}
+                dragMime="application/neuropipe-function-node"
+                preferenceKey={functionLibraryCollapsedCategoriesKey}
+              />
+            </div>
+          ) : null}
+          <Tooltip content={t("editor.library")} side="bottom" align="start">
+            <div className="pointer-events-auto rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Button size="sm" variant={showLibrary ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowLibrary((value) => !value)} aria-label={t("editor.library")} aria-pressed={showLibrary}>
+                <PanelLeft className="size-3.5" />
+              </Button>
+            </div>
+          </Tooltip>
+        </div>
+        {/* Floating right sidebar — Inspector. Mirrors the left. */}
+        <div className="pointer-events-none absolute right-3 top-3 bottom-3 z-30 flex flex-row-reverse items-start gap-2">
+          {showInspector ? (
+            <div className="pointer-events-auto muted-scroll flex h-full min-h-0 w-[340px] max-w-[calc(100vw-5rem)] flex-col overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-4 shadow-2xl shadow-black/40">
           <section className="space-y-3">
             <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-zinc-600">
               {t("functionEditor.details")}
@@ -959,7 +1002,16 @@ export function FunctionEditor({
             <Trash2 className="size-3.5" />
             {t("functionEditor.deleteFunction")}
           </Button>
-        </aside> : null}
+            </div>
+          ) : null}
+          <Tooltip content={t("editorActions.inspector")} side="bottom" align="end">
+            <div className="pointer-events-auto rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Button size="sm" variant={showInspector ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowInspector((value) => !value)} aria-label={t("editorActions.inspector")} aria-pressed={showInspector}>
+                <PanelRight className="size-3.5" />
+              </Button>
+            </div>
+          </Tooltip>
+        </div>
       </div>
     </section>
   );

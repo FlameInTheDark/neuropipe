@@ -39,7 +39,7 @@ export function BlueprintNodeLibrary({
   );
   const searching = search.trim().length > 0;
   return (
-    <aside className="muted-scroll min-h-0 overflow-y-auto border-r border-zinc-800 bg-zinc-950">
+    <aside className="muted-scroll flex h-full min-h-0 flex-col overflow-y-auto bg-zinc-950">
       <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950 p-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-2 size-3.5 text-zinc-600" />

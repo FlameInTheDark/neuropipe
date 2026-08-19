@@ -11,7 +11,6 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   Background,
-  Controls,
   Handle,
   MarkerType,
   Panel,
@@ -39,6 +38,8 @@ import {
   LayoutGrid,
   Loader2,
   Magnet,
+  Maximize2,
+  Minus,
   MousePointer2,
   PanelLeft,
   PanelRight,
@@ -53,6 +54,8 @@ import {
   UploadCloud,
   X,
   Zap,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BlueprintContextMenu } from "@/components/BlueprintContextMenu";
@@ -514,12 +517,23 @@ function EditorContents({
   const [pipeline, setPipeline] = useState<Pipeline>();
   const [nodes, setNodes] = useState<EditorNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
-  const [selectedID, setSelectedID] = useState<string>();
+  const [selectedID, setSelectedIDState] = useState<string>();
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [search, setSearch] = useState("");
-  const [showPalette, setShowPalette] = useState(true);
-  const [showInspector, setShowInspector] = useState(true);
+  const [showPalette, setShowPalette] = useState(false);
+  const [showInspector, setShowInspector] = useState(false);
+  // selectNode / deselectNode wrap the raw selection state so the inspector can
+  // auto-open when a node becomes selected and auto-close on canvas-pane click,
+  // while still respecting the user's explicit inspector toggle.
+  const selectNode = useCallback((id: string) => {
+    setSelectedIDState(id);
+    setShowInspector(true);
+  }, []);
+  const deselectNode = useCallback(() => {
+    setSelectedIDState(undefined);
+  }, []);
+  const setSelectedID = selectNode;
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState("");
   const [history, setHistory] = useState<Execution[]>([]);
@@ -629,6 +643,20 @@ function EditorContents({
   useEffect(() => {
     void load();
   }, [load]);
+  // Esc closes whichever floating sidebar currently has focus priority:
+  // inspector first (matches "click node → Esc → back to canvas"), then
+  // palette. The handler is a window-level listener so it works regardless
+  // of which inner element has focus.
+  useEffect(() => {
+    if (!showInspector && !showPalette) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (showInspector) setShowInspector(false);
+      else if (showPalette) setShowPalette(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showInspector, showPalette]);
   // Data reroutes derive their output type from the wire feeding them, so the
   // pin follows connects, disconnects, and upstream retypes, and downstream
   // wires re-colour to match. The input pin keeps its single-connection limit;
@@ -1144,7 +1172,7 @@ function EditorContents({
         (edge) => !removedIDs.has(edge.source) && !removedIDs.has(edge.target),
       ),
     );
-    setSelectedID(undefined);
+    setSelectedIDState(undefined);
     setDirty(true);
   };
   const duplicateSelected = () => {
@@ -1459,25 +1487,9 @@ function EditorContents({
           </Button>
         </div>
       </header>
-      <div className="min-h-0 flex-1">
-        <div
-          className="grid h-full min-h-0"
-          style={{
-            gridTemplateColumns: `${showPalette ? "246px " : ""}minmax(0,1fr)${showInspector ? " 300px" : ""}`,
-          }}
-        >
-          {showPalette && (
-            <BlueprintNodeLibrary
-              definitions={filteredDefinitions}
-              search={search}
-              onSearch={setSearch}
-              onAdd={addNode}
-              dragMime="application/neuropipe-node"
-              preferenceKey={nodeLibraryCollapsedCategoriesKey}
-            />
-          )}
-          <div ref={canvasRef} className="relative min-w-0">
-            <ReactFlow
+      <div className="relative min-h-0 flex-1">
+        <div ref={canvasRef} className="absolute inset-0 min-w-0">
+          <ReactFlow
               className="select-none"
               nodes={nodes}
               edges={edges.map((edge) =>
@@ -1533,7 +1545,7 @@ function EditorContents({
                 openCanvasMenu(event, undefined, undefined, edge.id, edge.kind)
               }
               onPaneClick={() => {
-                setSelectedID(undefined);
+                deselectNode();
                 setMenu(undefined);
               }}
               onPaneContextMenu={(event) => openCanvasMenu(event)}
@@ -1549,31 +1561,26 @@ function EditorContents({
               fitView
             >
               <Background color="#27272a" gap={20} size={1} />
-              <Controls className="blueprint-controls" showInteractive={false} />
               <Panel
-                position="top-left"
-                className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1"
+                position="bottom-center"
+                className="!m-3 z-30 flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1"
               >
-                <Tooltip content={t("editor.library")} side="bottom" align="start">
-                  <Button size="sm" variant={showPalette ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowPalette((value) => !value)} aria-label={t("editor.library")} aria-pressed={showPalette}>
-                    <PanelLeft className="size-3.5" />
+                <Tooltip content={t("editorActions.zoomIn", "Zoom in")} side="top">
+                  <Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => flow?.zoomIn()} aria-label={t("editorActions.zoomIn", "Zoom in")}>
+                    <ZoomIn className="size-3.5" />
                   </Button>
                 </Tooltip>
-              </Panel>
-              <Panel
-                position="top-right"
-                className="!m-3 rounded-md border border-zinc-700 bg-zinc-950 p-1"
-              >
-                <Tooltip content={t("editorActions.inspector")} side="bottom" align="end">
-                  <Button size="sm" variant={showInspector ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowInspector((value) => !value)} aria-label={t("editorActions.inspector")} aria-pressed={showInspector}>
-                    <PanelRight className="size-3.5" />
+                <Tooltip content={t("editorActions.zoomOut", "Zoom out")} side="top">
+                  <Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => flow?.zoomOut()} aria-label={t("editorActions.zoomOut", "Zoom out")}>
+                    <ZoomOut className="size-3.5" />
                   </Button>
                 </Tooltip>
-              </Panel>
-              <Panel
-                position="bottom-right"
-                className="!m-3 flex gap-1 rounded-md border border-zinc-700 bg-zinc-950 p-1"
-              >
+                <Tooltip content={t("editorActions.fitView", "Fit view")} side="top">
+                  <Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => flow?.fitView()} aria-label={t("editorActions.fitView", "Fit view")}>
+                    <Maximize2 className="size-3.5" />
+                  </Button>
+                </Tooltip>
+                <span className="mx-0.5 h-5 w-px shrink-0 bg-zinc-800" aria-hidden="true" />
                 <Tooltip content={t("editor.layout")} side="top">
                   <Button size="sm" variant="ghost" className="size-7 p-0" onClick={autoLayout} aria-label={t("editor.layout")}>
                     <LayoutGrid className="size-3.5" />
@@ -1584,6 +1591,7 @@ function EditorContents({
                     <Magnet className="size-3.5" />
                   </Button>
                 </Tooltip>
+                <span className="mx-0.5 h-5 w-px shrink-0 bg-zinc-800" aria-hidden="true" />
                 <Tooltip content={t("editorActions.duplicate")} side="top">
                   <Button
                     size="sm"
@@ -1621,16 +1629,58 @@ function EditorContents({
                 }}
               />
             )}
-          </div>
-          {showInspector ? <Inspector
-            node={selected}
-            definition={selectedDefinition}
-            sourceFields={selectedSourceFields}
-            onUpdate={updateConfig}
-            onUpdateConfig={updateConfigValues}
-            history={history}
-            runLogKey={runLogKey}
-          /> : null}
+        </div>
+        {/* Floating left sidebar — Node Library. Collapsed by default.
+            When closed: only the toggle button renders at the canvas
+            top-left corner. When open: panel takes the corner and the
+            button attaches to the panel's right edge so no canvas space
+            is wasted on either side. */}
+        <div className="pointer-events-none absolute left-3 top-3 bottom-3 z-30 flex items-start gap-2">
+          {showPalette ? (
+            <div className="pointer-events-auto flex h-full min-h-0 w-72 max-w-[calc(100vw-5rem)] flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl shadow-black/40">
+              <BlueprintNodeLibrary
+                definitions={filteredDefinitions}
+                search={search}
+                onSearch={setSearch}
+                onAdd={addNode}
+                dragMime="application/neuropipe-node"
+                preferenceKey={nodeLibraryCollapsedCategoriesKey}
+              />
+            </div>
+          ) : null}
+          <Tooltip content={t("editor.library")} side="bottom" align="start">
+            <div className="pointer-events-auto rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Button size="sm" variant={showPalette ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowPalette((value) => !value)} aria-label={t("editor.library")} aria-pressed={showPalette}>
+                <PanelLeft className="size-3.5" />
+              </Button>
+            </div>
+          </Tooltip>
+        </div>
+        {/* Floating right sidebar — Inspector. Mirrors the left: when
+            closed, only the button shows at the top-right corner; when
+            open, panel takes the corner and button attaches to its left
+            edge. */}
+        <div className="pointer-events-none absolute right-3 top-3 bottom-3 z-30 flex flex-row-reverse items-start gap-2">
+          {showInspector ? (
+            <div className="pointer-events-auto flex h-full min-h-0 w-[340px] max-w-[calc(100vw-5rem)] flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl shadow-black/40">
+              <Inspector
+                node={selected}
+                definition={selectedDefinition}
+                sourceFields={selectedSourceFields}
+                onUpdate={updateConfig}
+                onUpdateConfig={updateConfigValues}
+                history={history}
+                runLogKey={runLogKey}
+              />
+            </div>
+          ) : null}
+          <Tooltip content={t("editorActions.inspector")} side="bottom" align="end">
+            <div className="pointer-events-auto rounded-md border border-zinc-700 bg-zinc-950 p-1">
+              <Button size="sm" variant={showInspector ? "secondary" : "ghost"} className="size-7 p-0" onClick={() => setShowInspector((value) => !value)} aria-label={t("editorActions.inspector")} aria-pressed={showInspector}>
+                <PanelRight className="size-3.5" />
+              </Button>
+            </div>
+          </Tooltip>
         </div>
       </div>
     </section>
@@ -1886,8 +1936,8 @@ function Inspector({
     return () => { cancelled = true; };
   }, [definition?.type, t]);
   return (
-    <aside className="muted-scroll min-h-0 overflow-y-auto border-l border-zinc-800 bg-zinc-950">
-      <div className="flex border-b border-zinc-800">
+    <aside className="flex h-full min-h-0 flex-col bg-zinc-950">
+      <div className="flex shrink-0 border-b border-zinc-800">
         <button
           onClick={() => setTab("config")}
           className={cn(
@@ -1911,6 +1961,7 @@ function Inspector({
           {t("editorActions.executionLog")}
         </button>
       </div>
+      <div className="muted-scroll min-h-0 flex-1 overflow-y-auto">
       {tab === "runs" ? (
         <ExecutionLog runs={runs} />
       ) : !node || !definition ? (
@@ -1977,6 +2028,7 @@ function Inspector({
           )}
         </div>
       )}
+      </div>
     </aside>
   );
 }
