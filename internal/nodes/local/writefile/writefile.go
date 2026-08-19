@@ -76,7 +76,7 @@ func definition() domain.NodeDefinition {
 	defaults := map[string]any{"contentType": string(textbytes.Text), "content": ""}
 	return domain.NodeDefinition{
 		Type:        "action:file_write",
-		Category:    "Local",
+		Category:    "Files",
 		Label:       "Write File",
 		Description: "Write explicitly selected UTF-8 text or raw bytes to an approved local path.",
 		Icon:        "file-up",

@@ -53,3 +53,11 @@ Data nodes are pure unless noted. They have no exec pins and calculate only when
 ## Data Reroute
 
 **Purpose:** keep data wires legible. **Pins:** Value input/output. **Configure:** none. **Produces:** the same value. **Capabilities:** none. **Failure:** none beyond source evaluation. **Example:** LLM result → Data Reroute → Create Report.
+
+## Bytes To Base64
+
+**Purpose:** encode connected raw bytes as a Base64 string. **Pins:** Bytes input, Text output. **Configure:** none. **Produces:** standard Base64 text. **Capabilities:** none. **Failure:** non-bytes input is rejected. **Example:** Read File `bytes` → Bytes To Base64 → Set Field on JSON body.
+
+## Base64 To Bytes
+
+**Purpose:** decode a Base64 string to raw bytes, auto-detecting standard and URL-safe variants. **Pins:** Text input, Bytes output. **Configure:** none. **Produces:** the decoded bytes. **Capabilities:** none. **Failure:** malformed Base64 stops the requesting path. **Example:** HTTP body → Base64 To Bytes → Write File `bytes` content.

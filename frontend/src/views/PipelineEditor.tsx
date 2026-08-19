@@ -32,6 +32,7 @@ import {
   Bot,
   Check,
   ChevronRight,
+  CircleHelp,
   CirclePlay,
   Copy,
   FileCode2,
@@ -2015,6 +2016,23 @@ function ConfigControl({
       <span className="mb-1.5 flex items-center gap-1 text-xs font-medium text-zinc-400">
         {displayLabel}
         {field.required && <span className="text-zinc-600">*</span>}
+        {(field.kind === "javascript-editor" || field.kind === "sql-editor") && (
+          <Tooltip
+            content={field.kind === "javascript-editor" ? t("javascript.pinOverrideHint") : t("sql.pinOverrideHint")}
+            side="top"
+            align="start"
+            size="body"
+            className="w-72 px-2.5 py-2 text-zinc-300"
+          >
+            <button
+              type="button"
+              className="flex size-4 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+              aria-label={t("editor.pinOverrideHelp", "Override behaviour")}
+            >
+              <CircleHelp className="size-3" />
+            </button>
+          </Tooltip>
+        )}
         {(field.kind === "string" || field.kind === "textarea" || field.kind === "json" || field.kind === "type-spec") && (
           <TextEditorExpandButton onChange={onChange} value={stringValue} placeholder={field.placeholder} multiline={field.kind !== "string"} />
         )}

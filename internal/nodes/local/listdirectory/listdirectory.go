@@ -27,7 +27,7 @@ func New() Node {
 	return Node{
 		Metadata: domain.NodeDefinition{
 			Type:        "action:list_directory",
-			Category:    "Local",
+			Category:    "Folders",
 			Label:       "List Directory",
 			Description: "List files and folders from an approved local directory.",
 			Icon:        "folder-open",

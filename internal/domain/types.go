@@ -598,21 +598,64 @@ type SaveGlobalVariableRequest struct {
 	DefaultValue any      `json:"defaultValue"`
 }
 
-// Database is a user-registered SQLite file. Neuropipe stores only metadata;
-// the database contents remain in the selected local file.
+// DatabaseDriver identifies the SQL dialect of a registered database.
+type DatabaseDriver string
+
+const (
+	DatabaseDriverSQLite   DatabaseDriver = "sqlite"
+	DatabaseDriverPostgres DatabaseDriver = "postgres"
+	DatabaseDriverMySQL    DatabaseDriver = "mysql"
+)
+
+// DatabaseStatus reports the last-known connection state of a database.
+type DatabaseStatus string
+
+const (
+	DatabaseStatusUnknown    DatabaseStatus = "unknown"
+	DatabaseStatusConnected  DatabaseStatus = "connected"
+	DatabaseStatusError      DatabaseStatus = "error"
+	DatabaseStatusUnverified DatabaseStatus = "unverified"
+)
+
+// Database is a user-registered database connection. SQLite uses Path;
+// Postgres and MySQL use Host/Port/Database/Username/PasswordRef.
 type Database struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Driver      DatabaseDriver `json:"driver"`
+	Path        string         `json:"path,omitempty"`
+	Host        string         `json:"host,omitempty"`
+	Port        int            `json:"port,omitempty"`
+	Database    string         `json:"database,omitempty"`
+	Username    string         `json:"username,omitempty"`
+	PasswordRef string         `json:"passwordRef,omitempty"`
+	Schema      string         `json:"schema,omitempty"`
+	SSLMode     string         `json:"sslMode,omitempty"`
+	Charset     string         `json:"charset,omitempty"`
+	Options     string         `json:"options,omitempty"`
+	Status      DatabaseStatus `json:"status"`
+	LastPingAt  *time.Time     `json:"lastPingAt,omitempty"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
 }
 
 // SaveDatabaseRequest carries editable database metadata across Wails.
+// Password is write-only (never returned in reads).
 type SaveDatabaseRequest struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Path string `json:"path"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Driver      DatabaseDriver `json:"driver"`
+	Path        string         `json:"path,omitempty"`
+	Host        string         `json:"host,omitempty"`
+	Port        int            `json:"port,omitempty"`
+	Database    string         `json:"database,omitempty"`
+	Username    string         `json:"username,omitempty"`
+	PasswordRef string         `json:"passwordRef,omitempty"`
+	Password    string         `json:"password,omitempty"`
+	Schema      string         `json:"schema,omitempty"`
+	SSLMode     string         `json:"sslMode,omitempty"`
+	Charset     string         `json:"charset,omitempty"`
+	Options     string         `json:"options,omitempty"`
 }
 
 // DatabaseSchema is the inspectable SQLite catalog exposed to the editor.

@@ -17,9 +17,19 @@ type Node = nodes.Implementation
 
 var _ nodes.Node = Node{}
 
-const maxNodeRows = 500
+const (
+	maxNodeRows   = 500
+	sqlInputPinID = "sql"
+)
 
 var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// reservedParameterIDs are identifiers a user-configured SQL parameter cannot
+// reuse because they belong to the node's static input contract. Keeping them
+// out of user-configured pins preserves a stable pin contract per node.
+var reservedParameterIDs = map[string]struct{}{
+	sqlInputPinID: {},
+}
 
 func New() Node {
 	return Node{Metadata: definition(), Resolver: resolve, Executor: execute}
@@ -34,8 +44,11 @@ func definition() domain.NodeDefinition {
 	rowsType := domain.TypeSpec{Kind: domain.TypeList, Element: &domain.TypeSpec{Kind: domain.TypeMap, Key: &stringType, Value: &domain.TypeSpec{Kind: domain.TypeAny}}}
 	columnsType := domain.TypeSpec{Kind: domain.TypeList, Element: &stringType}
 	return domain.NodeDefinition{
-		Type: "action:sql", Category: "Database", Label: "SQL", Description: "Execute one safely parameterized statement against a registered SQLite database.", Icon: "database", Color: "#22c55e", Mode: domain.NodeImpure, PortContractOwned: true,
-		Inputs: []domain.NodePort{{ID: "in", Label: "Exec", Kind: domain.PinExec, Direction: domain.PinInput, Color: "#fafafa", MaxConnections: 1}},
+		Type: "action:sql", Category: "Database", Label: "SQL", Description: "Execute one safely parameterized statement against a registered database.", Icon: "database", Color: "#22c55e", Mode: domain.NodeImpure, PortContractOwned: true,
+		Inputs: []domain.NodePort{
+			{ID: "in", Label: "Exec", Kind: domain.PinExec, Direction: domain.PinInput, Color: "#fafafa", MaxConnections: 1},
+			{ID: sqlInputPinID, Label: "SQL", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataText, Type: &stringType, Color: "#e879f9", MaxConnections: 1, IgnoreConfigFallback: true},
+		},
 		Outputs: []domain.NodePort{
 			{ID: "out", Label: "Then", Kind: domain.PinExec, Direction: domain.PinOutput, Color: "#fafafa", MaxConnections: 1},
 			{ID: "columns", Label: "Columns", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataList, Type: &columnsType, Color: "#facc15", MaxConnections: 1},
@@ -75,6 +88,14 @@ func execute(ctx context.Context, invocation nodes.Invocation, runtime nodes.Run
 	}
 	databaseID, _ := invocation.Config["databaseId"].(string)
 	statement, _ := invocation.Config["sql"].(string)
+	// The SQL input pin overrides the editor value when connected. Falling back
+	// to the editor-configured statement keeps the dialog the source of truth
+	// for an unconnected node.
+	if invocation.ConnectedInputs[sqlInputPinID] {
+		if wired, ok := invocation.Inputs[sqlInputPinID].(string); ok {
+			statement = wired
+		}
+	}
 	parameters, err := configuredParameters(invocation.Config)
 	if err != nil {
 		return nodes.ExecutionResult{}, err
@@ -130,6 +151,12 @@ func configuredParameters(values map[string]any) ([]domain.SQLParameter, error) 
 		}
 		if !identifier.MatchString(parameter.Name) {
 			return nil, fmt.Errorf("SQL parameter %d has an invalid name", index+1)
+		}
+		if _, reserved := reservedParameterIDs[parameter.ID]; reserved {
+			return nil, fmt.Errorf("SQL parameter %d uses a reserved pin ID %q", index+1, parameter.ID)
+		}
+		if _, reserved := reservedParameterIDs[parameter.Name]; reserved {
+			return nil, fmt.Errorf("SQL parameter %d uses a reserved name %q", index+1, parameter.Name)
 		}
 		if _, duplicate := ids[parameter.ID]; duplicate {
 			return nil, fmt.Errorf("SQL parameters contain duplicate pin ID %q", parameter.ID)

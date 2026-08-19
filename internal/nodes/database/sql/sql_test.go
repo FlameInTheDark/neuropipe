@@ -30,7 +30,7 @@ func TestDynamicParametersAndExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	if len(definition.Inputs) != 2 || definition.Inputs[1].ID != "minimum" || definition.Inputs[1].Type == nil || definition.Inputs[1].Type.Kind != domain.TypeInt {
+	if len(definition.Inputs) != 3 || definition.Inputs[1].ID != "sql" || definition.Inputs[2].ID != "minimum" || definition.Inputs[2].Type == nil || definition.Inputs[2].Type.Kind != domain.TypeInt {
 		t.Fatalf("Resolve() inputs = %#v", definition.Inputs)
 	}
 	executor := &executorStub{}
@@ -43,5 +43,41 @@ func TestDynamicParametersAndExecution(t *testing.T) {
 	}
 	if len(result.Ports) != 1 || result.Ports[0] != "out" || result.Outputs["lastInsertId"] != int64(9) {
 		t.Fatalf("Execute() result = %#v", result)
+	}
+}
+
+// When the SQL input pin is connected, the wired statement must override the
+// editor-configured SQL so pipelines can supply statements dynamically.
+func TestSQLInputPinOverridesEditor(t *testing.T) {
+	node := domain.FlowNode{Type: "action:sql", Data: map[string]any{"config": map[string]any{"databaseId": "database-1", "sql": "SELECT 'editor' AS source", "parameters": []any{}}}}
+	module := New()
+	definition, err := module.Resolve(node)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	executor := &executorStub{}
+	_, err = module.Execute(context.Background(), nodes.Invocation{
+		Node:            node,
+		Definition:      definition,
+		Config:          node.Data["config"].(map[string]any),
+		Inputs:          map[string]any{sqlInputPinID: "SELECT 'wire' AS source"},
+		ConnectedInputs: map[string]bool{sqlInputPinID: true},
+	}, runtimeStub{executor: executor})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if executor.request.SQL != "SELECT 'wire' AS source" {
+		t.Fatalf("ExecuteSQL() SQL = %q, want wired statement", executor.request.SQL)
+	}
+}
+
+// A reserved SQL pin ID cannot be reused for a user-configured parameter.
+func TestSQLParameterRejectsReservedID(t *testing.T) {
+	parameter := map[string]any{"id": "sql", "name": "value", "label": "Reserved", "type": map[string]any{"kind": "string"}, "required": false}
+	node := domain.FlowNode{Type: "action:sql", Data: map[string]any{"config": map[string]any{"databaseId": "database-1", "sql": "SELECT 1", "parameters": []any{parameter}}}}
+	module := New()
+	_, err := module.Resolve(node)
+	if err == nil {
+		t.Fatal("Resolve() expected reserved parameter error")
 	}
 }

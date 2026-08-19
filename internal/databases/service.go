@@ -1,10 +1,13 @@
-// Package databases manages registered local SQLite files and their connections.
+// Package databases manages registered SQL databases and their connections.
+// It supports SQLite (local files), PostgreSQL (via pgx) and MySQL (via
+// go-sql-driver/mysql). Driver-specific behaviour lives in the dialect files.
 package databases
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -16,25 +19,31 @@ import (
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/persistence"
+	"github.com/FlameInTheDark/neuropipe/internal/security"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 const (
 	defaultMaxRows  = 500
 	absoluteMaxRows = 10_000
+	pingTimeout     = 5 * time.Second
 )
 
 var parameterName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type Service struct {
 	store  *persistence.Store
+	vault  *security.Vault
 	mu     sync.Mutex
 	dbs    map[string]*sql.DB
 	closed bool
 }
 
-func New(store *persistence.Store) *Service {
-	return &Service{store: store, dbs: make(map[string]*sql.DB)}
+// New creates a database service. vault may be nil for SQLite-only deployments,
+// but Postgres/MySQL connections require it to resolve password references.
+func New(store *persistence.Store, vault *security.Vault) *Service {
+	return &Service{store: store, vault: vault, dbs: make(map[string]*sql.DB)}
 }
 
 func (s *Service) List(ctx context.Context) ([]domain.Database, error) {
@@ -45,12 +54,28 @@ func (s *Service) Get(ctx context.Context, id string) (domain.Database, error) {
 	return s.store.GetDatabase(ctx, strings.TrimSpace(id))
 }
 
-// Create makes a new SQLite file and registers it. Existing files are never overwritten.
+// BuildDatabase validates a SaveDatabaseRequest and returns a populated
+// domain.Database without persisting it. Used by TestConnection so the
+// "Test connection" button uses the same defaults as a real save.
+func (s *Service) BuildDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
+	return validateMetadata(request)
+}
+
+// Create registers a new database. For SQLite the file is created on disk;
+// for Postgres and MySQL the metadata is persisted and a connection is
+// opened and pinged.
 func (s *Service) Create(ctx context.Context, request domain.SaveDatabaseRequest) (domain.Database, error) {
 	item, err := validateMetadata(request)
 	if err != nil {
 		return domain.Database{}, err
 	}
+	if item.Driver == domain.DatabaseDriverSQLite {
+		return s.createSQLite(ctx, item)
+	}
+	return s.createNetwork(ctx, item, request.Password)
+}
+
+func (s *Service) createSQLite(ctx context.Context, item domain.Database) (domain.Database, error) {
 	if err := os.MkdirAll(filepath.Dir(item.Path), 0o700); err != nil {
 		return domain.Database{}, fmt.Errorf("create database directory: %w", err)
 	}
@@ -72,15 +97,45 @@ func (s *Service) Create(ctx context.Context, request domain.SaveDatabaseRequest
 		_ = os.Remove(item.Path)
 		return domain.Database{}, err
 	}
-	return created, nil
+	if err := s.store.UpdateDatabaseStatus(ctx, created.ID, domain.DatabaseStatusConnected); err != nil {
+		return domain.Database{}, err
+	}
+	return s.store.GetDatabase(ctx, created.ID)
 }
 
-// Register records an existing SQLite file without changing it.
+// createNetwork stores a Postgres or MySQL database row. If a password is
+// supplied it is written to the vault under a stable ref; otherwise the
+// existing ref is reused.
+func (s *Service) createNetwork(ctx context.Context, item domain.Database, password string) (domain.Database, error) {
+	if err := s.applyPassword(ctx, &item, password); err != nil {
+		return domain.Database{}, err
+	}
+	status, _ := s.TestConnection(ctx, item, password)
+	created, err := s.store.CreateDatabase(ctx, item)
+	if err != nil {
+		_ = s.deleteSecret(item.PasswordRef)
+		return domain.Database{}, err
+	}
+	if err := s.store.UpdateDatabaseStatus(ctx, created.ID, status); err != nil {
+		return domain.Database{}, err
+	}
+	return s.store.GetDatabase(ctx, created.ID)
+}
+
+// Register records an existing database without creating it. For SQLite the
+// file must already exist; for Postgres/MySQL a connection is opened and pinged.
 func (s *Service) Register(ctx context.Context, request domain.SaveDatabaseRequest) (domain.Database, error) {
 	item, err := validateMetadata(request)
 	if err != nil {
 		return domain.Database{}, err
 	}
+	if item.Driver == domain.DatabaseDriverSQLite {
+		return s.registerSQLite(ctx, item)
+	}
+	return s.createNetwork(ctx, item, request.Password)
+}
+
+func (s *Service) registerSQLite(ctx context.Context, item domain.Database) (domain.Database, error) {
 	info, err := os.Stat(item.Path)
 	if err != nil {
 		return domain.Database{}, fmt.Errorf("open database file: %w", err)
@@ -96,7 +151,10 @@ func (s *Service) Register(ctx context.Context, request domain.SaveDatabaseReque
 		_ = s.store.DeleteDatabase(context.Background(), created.ID)
 		return domain.Database{}, err
 	}
-	return created, nil
+	if err := s.store.UpdateDatabaseStatus(ctx, created.ID, domain.DatabaseStatusConnected); err != nil {
+		return domain.Database{}, err
+	}
+	return s.store.GetDatabase(ctx, created.ID)
 }
 
 func (s *Service) Update(ctx context.Context, request domain.SaveDatabaseRequest) (domain.Database, error) {
@@ -108,24 +166,36 @@ func (s *Service) Update(ctx context.Context, request domain.SaveDatabaseRequest
 		return domain.Database{}, fmt.Errorf("database ID is required")
 	}
 	item.ID = strings.TrimSpace(request.ID)
-	if _, err := os.Stat(item.Path); err != nil {
-		return domain.Database{}, fmt.Errorf("open database file: %w", err)
-	}
 	stored, err := s.store.GetDatabase(ctx, item.ID)
 	if err != nil {
 		return domain.Database{}, err
 	}
-	if stored.Path != item.Path {
+	if item.Driver == domain.DatabaseDriverSQLite {
+		if _, err := os.Stat(item.Path); err != nil {
+			return domain.Database{}, fmt.Errorf("open database file: %w", err)
+		}
+	}
+	if stored.Path != item.Path || stored.Driver != item.Driver {
 		s.closeConnection(item.ID)
+	}
+	if err := s.applyPassword(ctx, &item, request.Password); err != nil {
+		return domain.Database{}, err
 	}
 	updated, err := s.store.UpdateDatabase(ctx, item)
 	if err != nil {
 		return domain.Database{}, err
 	}
+	// Drop any cached connection so subsequent calls reopen with the new config.
+	if stored.PasswordRef != item.PasswordRef || stored.Host != item.Host || stored.Port != item.Port || stored.Database != item.Database || stored.Username != item.Username || stored.Schema != item.Schema || stored.SSLMode != item.SSLMode || stored.Charset != item.Charset {
+		s.closeConnection(item.ID)
+	}
 	if _, err := s.connection(ctx, updated.ID); err != nil {
 		return domain.Database{}, err
 	}
-	return updated, nil
+	if err := s.store.UpdateDatabaseStatus(ctx, updated.ID, domain.DatabaseStatusConnected); err != nil {
+		return domain.Database{}, err
+	}
+	return s.store.GetDatabase(ctx, updated.ID)
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {
@@ -133,40 +203,106 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("database ID is required")
 	}
+	// Look up the passwordRef first so we can purge the secret after the row
+	// is gone. A failed lookup is fine — we still attempt the delete below
+	// which will surface the canonical "not found" error to the caller.
+	item, _ := s.store.GetDatabase(ctx, id)
 	s.closeConnection(id)
-	return s.store.DeleteDatabase(ctx, id)
+	if err := s.store.DeleteDatabase(ctx, id); err != nil {
+		return err
+	}
+	_ = s.deleteSecret(item.PasswordRef)
+	return nil
 }
 
 func (s *Service) Inspect(ctx context.Context, id string) (domain.DatabaseSchema, error) {
-	db, err := s.connection(ctx, id)
+	db, item, err := s.connectionWithItem(ctx, id)
 	if err != nil {
 		return domain.DatabaseSchema{}, err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name COLLATE NOCASE`)
+	dialect := dialectFor(item.Driver)
+	names, err := dialect.InspectTables(ctx, db, item)
 	if err != nil {
-		return domain.DatabaseSchema{}, fmt.Errorf("inspect database tables: %w", err)
-	}
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			_ = rows.Close()
-			return domain.DatabaseSchema{}, fmt.Errorf("inspect database table: %w", err)
-		}
-		names = append(names, name)
-	}
-	if err := rows.Close(); err != nil {
-		return domain.DatabaseSchema{}, fmt.Errorf("inspect database tables: %w", err)
+		return domain.DatabaseSchema{}, err
 	}
 	schema := domain.DatabaseSchema{Tables: make([]domain.DatabaseTable, 0, len(names))}
 	for _, name := range names {
-		table, err := inspectTable(ctx, db, name)
+		table, err := dialect.InspectTable(ctx, db, item, name)
 		if err != nil {
 			return domain.DatabaseSchema{}, err
 		}
 		schema.Tables = append(schema.Tables, table)
 	}
 	return schema, nil
+}
+
+// Ping opens (or reuses) a connection, runs the dialect's ping query, and
+// persists the resulting status.
+func (s *Service) Ping(ctx context.Context, id string) (domain.DatabaseStatus, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.DatabaseStatusError, fmt.Errorf("database ID is required")
+	}
+	item, err := s.store.GetDatabase(ctx, id)
+	if err != nil {
+		_ = s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusError)
+		return domain.DatabaseStatusError, err
+	}
+	dialect := dialectFor(item.Driver)
+	secret, err := s.resolveSecret(item.PasswordRef)
+	if err != nil {
+		_ = s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusError)
+		return domain.DatabaseStatusError, err
+	}
+	db, err := dialect.Open(item, secret)
+	if err != nil {
+		_ = s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusError)
+		return domain.DatabaseStatusError, err
+	}
+	defer func() { _ = db.Close() }()
+	maxOpen, maxIdle, maxLifetime := dialect.PoolDefaults()
+	db.SetConnMaxLifetime(maxLifetime)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetMaxOpenConns(maxOpen)
+	pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		_ = s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusError)
+		return domain.DatabaseStatusError, err
+	}
+	if err := pingQueryRow(pingCtx, db, dialect.PingQuery()); err != nil {
+		_ = s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusError)
+		return domain.DatabaseStatusError, err
+	}
+	if err := s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusConnected); err != nil {
+		return domain.DatabaseStatusConnected, err
+	}
+	return domain.DatabaseStatusConnected, nil
+}
+
+// TestConnection opens a transient connection with the supplied config and
+// password without persisting any state. Used by the "Test connection"
+// button in the create modal.
+func (s *Service) TestConnection(ctx context.Context, item domain.Database, password string) (domain.DatabaseStatus, error) {
+	dialect := dialectFor(item.Driver)
+	db, err := dialect.Open(item, password)
+	if err != nil {
+		return domain.DatabaseStatusError, err
+	}
+	defer func() { _ = db.Close() }()
+	maxOpen, maxIdle, maxLifetime := dialect.PoolDefaults()
+	db.SetConnMaxLifetime(maxLifetime)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetMaxOpenConns(maxOpen)
+	pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		return domain.DatabaseStatusError, err
+	}
+	if err := pingQueryRow(pingCtx, db, dialect.PingQuery()); err != nil {
+		return domain.DatabaseStatusError, err
+	}
+	return domain.DatabaseStatusConnected, nil
 }
 
 func (s *Service) ExecuteSQL(ctx context.Context, request domain.SQLRequest) (domain.SQLResult, error) {
@@ -283,43 +419,61 @@ func (s *Service) Close() error {
 	return first
 }
 
+// connection returns the cached *sql.DB for id, opening one on first use.
 func (s *Service) connection(ctx context.Context, id string) (*sql.DB, error) {
+	db, _, err := s.connectionWithItem(ctx, id)
+	return db, err
+}
+
+// connectionWithItem is the shared open-or-reuse path. It returns the cached
+// *sql.DB along with the domain.Database metadata so callers can dispatch to
+// dialect-specific helpers (InspectTables, InspectTable).
+func (s *Service) connectionWithItem(ctx context.Context, id string) (*sql.DB, domain.Database, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return nil, fmt.Errorf("database ID is required")
+		return nil, domain.Database{}, fmt.Errorf("database ID is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return nil, fmt.Errorf("database service is closed")
+		return nil, domain.Database{}, fmt.Errorf("database service is closed")
 	}
 	if db := s.dbs[id]; db != nil {
-		return db, nil
+		item, err := s.store.GetDatabase(ctx, id)
+		if err != nil {
+			return nil, domain.Database{}, err
+		}
+		return db, item, nil
 	}
 	item, err := s.store.GetDatabase(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, domain.Database{}, err
 	}
-	db, err := sql.Open("sqlite3", "file:"+filepath.ToSlash(item.Path)+"?_foreign_keys=on&_busy_timeout=5000")
+	dialect := dialectFor(item.Driver)
+	secret, err := s.resolveSecret(item.PasswordRef)
 	if err != nil {
-		return nil, fmt.Errorf("open registered database: %w", err)
+		return nil, domain.Database{}, err
 	}
-	db.SetConnMaxLifetime(0)
-	db.SetMaxIdleConns(1)
-	db.SetMaxOpenConns(4)
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	db, err := dialect.Open(item, secret)
+	if err != nil {
+		return nil, domain.Database{}, fmt.Errorf("open registered database: %w", err)
+	}
+	maxOpen, maxIdle, maxLifetime := dialect.PoolDefaults()
+	db.SetConnMaxLifetime(maxLifetime)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetMaxOpenConns(maxOpen)
+	pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("open registered database: %w", err)
+		return nil, domain.Database{}, fmt.Errorf("open registered database: %w", err)
 	}
-	var version string
-	if err := db.QueryRowContext(pingCtx, `SELECT sqlite_version()`).Scan(&version); err != nil {
+	if err := pingQueryRow(pingCtx, db, dialect.PingQuery()); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("validate registered database: %w", err)
+		return nil, domain.Database{}, fmt.Errorf("validate registered database: %w", err)
 	}
 	s.dbs[id] = db
-	return db, nil
+	return db, item, nil
 }
 
 func (s *Service) closeConnection(id string) {
@@ -331,78 +485,131 @@ func (s *Service) closeConnection(id string) {
 	}
 }
 
+// resolveSecret returns the plaintext password stored under ref. If the
+// service has no vault or ref is empty, the empty string is returned so that
+// connections without passwords still proceed.
+func (s *Service) resolveSecret(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || s.vault == nil {
+		return "", nil
+	}
+	secret, err := s.vault.Get(ref)
+	if err != nil {
+		return "", fmt.Errorf("load database password: %w", err)
+	}
+	return secret, nil
+}
+
+// applyPassword writes a new password (if any) to the vault and updates
+// item.PasswordRef. If password is empty the existing ref is preserved.
+func (s *Service) applyPassword(_ context.Context, item *domain.Database, password string) error {
+	password = strings.TrimSpace(password)
+	if password == "" {
+		return nil
+	}
+	if s.vault == nil {
+		return fmt.Errorf("database password storage is unavailable")
+	}
+	ref := strings.TrimSpace(item.PasswordRef)
+	if ref == "" {
+		ref = "dbpw:" + uuid.NewString()
+		item.PasswordRef = ref
+	}
+	if err := s.vault.Put(ref, password); err != nil {
+		return fmt.Errorf("store database password: %w", err)
+	}
+	return nil
+}
+
+// deleteSecret removes the password entry for ref. Errors are swallowed
+// because the database row deletion has already succeeded by the time we call
+// this and we don't want to leak dangling secrets, but we also don't want to
+// block the user-facing Delete call.
+func (s *Service) deleteSecret(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || s.vault == nil {
+		return nil
+	}
+	return s.vault.Delete(ref)
+}
+
+// pingQueryRow runs a single-row, single-column statement used to verify
+// the connection is fully usable beyond a bare TCP ping. A nil error from
+// sql.ErrNoRows is treated as success.
+func pingQueryRow(ctx context.Context, db *sql.DB, query string) error {
+	var ignored any
+	if err := db.QueryRowContext(ctx, query).Scan(&ignored); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return nil
+}
+
 func validateMetadata(request domain.SaveDatabaseRequest) (domain.Database, error) {
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		return domain.Database{}, fmt.Errorf("database name is required")
 	}
-	path := strings.TrimSpace(request.Path)
-	if path == "" {
-		return domain.Database{}, fmt.Errorf("database path is required")
+	driver := request.Driver
+	if driver == "" {
+		driver = domain.DatabaseDriverSQLite
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return domain.Database{}, fmt.Errorf("resolve database path: %w", err)
+	item := domain.Database{
+		Name:        name,
+		Driver:      driver,
+		Host:        strings.TrimSpace(request.Host),
+		Port:        request.Port,
+		Database:    strings.TrimSpace(request.Database),
+		Username:    strings.TrimSpace(request.Username),
+		PasswordRef: strings.TrimSpace(request.PasswordRef),
+		Schema:      strings.TrimSpace(request.Schema),
+		SSLMode:     strings.TrimSpace(request.SSLMode),
+		Charset:     strings.TrimSpace(request.Charset),
+		Options:     strings.TrimSpace(request.Options),
 	}
-	return domain.Database{Name: name, Path: filepath.Clean(absolute)}, nil
-}
-
-func inspectTable(ctx context.Context, db *sql.DB, name string) (domain.DatabaseTable, error) {
-	table := domain.DatabaseTable{Name: name, Columns: []domain.DatabaseColumn{}, Indexes: []domain.DatabaseIndex{}}
-	rows, err := db.QueryContext(ctx, `SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?) ORDER BY cid`, name)
-	if err != nil {
-		return table, fmt.Errorf("inspect table %q columns: %w", name, err)
-	}
-	for rows.Next() {
-		var column domain.DatabaseColumn
-		var notNull, primary int
-		var defaultValue sql.NullString
-		if err := rows.Scan(&column.Name, &column.DataType, &notNull, &defaultValue, &primary); err != nil {
-			_ = rows.Close()
-			return table, fmt.Errorf("inspect table %q column: %w", name, err)
+	switch driver {
+	case domain.DatabaseDriverSQLite:
+		path := strings.TrimSpace(request.Path)
+		if path == "" {
+			return domain.Database{}, fmt.Errorf("database path is required")
 		}
-		column.Nullable, column.PrimaryKey = notNull == 0, primary > 0
-		if defaultValue.Valid {
-			column.Default = &defaultValue.String
-		}
-		table.Columns = append(table.Columns, column)
-	}
-	if err := rows.Close(); err != nil {
-		return table, fmt.Errorf("inspect table %q columns: %w", name, err)
-	}
-	indexes, err := db.QueryContext(ctx, `SELECT name, "unique" FROM pragma_index_list(?) ORDER BY name`, name)
-	if err != nil {
-		return table, fmt.Errorf("inspect table %q indexes: %w", name, err)
-	}
-	for indexes.Next() {
-		var index domain.DatabaseIndex
-		var unique int
-		if err := indexes.Scan(&index.Name, &unique); err != nil {
-			_ = indexes.Close()
-			return table, fmt.Errorf("inspect table %q index: %w", name, err)
-		}
-		index.Unique = unique != 0
-		columns, err := db.QueryContext(ctx, `SELECT name FROM pragma_index_info(?) ORDER BY seqno`, index.Name)
+		absolute, err := filepath.Abs(path)
 		if err != nil {
-			_ = indexes.Close()
-			return table, fmt.Errorf("inspect index %q: %w", index.Name, err)
+			return domain.Database{}, fmt.Errorf("resolve database path: %w", err)
 		}
-		for columns.Next() {
-			var column string
-			if err := columns.Scan(&column); err != nil {
-				_ = columns.Close()
-				_ = indexes.Close()
-				return table, fmt.Errorf("inspect index %q column: %w", index.Name, err)
-			}
-			index.Columns = append(index.Columns, column)
+		item.Path = filepath.Clean(absolute)
+	case domain.DatabaseDriverPostgres:
+		if item.Host == "" {
+			return domain.Database{}, fmt.Errorf("database host is required")
 		}
-		_ = columns.Close()
-		table.Indexes = append(table.Indexes, index)
+		if item.Database == "" {
+			return domain.Database{}, fmt.Errorf("database name is required")
+		}
+		if item.Port == 0 {
+			item.Port = 5432
+		}
+		if item.SSLMode == "" {
+			item.SSLMode = "prefer"
+		}
+		if item.Schema == "" {
+			item.Schema = "public"
+		}
+	case domain.DatabaseDriverMySQL:
+		if item.Host == "" {
+			return domain.Database{}, fmt.Errorf("database host is required")
+		}
+		if item.Database == "" {
+			return domain.Database{}, fmt.Errorf("database name is required")
+		}
+		if item.Port == 0 {
+			item.Port = 3306
+		}
+		if item.Charset == "" {
+			item.Charset = "utf8mb4"
+		}
+	default:
+		return domain.Database{}, fmt.Errorf("unsupported database driver %q", driver)
 	}
-	if err := indexes.Close(); err != nil {
-		return table, fmt.Errorf("inspect table %q indexes: %w", name, err)
-	}
-	return table, nil
+	return item, nil
 }
 
 func query(ctx context.Context, executor sqlExecutor, statement string, args []any, limit int) (domain.SQLResult, error) {
@@ -441,6 +648,8 @@ func query(ctx context.Context, executor sqlExecutor, statement string, args []a
 	return result, nil
 }
 
+// sqliteArgument normalises parameter values into JSON-safe primitives
+// accepted by every supported driver. Despite the name it is dialect-neutral.
 func sqliteArgument(value any) (any, error) {
 	switch value := value.(type) {
 	case nil, string, bool, int64, float64, []byte:
@@ -490,9 +699,178 @@ func rowLimit(value int) int {
 	return value
 }
 
+// queryStatement returns true when the statement should be run as a query
+// rather than an exec. A statement is treated as a query when it begins with
+// SELECT, PRAGMA, EXPLAIN, WITH, or VALUES, or when an INSERT/UPDATE/DELETE
+// (or PostgreSQL UPSERT-style INSERT ... ON CONFLICT) statement contains a
+// top-level RETURNING clause.
 func queryStatement(statement string) bool {
-	fields := strings.Fields(strings.ToUpper(statement))
-	return len(fields) > 0 && (fields[0] == "SELECT" || fields[0] == "PRAGMA" || fields[0] == "EXPLAIN" || fields[0] == "WITH")
+	body := stripSQLLiterals(statement)
+	upper := strings.ToUpper(body)
+	fields := strings.Fields(upper)
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "SELECT", "PRAGMA", "EXPLAIN", "WITH", "VALUES":
+		return true
+	case "INSERT", "UPDATE", "DELETE", "MERGE":
+		return hasTopLevelKeyword(upper, "RETURNING")
+	}
+	return false
+}
+
+// stripSQLLiterals returns the statement with single-quoted, double-quoted,
+// backtick-quoted, and line/block comments replaced by spaces so that
+// keyword detection is not confused by string contents. Dollar-quoted
+// Postgres strings ($$...$$) are also stripped.
+func stripSQLLiterals(statement string) string {
+	var builder strings.Builder
+	builder.Grow(len(statement))
+	inSingle, inDouble, inBacktick, inLineComment, inBlockComment := false, false, false, false, false
+	runes := []rune(statement)
+	for index := 0; index < len(runes); index++ {
+		char := runes[index]
+		next := rune(0)
+		if index+1 < len(runes) {
+			next = runes[index+1]
+		}
+		switch {
+		case inLineComment:
+			if char == '\n' {
+				inLineComment = false
+				builder.WriteRune(char)
+			} else {
+				builder.WriteRune(' ')
+			}
+		case inBlockComment:
+			if char == '*' && next == '/' {
+				inBlockComment = false
+				index++
+				builder.WriteString("  ")
+			} else {
+				builder.WriteRune(' ')
+			}
+		case inSingle:
+			if char == '\'' {
+				if next == '\'' {
+					index++
+					builder.WriteString("  ")
+				} else {
+					inSingle = false
+					builder.WriteRune(' ')
+				}
+			} else {
+				builder.WriteRune(' ')
+			}
+		case inDouble:
+			if char == '"' {
+				if next == '"' {
+					index++
+					builder.WriteString("  ")
+				} else {
+					inDouble = false
+					builder.WriteRune(' ')
+				}
+			} else {
+				builder.WriteRune(' ')
+			}
+		case inBacktick:
+			if char == '`' {
+				if next == '`' {
+					index++
+					builder.WriteString("  ")
+				} else {
+					inBacktick = false
+					builder.WriteRune(' ')
+				}
+			} else {
+				builder.WriteRune(' ')
+			}
+		default:
+			switch {
+			case char == '-' && next == '-':
+				inLineComment = true
+				index++
+				builder.WriteString("  ")
+			case char == '/' && next == '*':
+				inBlockComment = true
+				index++
+				builder.WriteString("  ")
+			case char == '\'':
+				inSingle = true
+				builder.WriteRune(' ')
+			case char == '"':
+				inDouble = true
+				builder.WriteRune(' ')
+			case char == '`':
+				inBacktick = true
+				builder.WriteRune(' ')
+			default:
+				builder.WriteRune(char)
+			}
+		}
+	}
+	// Best-effort Postgres dollar-quote stripping ($$...$$). We replace the
+	// contents with spaces so RETURNING outside the literal still matches.
+	return stripDollarQuotes(builder.String())
+}
+
+// stripDollarQuotes replaces the body of Postgres $$...$$ (and $tag$...$tag$)
+// string literals with spaces. Tag matching is greedy on the leading
+// $...$ delimiter.
+func stripDollarQuotes(text string) string {
+	var builder strings.Builder
+	builder.Grow(len(text))
+	runes := []rune(text)
+	index := 0
+	for index < len(runes) {
+		if runes[index] != '$' {
+			builder.WriteRune(runes[index])
+			index++
+			continue
+		}
+		// Capture the tag: $tag$
+		start := index
+		index++
+		for index < len(runes) && runes[index] != '$' {
+			index++
+		}
+		if index >= len(runes) {
+			builder.WriteString(string(runes[start:]))
+			return builder.String()
+		}
+		index++ // consume closing $ of opener
+		tag := string(runes[start:index])
+		closeTag := tag
+		end := index
+		found := false
+		for end+len(closeTag) <= len(runes) {
+			if string(runes[end:end+len(closeTag)]) == closeTag {
+				found = true
+				break
+			}
+			end++
+		}
+		if !found {
+			builder.WriteString(string(runes[start:index]))
+			continue
+		}
+		// Replace body (including delimiters) with spaces, preserving length.
+		for count := 0; count < end+len(closeTag)-start; count++ {
+			builder.WriteRune(' ')
+		}
+		index = end + len(closeTag)
+	}
+	return builder.String()
+}
+
+// hasTopLevelKeyword reports whether the keyword occurs as a top-level token
+// in upper. The input is expected to have literals/comments stripped already.
+func hasTopLevelKeyword(upper, keyword string) bool {
+	upper = " " + upper + " "
+	target := " " + keyword + " "
+	return strings.Contains(upper, target)
 }
 
 func validateSingleStatement(statement string) error {

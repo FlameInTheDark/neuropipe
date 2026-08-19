@@ -258,7 +258,19 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS databases (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  path TEXT NOT NULL UNIQUE,
+  driver TEXT NOT NULL DEFAULT 'sqlite',
+  path TEXT NOT NULL DEFAULT '',
+  host TEXT NOT NULL DEFAULT '',
+  port INTEGER NOT NULL DEFAULT 0,
+  database_name TEXT NOT NULL DEFAULT '',
+  username TEXT NOT NULL DEFAULT '',
+  password_ref TEXT NOT NULL DEFAULT '',
+  schema_name TEXT NOT NULL DEFAULT '',
+  ssl_mode TEXT NOT NULL DEFAULT '',
+  charset TEXT NOT NULL DEFAULT '',
+  options TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'unknown',
+  last_ping_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -433,6 +445,9 @@ CREATE TABLE IF NOT EXISTS metric_resource_rollups (
 	if err := s.ensureTriggerNodeMetadataColumns(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureDatabaseMultiDialectColumns(ctx); err != nil {
+		return err
+	}
 	if err := s.repairV3LegacyMarkers(ctx); err != nil {
 		return err
 	}
@@ -568,6 +583,51 @@ func (s *Store) ensureTriggerNodeMetadataColumns(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE trigger_bindings ADD COLUMN %s %s", column.name, column.definition)); err != nil {
 			return fmt.Errorf("add trigger_bindings.%s column: %w", column.name, err)
 		}
+	}
+	return nil
+}
+
+// ensureDatabaseMultiDialectColumns adds the new multi-dialect columns to the
+// databases table for existing installations. Fresh installs get them from the
+// CREATE TABLE statement; this only handles the ALTER TABLE path.
+func (s *Store) ensureDatabaseMultiDialectColumns(ctx context.Context) error {
+	// First check if the old schema exists (path UNIQUE, no driver column)
+	var driverExists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('databases') WHERE name = 'driver'`).Scan(&driverExists); err != nil {
+		return fmt.Errorf("inspect databases.driver migration: %w", err)
+	}
+	if driverExists > 0 {
+		return nil // already migrated
+	}
+	// Drop the old UNIQUE constraint on path by recreating the table.
+	// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate.
+	if _, err := s.db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS databases_new (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  driver TEXT NOT NULL DEFAULT 'sqlite',
+  path TEXT NOT NULL DEFAULT '',
+  host TEXT NOT NULL DEFAULT '',
+  port INTEGER NOT NULL DEFAULT 0,
+  database_name TEXT NOT NULL DEFAULT '',
+  username TEXT NOT NULL DEFAULT '',
+  password_ref TEXT NOT NULL DEFAULT '',
+  schema_name TEXT NOT NULL DEFAULT '',
+  ssl_mode TEXT NOT NULL DEFAULT '',
+  charset TEXT NOT NULL DEFAULT '',
+  options TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'unknown',
+  last_ping_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+INSERT INTO databases_new (id, name, driver, path, created_at, updated_at)
+SELECT id, name, 'sqlite', path, created_at, updated_at FROM databases;
+DROP TABLE databases;
+ALTER TABLE databases_new RENAME TO databases;
+CREATE INDEX IF NOT EXISTS databases_name ON databases(name COLLATE NOCASE);
+`); err != nil {
+		return fmt.Errorf("migrate databases table to multi-dialect: %w", err)
 	}
 	return nil
 }

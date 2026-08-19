@@ -1,46 +1,860 @@
 {
   "documents": [
-    {"id":"getting-started/overview","title":"Overview","summary":"What Neuropipe is and how local automation is organised.","category":["Getting started"],"path":"getting-started/overview.md"},
-    {"id":"getting-started/first-automation","title":"Your first automation","summary":"Build, test, and publish a small Blueprint pipeline.","category":["Getting started"],"path":"getting-started/first-automation.md"},
-    {"id":"getting-started/providers-models","title":"Providers and models","summary":"Choose and run a local or compatible model provider.","category":["Getting started"],"path":"getting-started/providers-models.md"},
-    {"id":"concepts/blueprint-exec-data","title":"Blueprint exec and data pins","summary":"How control flow, data values, and per-run caching work.","category":["Core concepts"],"path":"concepts/blueprint-exec-data.md"},
-    {"id":"concepts/variables-functions","title":"Variables and functions","summary":"Share values within one run and package reusable graph logic.","category":["Core concepts"],"path":"concepts/variables-functions.md"},
-    {"id":"concepts/publishing-trust","title":"Publishing and trust","summary":"Why drafts, revisions, and capability grants are separate.","category":["Core concepts"],"path":"concepts/publishing-trust.md"},
-    {"id":"concepts/runs-and-queues","title":"Runs and queues","summary":"Execution state, cancellation, and local model concurrency.","category":["Core concepts"],"path":"concepts/runs-and-queues.md"},
-    {"id":"concepts/chat","title":"Chat","summary":"Model conversations and chat-triggered pipelines.","category":["Core concepts"],"path":"concepts/chat.md"},
-    {"id":"concepts/reports","title":"Reports","summary":"Create and browse local Markdown reports.","category":["Core concepts"],"path":"concepts/reports.md"},
-    {"id":"concepts/api-webhooks","title":"API and webhooks","summary":"Safely enable the optional local HTTP API.","category":["Core concepts"],"path":"concepts/api-webhooks.md"},
-    {"id":"concepts/metrics","title":"Metrics and privacy","summary":"Understand local operational analytics, retention, and cost estimates.","category":["Core concepts"],"path":"concepts/metrics.md"},
-    {"id":"guides/common-pipeline","title":"A common pipeline","summary":"Fetch, inspect, and report on external data.","category":["Guides"],"path":"guides/common-pipeline.md"},
-    {"id":"guides/ai-workflows","title":"AI workflows","summary":"Use a model as a constrained decision maker.","category":["Guides"],"path":"guides/ai-workflows.md"},
-    {"id":"guides/llm-tool-functions","title":"LLM tool functions","summary":"Build typed, model-facing functions and connect them safely to an Agent.","category":["Guides","AI"],"path":"guides/llm-tool-functions.md"},
-    {"id":"guides/javascript-node","title":"JavaScript node","summary":"Write typed, bounded JavaScript steps with deliberate local access.","category":["Guides","Code"],"path":"guides/javascript-node.md"},
-        {"id":"guides/twitch-eventsub","title":"Twitch EventSub","summary":"Connect Twitch identities and build trusted EventSub chat automations.","category":["Guides","Triggers"],"path":"guides/twitch-eventsub.md","nodeTypes":["twitch:event","twitch:send_chat_message"]},
-    {"id":"guides/scheduling-local-actions","title":"Schedules and local actions","summary":"Run a trusted task on a schedule with deliberate approvals.","category":["Guides"],"path":"guides/scheduling-local-actions.md"},
-    {"id":"extensions/plugin-system","title":"Plugin system","summary":"Local plugin bundles, validation, documentation, and the planned Emerald-style runtime.","category":["Extensions","Plugins"],"path":"extensions/plugin-system.md"},
-    {"id":"extensions/first-plugin","title":"Build your first plugin","summary":"Create, install, rediscover, and document a minimal local plugin bundle.","category":["Extensions","Plugins"],"path":"extensions/first-plugin.md"},
-    {"id":"reference/triggers","title":"Trigger nodes","summary":"Start a pipeline from a button, schedule, event, webhook, or chat.","category":["Node reference","Triggers"],"path":"reference/triggers.md","nodeTypes":["trigger:button","trigger:cron","trigger:file_watch","trigger:hotkey","trigger:webhook","trigger:chat"]},
-    {"id":"reference/data","title":"Data nodes","summary":"Create, inspect, transform, and store typed values.","category":["Node reference","Data"],"path":"reference/data.md","nodeTypes":["data:constant","data:format_text","data:get_field","data:build_object","data:break_object","data:cast","data:json_query","data:equals","data:greater_than","data:json_parse","data:get_variable","data:get_global_variable","data:reroute"]},
-        {"id":"reference/text","title":"Text nodes","summary":"Transform exact Text values without implicit conversion.","category":["Node reference","Data"],"path":"reference/text.md","nodeTypes":["text:split","text:join","text:contains","text:replace","text:trim","text:change_case","text:starts_with","text:ends_with","text:index_of","text:substring"]},
-    {"id":"reference/flow","title":"Flow nodes","summary":"Control execution, loops, routing, variables, and returns.","category":["Node reference","Flow"],"path":"reference/flow.md","nodeTypes":["flow:branch","flow:sequence","flow:for_each","flow:for_loop","flow:while","flow:switch","flow:do_once","flow:gate","flow:flip_flop","flow:multi_gate","flow:reroute","flow:break","flow:set_variable","flow:set_global_variable","flow:return"]},
-    {"id":"reference/actions","title":"Action nodes","summary":"Perform HTTP, reports, and pipeline actions after an exec pulse.","category":["Node reference","Actions"],"path":"reference/actions.md","nodeTypes":["action:http","action:report","action:subpipeline"]},
-    {"id":"reference/local","title":"Local nodes","summary":"List directories, read files, run commands, notify Windows, and use Git.","category":["Node reference","Local"],"path":"reference/local.md","nodeTypes":["action:list_directory","action:file_read","action:file_write","action:terminal","action:notification","action:git"]},
-    {"id":"reference/ai","title":"AI nodes","summary":"Prompt, extract, route, summarize, and run scoped agents.","category":["Node reference","AI"],"path":"reference/ai.md","nodeTypes":["llm:prompt","llm:extract","llm:boolean","llm:choice","llm:summarize","llm:agent","llm:coding_agent"]},
-    {"id":"reference/chat","title":"Chat nodes","summary":"Receive chat turns, reply in Markdown, and update activity status.","category":["Node reference","Chat"],"path":"reference/chat.md","nodeTypes":["data:chat_history","action:chat_reply","action:chat_status"]},
-    {"id":"reference/functions","title":"Function nodes","summary":"Define stable pure and impure function boundaries.","category":["Node reference","Functions"],"path":"reference/functions.md","nodeTypes":["function:entry","function:return","function:input","function:output"]},
-    {"id":"reference/canvas","title":"Canvas nodes","summary":"Annotate a graph without changing execution.","category":["Node reference","Canvas"],"path":"reference/canvas.md","nodeTypes":["visual:comment"]}
+    {
+      "id": "getting-started/overview",
+      "title": "Overview",
+      "summary": "What Neuropipe is and how local automation is organised.",
+      "category": [
+        "Getting started"
+      ],
+      "path": "getting-started/overview.md"
+    },
+    {
+      "id": "getting-started/first-automation",
+      "title": "Your first automation",
+      "summary": "Build, test, and publish a small Blueprint pipeline.",
+      "category": [
+        "Getting started"
+      ],
+      "path": "getting-started/first-automation.md"
+    },
+    {
+      "id": "getting-started/providers-models",
+      "title": "Providers and models",
+      "summary": "Choose and run a local or compatible model provider.",
+      "category": [
+        "Getting started"
+      ],
+      "path": "getting-started/providers-models.md"
+    },
+    {
+      "id": "concepts/blueprint-exec-data",
+      "title": "Blueprint exec and data pins",
+      "summary": "How control flow, data values, and per-run caching work.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/blueprint-exec-data.md"
+    },
+    {
+      "id": "concepts/variables-functions",
+      "title": "Variables and functions",
+      "summary": "Share values within one run and package reusable graph logic.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/variables-functions.md"
+    },
+    {
+      "id": "concepts/publishing-trust",
+      "title": "Publishing and trust",
+      "summary": "Why drafts, revisions, and capability grants are separate.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/publishing-trust.md"
+    },
+    {
+      "id": "concepts/runs-and-queues",
+      "title": "Runs and queues",
+      "summary": "Execution state, cancellation, and local model concurrency.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/runs-and-queues.md"
+    },
+    {
+      "id": "concepts/chat",
+      "title": "Chat",
+      "summary": "Model conversations and chat-triggered pipelines.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/chat.md"
+    },
+    {
+      "id": "concepts/reports",
+      "title": "Reports",
+      "summary": "Create and browse local Markdown reports.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/reports.md"
+    },
+    {
+      "id": "concepts/api-webhooks",
+      "title": "API and webhooks",
+      "summary": "Safely enable the optional local HTTP API.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/api-webhooks.md"
+    },
+    {
+      "id": "concepts/metrics",
+      "title": "Metrics and privacy",
+      "summary": "Understand local operational analytics, retention, and cost estimates.",
+      "category": [
+        "Core concepts"
+      ],
+      "path": "concepts/metrics.md"
+    },
+    {
+      "id": "guides/common-pipeline",
+      "title": "A common pipeline",
+      "summary": "Fetch, inspect, and report on external data.",
+      "category": [
+        "Guides"
+      ],
+      "path": "guides/common-pipeline.md"
+    },
+    {
+      "id": "guides/ai-workflows",
+      "title": "AI workflows",
+      "summary": "Use a model as a constrained decision maker.",
+      "category": [
+        "Guides"
+      ],
+      "path": "guides/ai-workflows.md"
+    },
+    {
+      "id": "guides/llm-tool-functions",
+      "title": "LLM tool functions",
+      "summary": "Build typed, model-facing functions and connect them safely to an Agent.",
+      "category": [
+        "Guides",
+        "AI"
+      ],
+      "path": "guides/llm-tool-functions.md"
+    },
+    {
+      "id": "guides/javascript-node",
+      "title": "JavaScript node",
+      "summary": "Write typed, bounded JavaScript steps with deliberate local access.",
+      "category": [
+        "Guides",
+        "Code"
+      ],
+      "path": "guides/javascript-node.md"
+    },
+    {
+      "id": "guides/twitch-eventsub",
+      "title": "Twitch EventSub",
+      "summary": "Connect Twitch identities and build trusted EventSub chat automations.",
+      "category": [
+        "Guides",
+        "Triggers"
+      ],
+      "path": "guides/twitch-eventsub.md",
+      "nodeTypes": [
+        "twitch:event",
+        "twitch:send_chat_message"
+      ]
+    },
+    {
+      "id": "guides/scheduling-local-actions",
+      "title": "Schedules and local actions",
+      "summary": "Run a trusted task on a schedule with deliberate approvals.",
+      "category": [
+        "Guides"
+      ],
+      "path": "guides/scheduling-local-actions.md"
+    },
+    {
+      "id": "extensions/plugin-system",
+      "title": "Plugin system",
+      "summary": "Local plugin bundles, validation, documentation, and the planned Emerald-style runtime.",
+      "category": [
+        "Extensions",
+        "Plugins"
+      ],
+      "path": "extensions/plugin-system.md"
+    },
+    {
+      "id": "extensions/first-plugin",
+      "title": "Build your first plugin",
+      "summary": "Create, install, rediscover, and document a minimal local plugin bundle.",
+      "category": [
+        "Extensions",
+        "Plugins"
+      ],
+      "path": "extensions/first-plugin.md"
+    },
+    {
+      "id": "reference/triggers",
+      "title": "Trigger nodes",
+      "summary": "Start a pipeline from a button, schedule, event, webhook, or chat.",
+      "category": [
+        "Node reference",
+        "Triggers"
+      ],
+      "path": "reference/triggers.md",
+      "nodeTypes": [
+        "trigger:button",
+        "trigger:cron",
+        "trigger:file_watch",
+        "trigger:hotkey",
+        "trigger:webhook",
+        "trigger:chat"
+      ]
+    },
+    {
+      "id": "reference/data",
+      "title": "Data nodes",
+      "summary": "Create, inspect, transform, and store typed values.",
+      "category": [
+        "Node reference",
+        "Data"
+      ],
+      "path": "reference/data.md",
+      "nodeTypes": [
+        "data:constant",
+        "data:format_text",
+        "data:get_field",
+        "data:build_object",
+        "data:break_object",
+        "data:cast",
+        "data:json_query",
+        "data:equals",
+        "data:greater_than",
+        "data:json_parse",
+        "data:get_variable",
+        "data:get_global_variable",
+        "data:reroute"
+      ]
+    },
+    {
+      "id": "reference/text",
+      "title": "Text nodes",
+      "summary": "Transform exact Text values without implicit conversion.",
+      "category": [
+        "Node reference",
+        "Data"
+      ],
+      "path": "reference/text.md",
+      "nodeTypes": [
+        "text:split",
+        "text:join",
+        "text:contains",
+        "text:replace",
+        "text:trim",
+        "text:change_case",
+        "text:starts_with",
+        "text:ends_with",
+        "text:index_of",
+        "text:substring"
+      ]
+    },
+    {
+      "id": "reference/flow",
+      "title": "Flow nodes",
+      "summary": "Control execution, loops, routing, variables, and returns.",
+      "category": [
+        "Node reference",
+        "Flow"
+      ],
+      "path": "reference/flow.md",
+      "nodeTypes": [
+        "flow:branch",
+        "flow:sequence",
+        "flow:for_each",
+        "flow:for_loop",
+        "flow:while",
+        "flow:switch",
+        "flow:do_once",
+        "flow:gate",
+        "flow:flip_flop",
+        "flow:multi_gate",
+        "flow:reroute",
+        "flow:break",
+        "flow:set_variable",
+        "flow:set_global_variable",
+        "flow:return"
+      ]
+    },
+    {
+      "id": "reference/actions",
+      "title": "Action nodes",
+      "summary": "Perform HTTP, reports, and pipeline actions after an exec pulse.",
+      "category": [
+        "Node reference",
+        "Actions"
+      ],
+      "path": "reference/actions.md",
+      "nodeTypes": [
+        "action:http",
+        "action:report",
+        "action:subpipeline"
+      ]
+    },
+    {
+      "id": "reference/local",
+      "title": "Local nodes",
+      "summary": "List directories, read files, run commands, notify Windows, and use Git.",
+      "category": [
+        "Node reference",
+        "Local"
+      ],
+      "path": "reference/local.md",
+      "nodeTypes": [
+        "action:list_directory",
+        "action:file_read",
+        "action:file_write",
+        "action:terminal",
+        "action:notification",
+        "action:git"
+      ]
+    },
+    {
+      "id": "reference/ai",
+      "title": "AI nodes",
+      "summary": "Prompt, extract, route, summarize, and run scoped agents.",
+      "category": [
+        "Node reference",
+        "AI"
+      ],
+      "path": "reference/ai.md",
+      "nodeTypes": [
+        "llm:prompt",
+        "llm:extract",
+        "llm:boolean",
+        "llm:choice",
+        "llm:summarize",
+        "llm:agent",
+        "llm:coding_agent"
+      ]
+    },
+    {
+      "id": "reference/chat",
+      "title": "Chat nodes",
+      "summary": "Receive chat turns, reply in Markdown, and update activity status.",
+      "category": [
+        "Node reference",
+        "Chat"
+      ],
+      "path": "reference/chat.md",
+      "nodeTypes": [
+        "data:chat_history",
+        "action:chat_reply",
+        "action:chat_status"
+      ]
+    },
+    {
+      "id": "reference/functions",
+      "title": "Function nodes",
+      "summary": "Define stable pure and impure function boundaries.",
+      "category": [
+        "Node reference",
+        "Functions"
+      ],
+      "path": "reference/functions.md",
+      "nodeTypes": [
+        "function:entry",
+        "function:return",
+        "function:input",
+        "function:output"
+      ]
+    },
+    {
+      "id": "reference/canvas",
+      "title": "Canvas nodes",
+      "summary": "Annotate a graph without changing execution.",
+      "category": [
+        "Node reference",
+        "Canvas"
+      ],
+      "path": "reference/canvas.md",
+      "nodeTypes": [
+        "visual:comment"
+      ]
+    },
+    {
+      "id": "reference/files",
+      "title": "File nodes",
+      "summary": "Read, write, copy, move, rename, and check files.",
+      "category": [
+        "Node reference",
+        "Files"
+      ],
+      "path": "reference/files.md",
+      "nodeTypes": [
+        "action:file_read",
+        "action:file_write",
+        "action:file_exists",
+        "action:wait_for_file",
+        "action:copy_file",
+        "action:move_file",
+        "action:delete_file",
+        "action:rename_file",
+        "action:file_to_base64",
+        "action:base64_to_file"
+      ]
+    },
+    {
+      "id": "reference/folders",
+      "title": "Folder nodes",
+      "summary": "List, copy, move, rename, and check folders.",
+      "category": [
+        "Node reference",
+        "Folders"
+      ],
+      "path": "reference/folders.md",
+      "nodeTypes": [
+        "action:list_directory",
+        "action:folder_exists",
+        "action:wait_for_folder",
+        "action:copy_folder",
+        "action:move_folder",
+        "action:delete_folder",
+        "action:rename_folder"
+      ]
+    },
+    {
+      "id": "reference/archive",
+      "title": "Archive nodes",
+      "summary": "Compress and extract local .zip archives.",
+      "category": [
+        "Node reference",
+        "Archive"
+      ],
+      "path": "reference/archive.md",
+      "nodeTypes": [
+        "action:zip_files",
+        "action:unzip_files"
+      ]
+    },
+    {
+      "id": "reference/uuid",
+      "title": "UUID nodes",
+      "summary": "Generate, parse, validate, and extract UUIDs.",
+      "category": [
+        "Node reference",
+        "UUID"
+      ],
+      "path": "reference/uuid.md",
+      "nodeTypes": [
+        "data:uuid_generate",
+        "data:uuid_parse",
+        "data:uuid_validate",
+        "data:uuid_extract"
+      ]
+    },
+    {
+      "id": "reference/path-utilities",
+      "title": "Path utility nodes",
+      "summary": "Split, join, and clean filesystem paths.",
+      "category": [
+        "Node reference",
+        "Data"
+      ],
+      "path": "reference/path-utilities.md",
+      "nodeTypes": [
+        "data:get_path_part",
+        "data:build_path",
+        "data:clean_path"
+      ]
+    }
   ],
   "nodeReferences": {
-    "trigger:button":{"documentId":"reference/triggers","anchor":"button-trigger"}, "trigger:cron":{"documentId":"reference/triggers","anchor":"cron-trigger"}, "trigger:file_watch":{"documentId":"reference/triggers","anchor":"file-watch"}, "trigger:hotkey":{"documentId":"reference/triggers","anchor":"global-hotkey"}, "trigger:webhook":{"documentId":"reference/triggers","anchor":"local-webhook"}, "trigger:chat":{"documentId":"reference/triggers","anchor":"chat-trigger"},
-      "data:constant":{"documentId":"reference/data","anchor":"constant"}, "data:format_text":{"documentId":"reference/data","anchor":"format-text"}, "data:get_field":{"documentId":"reference/data","anchor":"get-field"}, "data:build_object":{"documentId":"reference/data","anchor":"build-object"}, "data:break_object":{"documentId":"reference/data","anchor":"break-object"}, "data:cast":{"documentId":"reference/data","anchor":"cast"}, "data:json_query":{"documentId":"reference/data","anchor":"query-json"}, "data:equals":{"documentId":"reference/data","anchor":"equals"}, "data:greater_than":{"documentId":"reference/data","anchor":"greater-than"}, "data:json_parse":{"documentId":"reference/data","anchor":"parse-json"}, "data:get_variable":{"documentId":"reference/data","anchor":"get-variable"}, "data:get_global_variable":{"documentId":"reference/data","anchor":"get-global-variable"}, "data:reroute":{"documentId":"reference/data","anchor":"data-reroute"},
-      "flow:branch":{"documentId":"reference/flow","anchor":"branch"}, "flow:sequence":{"documentId":"reference/flow","anchor":"sequence"}, "flow:for_each":{"documentId":"reference/flow","anchor":"for-each-loop"}, "flow:for_loop":{"documentId":"reference/flow","anchor":"for-loop"}, "flow:while":{"documentId":"reference/flow","anchor":"while"}, "flow:switch":{"documentId":"reference/flow","anchor":"switch"}, "flow:do_once":{"documentId":"reference/flow","anchor":"do-once"}, "flow:gate":{"documentId":"reference/flow","anchor":"gate"}, "flow:flip_flop":{"documentId":"reference/flow","anchor":"flipflop"}, "flow:multi_gate":{"documentId":"reference/flow","anchor":"multigate"}, "flow:reroute":{"documentId":"reference/flow","anchor":"flow-reroute"}, "flow:break":{"documentId":"reference/flow","anchor":"break"}, "flow:set_variable":{"documentId":"reference/flow","anchor":"set-variable"}, "flow:set_global_variable":{"documentId":"reference/flow","anchor":"set-global-variable"}, "flow:return":{"documentId":"reference/flow","anchor":"return"},
-    "action:http":{"documentId":"reference/actions","anchor":"http-request"}, "action:report":{"documentId":"reference/actions","anchor":"create-report"}, "action:subpipeline":{"documentId":"reference/actions","anchor":"run-pipeline"},
-    "action:list_directory":{"documentId":"reference/local","anchor":"list-directory"}, "action:file_read":{"documentId":"reference/local","anchor":"read-file"}, "action:file_write":{"documentId":"reference/local","anchor":"write-file"}, "action:terminal":{"documentId":"reference/local","anchor":"run-terminal-command"}, "action:notification":{"documentId":"reference/local","anchor":"desktop-notification"}, "action:git":{"documentId":"reference/local","anchor":"git"}, "action:download":{"documentId":"reference/local","anchor":"download-from-web"}, "action:display_message":{"documentId":"reference/local","anchor":"display-message"}, "action:display_question":{"documentId":"reference/local","anchor":"display-question"}, "action:display_input":{"documentId":"reference/local","anchor":"display-input-dialog"}, "action:form":{"documentId":"reference/local","anchor":"form"},
-    "llm:prompt":{"documentId":"reference/ai","anchor":"llm-prompt"}, "llm:extract":{"documentId":"reference/ai","anchor":"structured-extract"}, "llm:boolean":{"documentId":"reference/ai","anchor":"llm-boolean-router"}, "llm:choice":{"documentId":"reference/ai","anchor":"llm-choice-router"}, "llm:summarize":{"documentId":"reference/ai","anchor":"summarize"}, "llm:agent":{"documentId":"reference/ai","anchor":"agent"}, "llm:coding_agent":{"documentId":"reference/ai","anchor":"coding-agent"},
-    "data:chat_history":{"documentId":"reference/chat","anchor":"read-chat-history"}, "action:chat_reply":{"documentId":"reference/chat","anchor":"reply-to-chat"}, "action:chat_status":{"documentId":"reference/chat","anchor":"update-chat-status"},
-    "function:entry":{"documentId":"reference/functions","anchor":"function-entry"}, "function:return":{"documentId":"reference/functions","anchor":"function-return"}, "function:input":{"documentId":"reference/functions","anchor":"function-inputs"}, "function:output":{"documentId":"reference/functions","anchor":"function-outputs"},
-        "visual:comment":{"documentId":"reference/canvas","anchor":"comment"},
-        "twitch:event":{"documentId":"guides/twitch-eventsub","anchor":"twitch-event-trigger"}, "twitch:send_chat_message":{"documentId":"guides/twitch-eventsub","anchor":"send-twitch-chat-message"},
-        "text:split":{"documentId":"reference/text","anchor":"split-and-join"}, "text:join":{"documentId":"reference/text","anchor":"split-and-join"}, "text:contains":{"documentId":"reference/text","anchor":"comparison-and-replacement"}, "text:replace":{"documentId":"reference/text","anchor":"comparison-and-replacement"}, "text:trim":{"documentId":"reference/text","anchor":"trim-case-and-unicode-ranges"}, "text:change_case":{"documentId":"reference/text","anchor":"trim-case-and-unicode-ranges"}, "text:starts_with":{"documentId":"reference/text","anchor":"comparison-and-replacement"}, "text:ends_with":{"documentId":"reference/text","anchor":"comparison-and-replacement"}, "text:index_of":{"documentId":"reference/text","anchor":"trim-case-and-unicode-ranges"}, "text:substring":{"documentId":"reference/text","anchor":"trim-case-and-unicode-ranges"}
+    "trigger:button": {
+      "documentId": "reference/triggers",
+      "anchor": "button-trigger"
+    },
+    "trigger:cron": {
+      "documentId": "reference/triggers",
+      "anchor": "cron-trigger"
+    },
+    "trigger:file_watch": {
+      "documentId": "reference/triggers",
+      "anchor": "file-watch"
+    },
+    "trigger:hotkey": {
+      "documentId": "reference/triggers",
+      "anchor": "global-hotkey"
+    },
+    "trigger:webhook": {
+      "documentId": "reference/triggers",
+      "anchor": "local-webhook"
+    },
+    "trigger:chat": {
+      "documentId": "reference/triggers",
+      "anchor": "chat-trigger"
+    },
+    "data:constant": {
+      "documentId": "reference/data",
+      "anchor": "constant"
+    },
+    "data:format_text": {
+      "documentId": "reference/data",
+      "anchor": "format-text"
+    },
+    "data:get_field": {
+      "documentId": "reference/data",
+      "anchor": "get-field"
+    },
+    "data:build_object": {
+      "documentId": "reference/data",
+      "anchor": "build-object"
+    },
+    "data:break_object": {
+      "documentId": "reference/data",
+      "anchor": "break-object"
+    },
+    "data:cast": {
+      "documentId": "reference/data",
+      "anchor": "cast"
+    },
+    "data:json_query": {
+      "documentId": "reference/data",
+      "anchor": "query-json"
+    },
+    "data:equals": {
+      "documentId": "reference/data",
+      "anchor": "equals"
+    },
+    "data:greater_than": {
+      "documentId": "reference/data",
+      "anchor": "greater-than"
+    },
+    "data:json_parse": {
+      "documentId": "reference/data",
+      "anchor": "parse-json"
+    },
+    "data:get_variable": {
+      "documentId": "reference/data",
+      "anchor": "get-variable"
+    },
+    "data:get_global_variable": {
+      "documentId": "reference/data",
+      "anchor": "get-global-variable"
+    },
+    "data:reroute": {
+      "documentId": "reference/data",
+      "anchor": "data-reroute"
+    },
+    "flow:branch": {
+      "documentId": "reference/flow",
+      "anchor": "branch"
+    },
+    "flow:sequence": {
+      "documentId": "reference/flow",
+      "anchor": "sequence"
+    },
+    "flow:for_each": {
+      "documentId": "reference/flow",
+      "anchor": "for-each-loop"
+    },
+    "flow:for_loop": {
+      "documentId": "reference/flow",
+      "anchor": "for-loop"
+    },
+    "flow:while": {
+      "documentId": "reference/flow",
+      "anchor": "while"
+    },
+    "flow:switch": {
+      "documentId": "reference/flow",
+      "anchor": "switch"
+    },
+    "flow:do_once": {
+      "documentId": "reference/flow",
+      "anchor": "do-once"
+    },
+    "flow:gate": {
+      "documentId": "reference/flow",
+      "anchor": "gate"
+    },
+    "flow:flip_flop": {
+      "documentId": "reference/flow",
+      "anchor": "flipflop"
+    },
+    "flow:multi_gate": {
+      "documentId": "reference/flow",
+      "anchor": "multigate"
+    },
+    "flow:reroute": {
+      "documentId": "reference/flow",
+      "anchor": "flow-reroute"
+    },
+    "flow:break": {
+      "documentId": "reference/flow",
+      "anchor": "break"
+    },
+    "flow:set_variable": {
+      "documentId": "reference/flow",
+      "anchor": "set-variable"
+    },
+    "flow:set_global_variable": {
+      "documentId": "reference/flow",
+      "anchor": "set-global-variable"
+    },
+    "flow:return": {
+      "documentId": "reference/flow",
+      "anchor": "return"
+    },
+    "action:http": {
+      "documentId": "reference/actions",
+      "anchor": "http-request"
+    },
+    "action:report": {
+      "documentId": "reference/actions",
+      "anchor": "create-report"
+    },
+    "action:subpipeline": {
+      "documentId": "reference/actions",
+      "anchor": "run-pipeline"
+    },
+    "action:list_directory": {
+      "documentId": "reference/local",
+      "anchor": "list-directory"
+    },
+    "action:file_read": {
+      "documentId": "reference/local",
+      "anchor": "read-file"
+    },
+    "action:file_write": {
+      "documentId": "reference/local",
+      "anchor": "write-file"
+    },
+    "action:terminal": {
+      "documentId": "reference/local",
+      "anchor": "run-terminal-command"
+    },
+    "action:notification": {
+      "documentId": "reference/local",
+      "anchor": "desktop-notification"
+    },
+    "action:git": {
+      "documentId": "reference/local",
+      "anchor": "git"
+    },
+    "action:download": {
+      "documentId": "reference/local",
+      "anchor": "download-from-web"
+    },
+    "action:display_message": {
+      "documentId": "reference/local",
+      "anchor": "display-message"
+    },
+    "action:display_question": {
+      "documentId": "reference/local",
+      "anchor": "display-question"
+    },
+    "action:display_input": {
+      "documentId": "reference/local",
+      "anchor": "display-input-dialog"
+    },
+    "action:form": {
+      "documentId": "reference/local",
+      "anchor": "form"
+    },
+    "llm:prompt": {
+      "documentId": "reference/ai",
+      "anchor": "llm-prompt"
+    },
+    "llm:extract": {
+      "documentId": "reference/ai",
+      "anchor": "structured-extract"
+    },
+    "llm:boolean": {
+      "documentId": "reference/ai",
+      "anchor": "llm-boolean-router"
+    },
+    "llm:choice": {
+      "documentId": "reference/ai",
+      "anchor": "llm-choice-router"
+    },
+    "llm:summarize": {
+      "documentId": "reference/ai",
+      "anchor": "summarize"
+    },
+    "llm:agent": {
+      "documentId": "reference/ai",
+      "anchor": "agent"
+    },
+    "llm:coding_agent": {
+      "documentId": "reference/ai",
+      "anchor": "coding-agent"
+    },
+    "data:chat_history": {
+      "documentId": "reference/chat",
+      "anchor": "read-chat-history"
+    },
+    "action:chat_reply": {
+      "documentId": "reference/chat",
+      "anchor": "reply-to-chat"
+    },
+    "action:chat_status": {
+      "documentId": "reference/chat",
+      "anchor": "update-chat-status"
+    },
+    "function:entry": {
+      "documentId": "reference/functions",
+      "anchor": "function-entry"
+    },
+    "function:return": {
+      "documentId": "reference/functions",
+      "anchor": "function-return"
+    },
+    "function:input": {
+      "documentId": "reference/functions",
+      "anchor": "function-inputs"
+    },
+    "function:output": {
+      "documentId": "reference/functions",
+      "anchor": "function-outputs"
+    },
+    "visual:comment": {
+      "documentId": "reference/canvas",
+      "anchor": "comment"
+    },
+    "twitch:event": {
+      "documentId": "guides/twitch-eventsub",
+      "anchor": "twitch-event-trigger"
+    },
+    "twitch:send_chat_message": {
+      "documentId": "guides/twitch-eventsub",
+      "anchor": "send-twitch-chat-message"
+    },
+    "text:split": {
+      "documentId": "reference/text",
+      "anchor": "split-and-join"
+    },
+    "text:join": {
+      "documentId": "reference/text",
+      "anchor": "split-and-join"
+    },
+    "text:contains": {
+      "documentId": "reference/text",
+      "anchor": "comparison-and-replacement"
+    },
+    "text:replace": {
+      "documentId": "reference/text",
+      "anchor": "comparison-and-replacement"
+    },
+    "text:trim": {
+      "documentId": "reference/text",
+      "anchor": "trim-case-and-unicode-ranges"
+    },
+    "text:change_case": {
+      "documentId": "reference/text",
+      "anchor": "trim-case-and-unicode-ranges"
+    },
+    "text:starts_with": {
+      "documentId": "reference/text",
+      "anchor": "comparison-and-replacement"
+    },
+    "text:ends_with": {
+      "documentId": "reference/text",
+      "anchor": "comparison-and-replacement"
+    },
+    "text:index_of": {
+      "documentId": "reference/text",
+      "anchor": "trim-case-and-unicode-ranges"
+    },
+    "text:substring": {
+      "documentId": "reference/text",
+      "anchor": "trim-case-and-unicode-ranges"
+    },
+    "action:zip_files": {
+      "documentId": "reference/archive",
+      "anchor": "zip-files"
+    },
+    "action:unzip_files": {
+      "documentId": "reference/archive",
+      "anchor": "unzip-files"
+    },
+    "action:file_exists": {
+      "documentId": "reference/files",
+      "anchor": "file-exists"
+    },
+    "action:wait_for_file": {
+      "documentId": "reference/files",
+      "anchor": "wait-for-file"
+    },
+    "action:copy_file": {
+      "documentId": "reference/files",
+      "anchor": "copy-file"
+    },
+    "action:move_file": {
+      "documentId": "reference/files",
+      "anchor": "move-file"
+    },
+    "action:delete_file": {
+      "documentId": "reference/files",
+      "anchor": "delete-file"
+    },
+    "action:rename_file": {
+      "documentId": "reference/files",
+      "anchor": "rename-file"
+    },
+    "action:file_to_base64": {
+      "documentId": "reference/files",
+      "anchor": "file-to-base64"
+    },
+    "action:base64_to_file": {
+      "documentId": "reference/files",
+      "anchor": "base64-to-file"
+    },
+    "action:folder_exists": {
+      "documentId": "reference/folders",
+      "anchor": "folder-exists"
+    },
+    "action:wait_for_folder": {
+      "documentId": "reference/folders",
+      "anchor": "wait-for-folder"
+    },
+    "action:copy_folder": {
+      "documentId": "reference/folders",
+      "anchor": "copy-folder"
+    },
+    "action:move_folder": {
+      "documentId": "reference/folders",
+      "anchor": "move-folder"
+    },
+    "action:delete_folder": {
+      "documentId": "reference/folders",
+      "anchor": "delete-folder"
+    },
+    "action:rename_folder": {
+      "documentId": "reference/folders",
+      "anchor": "rename-folder"
+    },
+    "data:uuid_generate": {
+      "documentId": "reference/uuid",
+      "anchor": "generate-uuid"
+    },
+    "data:uuid_parse": {
+      "documentId": "reference/uuid",
+      "anchor": "parse-uuid"
+    },
+    "data:uuid_validate": {
+      "documentId": "reference/uuid",
+      "anchor": "validate-uuid"
+    },
+    "data:uuid_extract": {
+      "documentId": "reference/uuid",
+      "anchor": "extract-uuids"
+    },
+    "data:bytes_to_base64": {
+      "documentId": "reference/data",
+      "anchor": "bytes-to-base64"
+    },
+    "data:base64_to_bytes": {
+      "documentId": "reference/data",
+      "anchor": "base64-to-bytes"
+    },
+    "data:get_path_part": {
+      "documentId": "reference/path-utilities",
+      "anchor": "get-path-part"
+    },
+    "data:build_path": {
+      "documentId": "reference/path-utilities",
+      "anchor": "build-path"
+    },
+    "data:clean_path": {
+      "documentId": "reference/path-utilities",
+      "anchor": "clean-path"
+    }
   }
 }

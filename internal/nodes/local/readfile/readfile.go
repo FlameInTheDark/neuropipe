@@ -70,7 +70,7 @@ func definition() domain.NodeDefinition {
 	defaults := map[string]any{"outputType": string(textbytes.Bytes)}
 	return domain.NodeDefinition{
 		Type:        "action:file_read",
-		Category:    "Local",
+		Category:    "Files",
 		Label:       "Read File",
 		Description: "Read an approved local file as explicitly selected bytes or UTF-8 text.",
 		Icon:        "file-down",

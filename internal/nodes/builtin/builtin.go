@@ -9,6 +9,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arrayget"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/base64decode"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/base64encode"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/base64ext"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/breakobject"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/buildobject"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/cast"
@@ -25,12 +26,14 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/jsonparse"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/jsonquery"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/length"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/pathops"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/randomnumber"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexmatch"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexreplace"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexsplit"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/reroute"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/typeassert"
+	uuidnode "github.com/FlameInTheDark/neuropipe/internal/nodes/data/uuid"
 	sqlnode "github.com/FlameInTheDark/neuropipe/internal/nodes/database/sql"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/date"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/branch"
@@ -48,10 +51,26 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/setvariable"
 	switchnode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/switch"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/while"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/archive/unzipfiles"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/archive/zipfiles"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displayinput"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displaymessage"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displayquestion"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/download"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/base64tofile"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/copyfile"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/copyfolder"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/deletefile"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/deletefolder"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/fileexists"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/filetobase64"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/folderexists"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/movefile"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/movefolder"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/renamefile"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/renamefolder"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/waitforfile"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/waitforfolder"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/form"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/listdirectory"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/readfile"
@@ -145,6 +164,36 @@ func RegisterAll(registrar nodes.Registrar) error {
 		endswith.Register,
 		indexof.Register,
 		substring.Register,
+		// Archive
+		zipfiles.Register,
+		unzipfiles.Register,
+		// File ops
+		fileexists.Register,
+		folderexists.Register,
+		waitforfile.Register,
+		waitforfolder.Register,
+		copyfile.Register,
+		copyfolder.Register,
+		movefile.Register,
+		movefolder.Register,
+		deletefile.Register,
+		deletefolder.Register,
+		renamefile.Register,
+		renamefolder.Register,
+		filetobase64.Register,
+		base64tofile.Register,
+		// UUID
+		uuidnode.RegisterGenerate,
+		uuidnode.RegisterParse,
+		uuidnode.RegisterValidate,
+		uuidnode.RegisterExtract,
+		// Path utilities
+		pathops.RegisterGetPathPart,
+		pathops.RegisterBuildPath,
+		pathops.RegisterCleanPath,
+		// Extra base64 (pure bytes↔text)
+		base64ext.RegisterBytesToBase64,
+		base64ext.RegisterBase64ToBytes,
 	} {
 		if err := register(registrar); err != nil {
 			return err
