@@ -368,25 +368,61 @@ export default function App() {
       run: () => guardedGoto(n.id),
     }));
 
-    if (!nav.inEditor) return navigate;
+    if (nav.inEditor) {
+      /* every library entry is placeable straight into the viewport center */
+      const nodes: Command[] = workspace.library.flatMap((cat) =>
+        cat.items.map((item) => ({
+          id: `node-${item.functionId ?? item.type}`,
+          label: item.name,
+          icon: item.icon,
+          group: t("palette.groupNodes"),
+          hint: cat.name,
+          run: () => addNodeCentered(item, cat.name),
+        })),
+      );
+      const editor: Command[] = [
+        { id: "run", label: t("editor.runDraft"), icon: "Play", group: t("palette.groupEditor"), hint: "⌘↵", run: () => void graph.run() },
+        { id: "save", label: t("editor.menuSaveDraft"), icon: "Save", group: t("palette.groupEditor"), hint: "⌘S", run: () => void save() },
+        { id: "fit", label: t("editor.fitGraph"), icon: "Maximize2", group: t("palette.groupEditor"), run: () => fitRef.current?.() },
+        {
+          id: "snap",
+          label: snap ? t("editor.snapOff") : t("editor.snapOn"),
+          icon: "Magnet",
+          group: t("palette.groupEditor"),
+          run: () => setSnap(!snap),
+        },
+        { id: "dup", label: t("editor.duplicateNode"), icon: "Copy", group: t("palette.groupEditor"), hint: "⌘D", run: graph.duplicateSelected },
+        { id: "del", label: t("editor.deleteNode"), icon: "Trash2", group: t("palette.groupEditor"), hint: "⌫", run: graph.deleteSelected },
+        { id: "close", label: t("editor.closeEditor"), icon: "ArrowLeft", group: t("palette.groupEditor"), run: nav.closeEditor },
+      ];
+      return [...nodes, ...editor, ...navigate];
+    }
 
-    const editor: Command[] = [
-      { id: "run", label: t("editor.runDraft"), icon: "Play", group: t("palette.groupEditor"), hint: "⌘↵", run: () => void graph.run() },
-      { id: "save", label: t("editor.menuSaveDraft"), icon: "Save", group: t("palette.groupEditor"), hint: "⌘S", run: () => void save() },
-      { id: "fit", label: t("editor.fitGraph"), icon: "Maximize2", group: t("palette.groupEditor"), run: () => fitRef.current?.() },
-      {
-        id: "snap",
-        label: snap ? t("editor.snapOff") : t("editor.snapOn"),
-        icon: "Magnet",
-        group: t("palette.groupEditor"),
-        run: () => setSnap(!snap),
+    /* launcher mode: every pipeline and function is directly openable */
+    const pipelines: Command[] = workspace.pipelines.map((p) => ({
+      id: `pipeline-${p.id}`,
+      label: p.name,
+      icon: p.icon || "Cable",
+      group: t("palette.groupPipelines"),
+      hint: p.version || undefined,
+      // must go through nav so the editor actually opens, not just loads
+      run: () => {
+        nav.openPipeline(p).catch(() => undefined);
       },
-      { id: "dup", label: t("editor.duplicateNode"), icon: "Copy", group: t("palette.groupEditor"), hint: "⌘D", run: graph.duplicateSelected },
-      { id: "del", label: t("editor.deleteNode"), icon: "Trash2", group: t("palette.groupEditor"), hint: "⌫", run: graph.deleteSelected },
-      { id: "close", label: t("editor.closeEditor"), icon: "ArrowLeft", group: t("palette.groupEditor"), run: nav.closeEditor },
-    ];
-    return [...editor, ...navigate];
-  }, [nav, graph.run, graph.duplicateSelected, graph.deleteSelected, save, snap, t, guardedGoto]);
+    }));
+    const functions: Command[] = workspace.functions.map((f) => ({
+      id: `function-${f.id}`,
+      label: f.name,
+      icon: f.icon || "Braces",
+      group: t("palette.groupFunctions"),
+      hint: f.publishedRevision > 0 ? `v${f.publishedRevision}` : undefined,
+      run: () => {
+        void nav.openFunction(f);
+      },
+    }));
+    return [...pipelines, ...functions, ...navigate];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav, graph.run, graph.duplicateSelected, graph.deleteSelected, save, snap, t, guardedGoto, workspace.pipelines, workspace.functions, workspace.library, addNodeCentered]);
 
   /* ---------- documentation overlay (editor-safe) ---------- */
 

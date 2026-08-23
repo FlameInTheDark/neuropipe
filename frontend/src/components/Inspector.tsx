@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphNode, LogEntry, Port } from "@/types";
 import type { Execution } from "@/lib/types";
@@ -899,7 +899,15 @@ function LogBody({
   const { t } = useTranslation();
   const [selectedExecution, setSelectedExecution] = useState<string>("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  /* scoped to the unique entry (node + start time) so repeated runs of the
+     same node highlight individually, never as one group */
+  const [hoveredEntryId, setHoveredEntryId] = useState<string | null>(null);
+  /* log rows by entry id — timeline clicks scroll to their row */
+  const entryRefs = useRef(new Map<string, HTMLLIElement>());
+  const scrollToEntry = (id: string) => {
+    setHoveredEntryId(id); // keep the target marked after the pointer leaves the strip
+    entryRefs.current.get(id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
 
   const executionOptions = useMemo(
     () => [
@@ -962,14 +970,16 @@ function LogBody({
               const scale = 100 / clamped.reduce((s, w) => s + w, 0);
               return sorted.map((l, i) => {
                 const width = clamped[i] * scale;
-                const hovered = hoveredNodeId === l.nodeId;
+                const hovered = hoveredEntryId === l.id;
                 return (
                   <div
                     key={`tl-${l.id}`}
                     role="button"
                     tabIndex={-1}
-                    onMouseEnter={() => setHoveredNodeId(l.nodeId ?? null)}
-                    onMouseLeave={() => setHoveredNodeId(null)}
+                    title={`${l.node} · ${formatDuration(l.ms)}`}
+                    onClick={() => scrollToEntry(l.id)}
+                    onMouseEnter={() => setHoveredEntryId(l.id)}
+                    onMouseLeave={() => setHoveredEntryId(null)}
                     className="h-full cursor-pointer transition-opacity"
                     style={{
                       /* grow ratios (not %) so the 1px gaps are subtracted
@@ -999,13 +1009,17 @@ function LogBody({
           <p className="px-3 py-6 text-center text-[12px] leading-relaxed text-ink-500">{t("editor.runToInspect")}</p>
         )}
         {log.map((l) => {
-          const isHovered = l.nodeId && l.nodeId === hoveredNodeId;
+          const isHovered = hoveredEntryId === l.id;
           const isExpanded = expandedId === l.id;
           return (
             <li
               key={l.id}
-              onMouseEnter={() => setHoveredNodeId(l.nodeId ?? null)}
-              onMouseLeave={() => setHoveredNodeId(null)}
+              ref={(el) => {
+                if (el) entryRefs.current.set(l.id, el);
+                else entryRefs.current.delete(l.id);
+              }}
+              onMouseEnter={() => setHoveredEntryId(l.id)}
+              onMouseLeave={() => setHoveredEntryId(null)}
               className={cn(
                 "border-b border-seam/70 px-3 py-2 transition",
                 isHovered ? "bg-ink-800" : "hover:bg-ink-850",
