@@ -196,7 +196,7 @@ func TestUpdateMetadataForbidsRenameAndTypeChange(t *testing.T) {
 func TestDeleteBlocksReferencedVariable(t *testing.T) {
 	service, store := newService(t)
 	definition := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{{ID: "start", Type: "trigger:button"}, {ID: "read", Type: "data:get_global_variable", Data: map[string]any{"config": map[string]any{"name": "shared"}}}}}
-	pipeline, err := store.CreatePipeline(context.Background(), "uses-variable", definition)
+	pipeline, err := store.CreatePipeline(context.Background(), "", "uses-variable", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}

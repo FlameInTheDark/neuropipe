@@ -47,9 +47,13 @@ export function formatNumber(value: number): string {
 }
 
 /** Locale-aware percent formatting. */
+/** Locale-aware percentage for values already expressed in percent (0–100),
+ *  e.g. a success rate of 63.194 → "63.2%". Unlike Intl's percent style it
+ *  does NOT multiply the input by 100. */
 export function formatPercent(value: number): string {
   return new Intl.NumberFormat(i18n.resolvedLanguage ?? "en", {
-    style: "percent",
+    style: "unit",
+    unit: "percent",
     maximumFractionDigits: 1,
   }).format(value);
 }

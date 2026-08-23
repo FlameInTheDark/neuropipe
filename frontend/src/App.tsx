@@ -42,10 +42,15 @@ export default function App() {
   /* ---------- cross-cutting ---------- */
   const { toast, notify } = useToast();
   const workspace = useWorkspace(notify);
+
+  /* editor canvas viewport — declared before the editor hook so loads can
+     push the saved pan/zoom straight into the rendered view */
+  const [view, setView] = useState<View>({ x: 40, y: 40, z: 1 });
   const graph = useGraphEditor({
     notify,
     definitionIndex: workspace.definitionIndex,
     runningMap: workspace.running,
+    onViewport: setView,
   });
 
   /* ---------- shell state ---------- */
@@ -55,7 +60,6 @@ export default function App() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
   /* ---------- editor viewport / panels ---------- */
-  const [view, setView] = useState<View>({ x: 40, y: 40, z: 1 });
   const [snap, setSnap] = useState(true);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -454,6 +458,7 @@ export default function App() {
           viewTitle={viewTitle}
           parentTitle={nav.editorKind === "function" ? t("nav.functions") : t("nav.pipelines")}
           pipelineName={nav.editingFunction?.name ?? nav.editingPipeline?.name}
+          executorName={nav.editingPipeline?.executorName}
           version={
             nav.editorKind === "function"
               ? nav.editingFunction?.publishedRevision

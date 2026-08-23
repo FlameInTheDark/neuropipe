@@ -62,6 +62,27 @@ go vet ./...
 go test -race ./...
 ```
 
+The remote-executor gRPC contract is generated with `protoc`; regenerate it after editing `internal/proto/executor/v1/executor.proto`:
+
+```bash
+task gen:proto
+```
+
+The standalone pipeline executor (Windows/Linux/macOS, no cgo) is built with:
+
+```bash
+task executor:build
+```
+
+Its CLI uses `serve` to start the daemon, auto-generates and saves a shared token on first start (printed exactly once for copying into Neuropipe), and ships a few tools:
+
+```bash
+neuropipe-executor serve --token <value>   # explicit token; also --config/--data-dir/--listen
+neuropipe-executor token generate          # rotate the shared token, printed once
+neuropipe-executor status                  # effective config + local pipeline/run counts
+neuropipe-executor --version
+```
+
 ## Releases
 
 Pull requests and pushes to `main` run the frontend type/build checks plus Go vet and race tests. Conventional commits on `main` create a semantic GitHub release. A second workflow builds the tagged Windows executable and NSIS installer, then attaches both to that release.

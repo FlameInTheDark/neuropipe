@@ -148,7 +148,12 @@ export function RunsView({ workspace, nav }: { workspace: Workspace; nav: NavApi
                 <div className="mt-1 flex items-center gap-2">
                   <span className="font-mono text-[10.5px] text-ink-500">{r.execution.id}</span>
                   <span className="text-[10.5px] text-ink-600">·</span>
-                  <span className="text-[10.5px] text-ink-500">{r.triggerLabel}</span>
+                  <span className="truncate text-[10.5px] text-ink-500">{r.triggerLabel}</span>
+                  {r.execution.executorId && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded border border-violet-500/30 bg-violet-500/10 px-1 py-px text-[9.5px] font-medium text-violet-300">
+                      {t("executors.category")}
+                    </span>
+                  )}
                   <span className="ml-auto font-mono text-[10.5px] text-ink-400">{formatDuration(r.ms)}</span>
                 </div>
                 <div className="mt-1.5 h-[3px] overflow-hidden rounded-full bg-ink-800">

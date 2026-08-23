@@ -520,6 +520,9 @@ export interface UiPipeline {
   updated: string;
   migrationIssue?: string;
   running?: boolean;
+  /** Set when the pipeline targets a remote executor. */
+  executorId?: string;
+  executorName?: string;
 }
 
 export function pipelineFromBackend(p: Omit<import("./types").PipelineSummary, "triggerCount"> & { triggerCount?: number }): UiPipeline {
@@ -533,6 +536,8 @@ export function pipelineFromBackend(p: Omit<import("./types").PipelineSummary, "
     triggers: p.triggerCount ?? 0,
     updated: formatDateTime(p.updatedAt),
     migrationIssue: p.migrationIssue,
+    executorId: p.executorId || undefined,
+    executorName: p.executorName || undefined,
   };
 }
 

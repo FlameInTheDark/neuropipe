@@ -49,7 +49,7 @@ func TestPublishCreatesImmutableRevisionAndBindings(t *testing.T) {
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	definition := domain.FlowDefinition{Nodes: []domain.FlowNode{{ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Run"}}}}}
-	pipeline, err := store.CreatePipeline(ctx, "Inbox", definition)
+	pipeline, err := store.CreatePipeline(ctx, "Inbox", "", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -82,7 +82,7 @@ func TestTrustedRevisionStillAllowsDraftUpdatesAndRepublishing(t *testing.T) {
 	definition := domain.FlowDefinition{Nodes: []domain.FlowNode{{
 		ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Before"}},
 	}}}
-	pipeline, err := store.CreatePipeline(ctx, "Editable after trust", definition)
+	pipeline, err := store.CreatePipeline(ctx, "Editable after trust", "", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -130,7 +130,7 @@ func TestCapabilityGrantsPersistOnRepublish(t *testing.T) {
 	definition := domain.FlowDefinition{Nodes: []domain.FlowNode{{
 		ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Run"}},
 	}}}
-	pipeline, err := store.CreatePipeline(ctx, "Capability persist test", definition)
+	pipeline, err := store.CreatePipeline(ctx, "Capability persist test", "", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -188,7 +188,7 @@ func TestPublishEnablesGlobalHotkeyBinding(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
-	pipeline, err := store.CreatePipeline(ctx, "Hotkey", domain.FlowDefinition{})
+	pipeline, err := store.CreatePipeline(ctx, "Hotkey", "", domain.FlowDefinition{})
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -212,7 +212,7 @@ func TestBlueprintCatalogMigrationConvertsSafeNodesAndFlagsAmbiguity(t *testing.
 	}
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
-	pipeline, err := store.CreatePipeline(ctx, "Migration", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
+	pipeline, err := store.CreatePipeline(ctx, "Migration", "", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
 		{ID: "store", Type: "logic:store_value", Data: map[string]any{"config": map[string]any{"name": "Greeting", "value": "hello"}}},
 		{ID: "condition", Type: "logic:condition", Data: map[string]any{"config": map[string]any{"path": "status"}}},
 	}})
@@ -256,7 +256,7 @@ func TestBlueprintV3MigrationBacksUpAndPausesPublishedDrafts(t *testing.T) {
 		{ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Run"}}},
 		{ID: "notice", Type: "action:notification", Data: map[string]any{"config": map[string]any{"title": "Done", "message": "Done"}}},
 	}, Edges: []domain.FlowEdge{{ID: "run", Source: "button", SourceHandle: "out", Target: "notice", TargetHandle: "in", Kind: domain.PinExec}}}
-	pipeline, err := store.CreatePipeline(ctx, "V3 migration", definition)
+	pipeline, err := store.CreatePipeline(ctx, "V3 migration", "", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -378,7 +378,7 @@ func TestListExecutionsIncludesPersistedNodeRuns(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
-	pipeline, err := store.CreatePipeline(ctx, "Run history", domain.FlowDefinition{Nodes: []domain.FlowNode{{ID: "button", Type: "trigger:button"}}})
+	pipeline, err := store.CreatePipeline(ctx, "Run history", "", domain.FlowDefinition{Nodes: []domain.FlowNode{{ID: "button", Type: "trigger:button"}}})
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -412,7 +412,7 @@ func TestCreateAndListReportsIncludesPipelineAndExecutionContext(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
-	pipeline, err := store.CreatePipeline(ctx, "Daily briefing", domain.FlowDefinition{Nodes: []domain.FlowNode{{ID: "button", Type: "trigger:button"}}})
+	pipeline, err := store.CreatePipeline(ctx, "Daily briefing", "", domain.FlowDefinition{Nodes: []domain.FlowNode{{ID: "button", Type: "trigger:button"}}})
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -482,7 +482,7 @@ func TestLegacyGraphsAreBackedUpPausedAndMarkedReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	legacy, err := store.CreatePipeline(context.Background(), "Legacy", domain.FlowDefinition{Nodes: []domain.FlowNode{{ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Legacy"}}}}})
+	legacy, err := store.CreatePipeline(context.Background(), "", "Legacy", domain.FlowDefinition{Nodes: []domain.FlowNode{{ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Legacy"}}}}})
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -515,7 +515,7 @@ func TestV3PipelineIsNotMarkedLegacyAndRepairsOldMarker(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	ctx := context.Background()
-	pipeline, err := store.CreatePipeline(ctx, "Current", domain.FlowDefinition{
+	pipeline, err := store.CreatePipeline(ctx, "Current", "", domain.FlowDefinition{
 		SchemaVersion: domain.GraphSchemaV3,
 		Nodes:         []domain.FlowNode{{ID: "button", Type: "trigger:button"}},
 	})
@@ -559,7 +559,7 @@ func TestDeletePipelineRemovesPipeline(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	defer func() { _ = store.Close() }()
-	pipeline, err := store.CreatePipeline(context.Background(), "Disposable", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2})
+	pipeline, err := store.CreatePipeline(context.Background(), "", "Disposable", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2})
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}

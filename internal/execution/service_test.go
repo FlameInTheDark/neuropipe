@@ -62,7 +62,7 @@ func TestRunDraftExecutesAndPersistsConnectedNodes(t *testing.T) {
 		},
 		Edges: []domain.FlowEdge{{ID: "button-to-set", Source: "button", SourceHandle: "out", Target: "set", TargetHandle: "in", Kind: domain.PinExec}},
 	}
-	item, err := store.CreatePipeline(context.Background(), "Draft run", definition)
+	item, err := store.CreatePipeline(context.Background(), "Draft run", "", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}

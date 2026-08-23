@@ -113,6 +113,8 @@ export interface Pipeline {
         /** True when the editable draft differs from the revision triggers execute. */
   hasUnpublishedChanges: boolean;
   migrationIssue?: string;
+  /** Set when the pipeline is deployed to and runs on a remote executor. */
+  executorId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -128,6 +130,8 @@ export interface PipelineSummary {
   publishedRevision: number;
   triggerCount: number;
   migrationIssue?: string;
+  executorId?: string;
+  executorName?: string;
   updatedAt: string;
 }
 
@@ -605,6 +609,75 @@ export interface Execution {
   finishedAt?: string;
   error?: string;
   nodeRuns: NodeRun[];
+  /** Set when the run executed on a remote executor. */
+  executorId?: string;
+}
+
+export type ExecutorLLMMode = "proxy" | "local";
+
+/** A user-registered remote pipeline executor. The token never reaches React. */
+export interface RemoteExecutor {
+  id: string;
+  name: string;
+  address: string;
+  useTLS: boolean;
+  llmMode: ExecutorLLMMode;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RemoteExecutorStatus {
+  online: boolean;
+  version?: string;
+  platform?: string;
+  message?: string;
+  activeRuns: number;
+  maxConcurrent: number;
+}
+
+export interface RemoteExecutorListItem {
+  id: string;
+  name: string;
+  address: string;
+  useTLS: boolean;
+  llmMode: ExecutorLLMMode;
+  createdAt: string;
+  updatedAt: string;
+  status: RemoteExecutorStatus;
+}
+
+/** Returned once after creating an executor so the token can be shown. */
+export interface ExecutorCreateResult {
+  executor: RemoteExecutor;
+  token: string;
+}
+
+export interface SaveRemoteExecutorRequest {
+  id?: string;
+  name: string;
+  address: string;
+  /** Supplied once on create/rotate; never returned by the backend. */
+  token?: string;
+  useTLS: boolean;
+}
+
+export interface RemoteExecutorProvider {
+  id: string;
+  name: string;
+  kind: string;
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+  /** Write-only; the backend reports apiKeySet instead of echoing it back. */
+  apiKey?: string;
+  apiKeySet: boolean;
+}
+
+export interface RemoteExecutorConfig {
+  llmMode: ExecutorLLMMode;
+  providers: RemoteExecutorProvider[];
+  defaultProviderId: string;
+  maxConcurrentRuns: number;
 }
 export interface Report {
   id: string;

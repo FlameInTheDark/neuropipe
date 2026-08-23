@@ -79,6 +79,7 @@ export function TopBar({
   parentTitle = "Pipelines",
   pipelineName,
   version,
+  executorName,
   busy,
   onRename,
   dirty,
@@ -99,6 +100,8 @@ export function TopBar({
   parentTitle?: string;
   pipelineName?: string;
   version?: string;
+  /** Set when the edited pipeline targets a remote executor. */
+  executorName?: string;
   busy?: string | null;
   onRename?: (name: string) => void;
   dirty: boolean;
@@ -180,6 +183,11 @@ export function TopBar({
             </button>
             <Icon name="ChevronRight" className="h-3 w-3 shrink-0 text-ink-600" />
             <EditableName name={pipelineName ?? ""} label={t("editor.rename")} onRename={onRename} />
+            {executorName && (
+              <Badge tone="muted" className="ml-0.5 inline-flex items-center gap-1 border-violet-500/30 bg-violet-500/10 text-violet-300">
+                {executorName}
+              </Badge>
+            )}
             {version && (
               <Badge tone="muted" className="ml-0.5">
                 {version}

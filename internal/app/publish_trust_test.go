@@ -25,7 +25,7 @@ func TestPublishPreservesCapabilityGrantsForTrustedTriggers(t *testing.T) {
 	registry := catalog.New()
 	ctx := context.Background()
 
-// Create a pipeline with a JavaScript node that requires network capability.
+	// Create a pipeline with a JavaScript node that requires network capability.
 	definition := domain.FlowDefinition{
 		SchemaVersion: domain.GraphSchemaV3,
 		Nodes: []domain.FlowNode{
@@ -35,7 +35,7 @@ func TestPublishPreservesCapabilityGrantsForTrustedTriggers(t *testing.T) {
 		Edges: []domain.FlowEdge{{ID: "e1", Source: "button", SourceHandle: "out", Target: "js", TargetHandle: "in", Kind: domain.PinExec}},
 	}
 
-	pipeline, err := store.CreatePipeline(ctx, "JS Pipeline", definition)
+	pipeline, err := store.CreatePipeline(ctx, "JS Pipeline", "", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}

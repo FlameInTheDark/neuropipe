@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Events } from "@wailsio/runtime";
 import ReactMarkdown from "react-markdown";
@@ -11,6 +11,7 @@ import type {
   ChatPipeline,
   ChatRun,
   ChatRunEvent,
+  ChatToolCall,
 } from "@/lib/types";
 import { conversationGroup, formatDateTime } from "@/lib/format";
 import { ask } from "@/stores/confirmation";
@@ -28,6 +29,11 @@ const SUGGESTION_KEYS = [
   "chat.suggestion3",
   "chat.suggestion4",
 ];
+
+/** Ordered transcript entry: a plain bubble or an inline tool-call group. */
+type TranscriptItem =
+  | { kind: "message"; msg: ChatMessage }
+  | { kind: "tools"; key: string; calls: ToolCallEntry[] };
 
 /* ── sidebar row ── */
 function ThreadRow({
@@ -135,9 +141,50 @@ export default function ChatView() {
   const [renameTarget, setRenameTarget] = useState<ChatConversation | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** true while the user is scrolled to (or near) the conversation bottom */
+  const pinnedRef = useRef(true);
   const ctx = useCtxMenu();
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
+
+  /* ---------- transcript ---------- */
+
+  /**
+   * Walks messages in stored order and lifts tool activity into inline
+   * cards: an assistant turn carrying tool_calls is followed by its result
+   * card(s), matching how the harness renders a trajectory. Orphan results
+   * keep their chronological slot instead of disappearing.
+   */
+  const transcript = useMemo<TranscriptItem[]>(() => {
+    const items: TranscriptItem[] = [];
+    for (const msg of messages) {
+      if (msg.role === "tool") {
+        const last = items[items.length - 1];
+        const entry =
+          last?.kind === "tools" ? last.calls.find((c) => c.call.id && c.call.id === msg.toolCallId) : undefined;
+        if (last?.kind === "tools" && entry) {
+          entry.result = msg;
+          continue;
+        }
+        items.push({
+          kind: "tools",
+          key: msg.id,
+          calls: [{ call: { id: msg.toolCallId ?? msg.id, name: msg.toolName ?? "tool", arguments: {} }, result: msg }],
+        });
+        continue;
+      }
+      if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
+        // some models emit prose alongside the calls — keep it, then the cards
+        if (msg.content.trim() !== "") items.push({ kind: "message", msg });
+        items.push({ kind: "tools", key: msg.id, calls: msg.toolCalls.map((call) => ({ call })) });
+        continue;
+      }
+      if (msg.role === "assistant" && msg.content.trim() === "") continue; // nothing to show
+      items.push({ kind: "message", msg });
+    }
+    return items;
+  }, [messages]);
 
   /* ---------- data loading ---------- */
 
@@ -203,6 +250,7 @@ export default function ChatView() {
     setRuns([]);
     setApprovals([]);
     setEvents({});
+    pinnedRef.current = true;
     if (selectedId) void loadDetails(selectedId);
   }, [selectedId, loadDetails]);
 
@@ -223,10 +271,14 @@ export default function ChatView() {
     return () => offs.forEach((off) => off());
   }, [selectedId, refreshList, loadDetails]);
 
-  /* auto-scroll when at bottom */
+  /* auto-scroll only while the user is pinned to the bottom; polling during
+     a tool round must never yank the view if they scrolled up to read */
+  const transcriptKey = `${selectedId}:${messages.length}:${runs.map((r) => r.status).join(",")}`;
   useEffect(() => {
+    if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
-  }, [messages.length, selectedId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcriptKey]);
 
   /* ---------- derived ---------- */
 
@@ -507,40 +559,38 @@ export default function ChatView() {
         </div>
 
         {/* messages */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={scrollRef}
+          onScroll={() => {
+            const el = scrollRef.current;
+            if (!el) return;
+            pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+          }}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
           {selected ? (
             <div className="mx-auto max-w-[640px] space-y-5 px-4 py-6">
-              {/* tool activity disclosures for runs referenced by messages */}
-              {runs.map((run) => {
-                const referenced = messages.some((m) => m.chatRunId === run.id);
-                if (!referenced && run.id !== activeRun?.id) return null;
-                return <ActivityDisclosure key={`disc-${run.id}`} run={run} events={events[run.id] ?? []} />;
-              })}
+              {/* live status + activity feed for the run in flight; finished
+                  runs keep their story in the inline tool cards below */}
+              {activeRun && (
+                <ActivityDisclosure
+                  key={`disc-${activeRun.id}`}
+                  run={activeRun}
+                  events={events[activeRun.id] ?? []}
+                />
+              )}
 
-              {messages
-                .filter((m) => m.role !== "tool")
-                .map((m) => (
-                  <div key={m.id} className={cn("flex gap-3", m.role === "user" ? "justify-end" : "justify-start")}>
-                    {m.role !== "user" && (
-                      <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-200">
-                        <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
-                      </span>
-                    )}
-                    <div
-                      onContextMenu={(e) => onBubbleCtx(e, m.content)}
-                      className={cn(
-                        "max-w-[80%] cursor-default rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
-                        m.role === "user" ? "bg-ink-50 text-ink-950" : "bg-ink-850 text-ink-100",
-                      )}
-                    >
-                      {m.role === "user" ? (
-                        m.content
-                      ) : (
-                        <MarkdownBody content={m.content} />
-                      )}
-                    </div>
+              {transcript.map((item) =>
+                item.kind === "tools" ? (
+                  <div key={item.key} className="space-y-1.5">
+                    {item.calls.map((entry) => (
+                      <ToolCallCard key={entry.call.id || entry.result?.id || item.key} entry={entry} />
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <TranscriptMessage key={item.msg.id} msg={item.msg} pipelineMode={selected.mode === "pipeline"} onCtx={onBubbleCtx} />
+                ),
+              )}
 
               {(activeRun || sending) && (
                 <div className="flex gap-3">
@@ -750,13 +800,102 @@ export default function ChatView() {
   );
 }
 
-function MarkdownBody({ content }: { content: string }) {
+/** One non-tool transcript row: user or assistant bubble. */
+function TranscriptMessage({
+  msg,
+  pipelineMode,
+  onCtx,
+}: {
+  msg: ChatMessage;
+  pipelineMode: boolean;
+  onCtx: (e: React.MouseEvent, text: string) => void;
+}) {
+  return (
+    <div className={cn("flex gap-3", msg.role === "user" ? "justify-end" : "justify-start")}>
+      {msg.role !== "user" && (
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-200">
+          <Icon name={pipelineMode ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
+        </span>
+      )}
+      <div
+        onContextMenu={(e) => onCtx(e, msg.content)}
+        className={cn(
+          "max-w-[80%] cursor-default rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
+          msg.role === "user" ? "bg-ink-50 text-ink-950" : "bg-ink-850 text-ink-100",
+        )}
+      >
+        {msg.role === "user" ? msg.content : <MarkdownBody content={msg.content} />}
+      </div>
+    </div>
+  );
+}
+
+type ToolCallEntry = { call: ChatToolCall; result?: ChatMessage };
+
+/**
+ * One tool invocation rendered inline in the transcript: name plus status
+ * while running, expandable arguments and raw result once it finished.
+ * Auto-expanded while the result has not arrived yet so progress is visible.
+ */
+function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(!entry.result);
+  const running = !entry.result;
+  const prettyArguments = useMemo(() => {
+    try {
+      return JSON.stringify(entry.call.arguments ?? {}, null, 2);
+    } catch {
+      return String(entry.call.arguments ?? "");
+    }
+  }, [entry.call.arguments]);
+  const resultText = entry.result?.content ?? "";
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-ink-700/70 bg-ink-850/50">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+        <Icon name="ChevronRight" className={cn("h-3 w-3 shrink-0 text-ink-500 transition-transform", open && "rotate-90")} />
+        <Icon name="Braces" className="h-3.5 w-3.5 shrink-0 text-violet-300/80" />
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-200">
+          {entry.call.name.replace(/_/g, " ")}
+        </span>
+        {running ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-sky-300">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />
+            {t("chat.toolRunning")}
+          </span>
+        ) : (
+          <Icon name="Check" className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
+        )}
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-seam px-3 py-2">
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("chat.toolArguments")}</p>
+            <pre className="max-h-[140px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-ink-300">
+              {prettyArguments}
+            </pre>
+          </div>
+          {entry.result && (
+            <div>
+              <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("chat.toolResult")}</p>
+              <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-ink-300">
+                {resultText}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MarkdownBody = memo(function MarkdownBody({ content }: { content: string }) {
   return (
     <div className="[&_a]:text-sky-300 [&_code]:rounded [&_code]:bg-ink-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_li]:ml-4 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-ink-700 [&_pre]:bg-ink-950/60 [&_pre]:p-3">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
-}
+});
 
 /** Call-to-action for starting a pipeline chat from the empty state. */
 function CtaButton({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {

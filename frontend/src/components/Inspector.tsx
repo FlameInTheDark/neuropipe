@@ -12,6 +12,7 @@ import { CodeEditorModal } from "./CodeEditorModal";
 import { TypeSpecField, specTopToken, tokenToPinDataType } from "./TypeSpecField";
 import { typeSpecFromDataType } from "../lib/type-spec";
 import { unmapDataType } from "../lib/adapters";
+import { formatDuration } from "@/lib/format";
 import type { TypeSpec } from "../lib/types";
 import { control } from "./primitives/styles";
 import { cn } from "../utils/cn";
@@ -936,39 +937,31 @@ function LogBody({
       </div>
 
       {/* timeline */}
-      {timed.length > 1 && (
+      {timed.length > 1 && (() => {
+        const totalMs = timed.reduce((s, l) => s + l.ms, 0);
+        return (
         <div className="shrink-0 border-b border-seam px-3 pb-2 pt-2.5">
           <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.09em] text-ink-500">{t("editor.timeline")}</p>
           <div className="relative flex h-7 w-full gap-px overflow-hidden rounded-md bg-ink-950/60">
             {(() => {
               /* sequential waterfall: segments in execution order, width
-                 proportional to duration but clamped to a visible minimum */
+                 proportional to duration. Sub-millisecond runs truncate to
+                 0 ms, so an all-zero measurement stretches evenly instead
+                 of collapsing into minimum strips; every other layout is
+                 renormalized to fill exactly 100% of the track. */
               const MIN_PCT = 2;
               const sorted = [...timed].sort(
                 (a, b) => Date.parse(a.startedAt!) - Date.parse(b.startedAt!),
               );
-              const total = sorted.reduce((s, l) => s + l.ms, 0) || 1;
-              const raws = sorted.map((l) => (l.ms / total) * 100);
-              /* clamp minimums, then scale down the rest proportionally */
-              const clamped = raws.map((r) => Math.max(r, MIN_PCT));
-              const excess = clamped.reduce((s, r) => s + r, 0) - 100;
-              if (excess > 0) {
-                const shrinkable = clamped
-                  .map((r, i) => ({ r, i }))
-                  .filter((x) => x.r > MIN_PCT)
-                  .sort((a, b) => b.r - a.r);
-                let remaining = excess;
-                const pool = shrinkable.reduce((s, x) => s + (x.r - MIN_PCT), 0);
-                for (const x of shrinkable) {
-                  const cut = Math.min(x.r - MIN_PCT, (x.r - MIN_PCT) / pool * remaining);
-                  clamped[x.i] -= cut;
-                  remaining -= cut;
-                }
-              }
-              let offset = 0;
+              let weights = sorted.map((l) => Math.max(l.ms, 0));
+              if (!weights.some((w) => w > 0)) weights = sorted.map(() => 1);
+              const weightSum = weights.reduce((s, w) => s + w, 0);
+              /* visible minimum, capped so many tiny nodes can still share the track */
+              const minPct = Math.min(MIN_PCT, 100 / sorted.length);
+              const clamped = weights.map((w) => Math.max((w / weightSum) * 100, minPct));
+              const scale = 100 / clamped.reduce((s, w) => s + w, 0);
               return sorted.map((l, i) => {
-                const width = clamped[i];
-                offset += width;
+                const width = clamped[i] * scale;
                 const hovered = hoveredNodeId === l.nodeId;
                 return (
                   <div
@@ -977,9 +970,12 @@ function LogBody({
                     tabIndex={-1}
                     onMouseEnter={() => setHoveredNodeId(l.nodeId ?? null)}
                     onMouseLeave={() => setHoveredNodeId(null)}
-                    className="h-full shrink-0 cursor-pointer transition-opacity"
+                    className="h-full cursor-pointer transition-opacity"
                     style={{
-                      width: `${width}%`,
+                      /* grow ratios (not %) so the 1px gaps are subtracted
+                         first and segments exactly fill the track */
+                      flexGrow: Math.max(width, 0.0001),
+                      flexBasis: 0,
                       background: statusColor(l.status),
                       opacity: hovered ? 1 : 0.55,
                       borderRadius: 2,
@@ -991,10 +987,11 @@ function LogBody({
           </div>
           <div className="mt-0.5 flex justify-between font-mono text-[9px] text-ink-600">
             <span>0ms</span>
-            <span>{Math.round(timed.reduce((s, l) => s + l.ms, 0))}ms</span>
+            <span>{totalMs > 0 && totalMs < 1 ? "<1ms" : formatDuration(totalMs)}</span>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* log entries */}
       <ul className="min-h-0 flex-1">

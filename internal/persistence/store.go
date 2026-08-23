@@ -423,6 +423,16 @@ CREATE TABLE IF NOT EXISTS metric_resource_rollups (
   working_set_sum INTEGER NOT NULL DEFAULT 0,
   working_set_peak INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(bucket, process_name)
+);
+CREATE TABLE IF NOT EXISTS remote_executors (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  address TEXT NOT NULL,
+  token_ref TEXT NOT NULL,
+  use_tls INTEGER NOT NULL DEFAULT 0,
+  llm_mode TEXT NOT NULL DEFAULT 'proxy',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );`)
 	if err != nil {
 		return fmt.Errorf("migrate database: %w", err)
@@ -443,6 +453,9 @@ CREATE TABLE IF NOT EXISTS metric_resource_rollups (
 		return err
 	}
 	if err := s.ensureTriggerNodeMetadataColumns(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureExecutorColumns(ctx); err != nil {
 		return err
 	}
 	if err := s.ensureDatabaseMultiDialectColumns(ctx); err != nil {
@@ -567,6 +580,29 @@ func (s *Store) ensureExecutionTimingColumns(ctx context.Context) error {
 	return nil
 }
 
+// ensureExecutorColumns adds the remote-executor targeting columns to
+// pipelines and executions for stores created before remote executors existed.
+func (s *Store) ensureExecutorColumns(ctx context.Context) error {
+	columns := []struct{ table, name, definition string }{
+		{"pipelines", "executor_id", "TEXT NOT NULL DEFAULT ''"},
+		{"executions", "executor_id", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, column := range columns {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?", column.table), column.name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect %s.%s migration: %w", column.table, column.name, err)
+		}
+		if exists > 0 {
+			continue
+		}
+		statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", column.table, column.name, column.definition)
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("add %s.%s column: %w", column.table, column.name, err)
+		}
+	}
+	return nil
+}
+
 func (s *Store) ensureTriggerNodeMetadataColumns(ctx context.Context) error {
 	columns := []struct{ name, definition string }{
 		{name: "node_type", definition: "TEXT NOT NULL DEFAULT ''"},
@@ -633,9 +669,9 @@ CREATE INDEX IF NOT EXISTS databases_name ON databases(name COLLATE NOCASE);
 }
 
 // CreatePipeline persists a new draft pipeline.
-func (s *Store) CreatePipeline(ctx context.Context, name string, definition domain.FlowDefinition) (domain.Pipeline, error) {
+func (s *Store) CreatePipeline(ctx context.Context, name string, executorID string, definition domain.FlowDefinition) (domain.Pipeline, error) {
 	now := time.Now().UTC()
-	pipeline := domain.Pipeline{ID: uuid.NewString(), Name: strings.TrimSpace(name), Icon: "workflow", IconColor: "#e4e4e7", IconBackground: "#27272a", Status: domain.PipelineDraft, DraftDefinition: definition, CreatedAt: now, UpdatedAt: now}
+	pipeline := domain.Pipeline{ID: uuid.NewString(), Name: strings.TrimSpace(name), Icon: "workflow", IconColor: "#e4e4e7", IconBackground: "#27272a", Status: domain.PipelineDraft, ExecutorID: executorID, DraftDefinition: definition, CreatedAt: now, UpdatedAt: now}
 	if pipeline.Name == "" {
 		pipeline.Name = "Untitled pipeline"
 	}
@@ -643,7 +679,7 @@ func (s *Store) CreatePipeline(ctx context.Context, name string, definition doma
 	if err != nil {
 		return domain.Pipeline{}, err
 	}
-	_, err = statements(s.db).Insert("pipelines").Columns("id", "name", "description", "icon", "icon_color", "icon_background", "status", "draft_definition", "published_revision", "created_at", "updated_at").Values(pipeline.ID, pipeline.Name, pipeline.Description, pipeline.Icon, pipeline.IconColor, pipeline.IconBackground, pipeline.Status, definitionJSON, 0, stamp(now), stamp(now)).ExecContext(ctx)
+	_, err = statements(s.db).Insert("pipelines").Columns("id", "name", "description", "icon", "icon_color", "icon_background", "status", "draft_definition", "published_revision", "executor_id", "created_at", "updated_at").Values(pipeline.ID, pipeline.Name, pipeline.Description, pipeline.Icon, pipeline.IconColor, pipeline.IconBackground, pipeline.Status, definitionJSON, 0, pipeline.ExecutorID, stamp(now), stamp(now)).ExecContext(ctx)
 	if err != nil {
 		return domain.Pipeline{}, fmt.Errorf("create pipeline: %w", err)
 	}
@@ -666,7 +702,7 @@ func (s *Store) DeletePipeline(ctx context.Context, id string) error {
 // ListPipelines returns concise cards ordered by newest edits.
 func (s *Store) ListPipelines(ctx context.Context) ([]domain.PipelineSummary, error) {
 	migrationIssue := sqliteStatements.Select("issue").From("blueprint_migration_issues mi").Where("mi.pipeline_id = p.id").OrderBy("mi.detected_at DESC").Limit(1)
-	rows, err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.published_revision", "p.updated_at", "COUNT(t.id)").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").LeftJoin("trigger_bindings t ON t.pipeline_id = p.id").GroupBy("p.id").OrderBy("p.updated_at DESC").QueryContext(ctx)
+	rows, err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.published_revision", "p.updated_at", "COUNT(t.id)", "COALESCE(p.executor_id, '')", "COALESCE(e.name, '')").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").LeftJoin("trigger_bindings t ON t.pipeline_id = p.id").LeftJoin("remote_executors e ON e.id = p.executor_id").GroupBy("p.id", "p.executor_id").OrderBy("p.updated_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list pipelines: %w", err)
 	}
@@ -676,7 +712,7 @@ func (s *Store) ListPipelines(ctx context.Context) ([]domain.PipelineSummary, er
 		var item domain.PipelineSummary
 		var status string
 		var updated string
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Icon, &item.IconColor, &item.IconBackground, &status, &item.PublishedRevision, &updated, &item.TriggerCount, &item.MigrationIssue); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Icon, &item.IconColor, &item.IconBackground, &status, &item.PublishedRevision, &updated, &item.TriggerCount, &item.ExecutorID, &item.ExecutorName, &item.MigrationIssue); err != nil {
 			return nil, fmt.Errorf("scan pipeline summary: %w", err)
 		}
 		item.Status = domain.PipelineStatus(status)
@@ -691,7 +727,7 @@ func (s *Store) GetPipeline(ctx context.Context, id string) (domain.Pipeline, er
 	var pipeline domain.Pipeline
 	var status, definitionJSON, created, updated string
 	migrationIssue := sqliteStatements.Select("issue").From("blueprint_migration_issues mi").Where("mi.pipeline_id = p.id").OrderBy("mi.detected_at DESC").Limit(1)
-	err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.draft_definition", "p.published_revision", "p.created_at", "p.updated_at").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").Where(squirrel.Eq{"p.id": id}).QueryRowContext(ctx).Scan(&pipeline.ID, &pipeline.Name, &pipeline.Description, &pipeline.Icon, &pipeline.IconColor, &pipeline.IconBackground, &status, &definitionJSON, &pipeline.PublishedRevision, &created, &updated, &pipeline.MigrationIssue)
+	err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.draft_definition", "p.published_revision", "p.created_at", "p.updated_at", "COALESCE(p.executor_id, '')").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").Where(squirrel.Eq{"p.id": id}).QueryRowContext(ctx).Scan(&pipeline.ID, &pipeline.Name, &pipeline.Description, &pipeline.Icon, &pipeline.IconColor, &pipeline.IconBackground, &status, &definitionJSON, &pipeline.PublishedRevision, &created, &updated, &pipeline.ExecutorID, &pipeline.MigrationIssue)
 	if err != nil {
 		return domain.Pipeline{}, fmt.Errorf("get pipeline: %w", err)
 	}
@@ -739,7 +775,7 @@ func (s *Store) SaveDraft(ctx context.Context, pipeline domain.Pipeline) (domain
 	if pipeline.IconBackground == "" {
 		pipeline.IconBackground = "#27272a"
 	}
-	_, err = statements(s.db).Update("pipelines").Set("name", strings.TrimSpace(pipeline.Name)).Set("description", pipeline.Description).Set("icon", pipeline.Icon).Set("icon_color", pipeline.IconColor).Set("icon_background", pipeline.IconBackground).Set("draft_definition", definitionJSON).Set("updated_at", stamp(pipeline.UpdatedAt)).Where(squirrel.Eq{"id": pipeline.ID}).ExecContext(ctx)
+	_, err = statements(s.db).Update("pipelines").Set("name", strings.TrimSpace(pipeline.Name)).Set("description", pipeline.Description).Set("icon", pipeline.Icon).Set("icon_color", pipeline.IconColor).Set("icon_background", pipeline.IconBackground).Set("draft_definition", definitionJSON).Set("executor_id", pipeline.ExecutorID).Set("updated_at", stamp(pipeline.UpdatedAt)).Where(squirrel.Eq{"id": pipeline.ID}).ExecContext(ctx)
 	if err != nil {
 		return domain.Pipeline{}, fmt.Errorf("save draft: %w", err)
 	}
@@ -1294,10 +1330,11 @@ func (s *Store) StartExecution(ctx context.Context, pipelineID, triggerID string
 }
 
 // QueueExecution persists a pending run before it is handed to an owned worker.
-func (s *Store) QueueExecution(ctx context.Context, pipelineID, triggerID string) (domain.Execution, error) {
+// A non-empty executorID marks the run as dispatched to a remote executor.
+func (s *Store) QueueExecution(ctx context.Context, pipelineID, triggerID, executorID string) (domain.Execution, error) {
 	now := time.Now().UTC()
-	execution := domain.Execution{ID: uuid.NewString(), PipelineID: pipelineID, TriggerID: triggerID, Status: domain.RunPending, StartedAt: now, QueuedAt: &now}
-	_, err := statements(s.db).Insert("executions").Columns("id", "pipeline_id", "trigger_id", "status", "started_at", "queued_at").Values(execution.ID, execution.PipelineID, execution.TriggerID, execution.Status, stamp(execution.StartedAt), stamp(now)).ExecContext(ctx)
+	execution := domain.Execution{ID: uuid.NewString(), PipelineID: pipelineID, TriggerID: triggerID, Status: domain.RunPending, StartedAt: now, QueuedAt: &now, ExecutorID: executorID}
+	_, err := statements(s.db).Insert("executions").Columns("id", "pipeline_id", "trigger_id", "status", "started_at", "queued_at", "executor_id").Values(execution.ID, execution.PipelineID, execution.TriggerID, execution.Status, stamp(execution.StartedAt), stamp(now), execution.ExecutorID).ExecContext(ctx)
 	if err != nil {
 		return domain.Execution{}, fmt.Errorf("queue execution: %w", err)
 	}
@@ -1323,7 +1360,7 @@ func (s *Store) CompleteExecution(ctx context.Context, execution domain.Executio
 	// execution would stay "running" forever in the DB when a node output
 	// cannot be encoded.
 	finished := time.Now().UTC()
-	if _, err := statements(s.db).Update("executions").Set("status", execution.Status).Set("finished_at", stamp(finished)).Set("error", execution.Error).Where(squirrel.Eq{"id": execution.ID}).ExecContext(ctx); err != nil {
+	if _, err := statements(s.db).Update("executions").Set("status", execution.Status).Set("finished_at", stamp(finished)).Set("error", execution.Error).Set("executor_id", execution.ExecutorID).Where(squirrel.Eq{"id": execution.ID}).ExecContext(ctx); err != nil {
 		return fmt.Errorf("complete execution: %w", err)
 	}
 	// Clear any previously-stored node runs so a re-completion (e.g. after a
@@ -1357,7 +1394,7 @@ func (s *Store) ListExecutions(ctx context.Context, pipelineID string, limit int
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error").From("executions").Where(squirrel.Eq{"pipeline_id": pipelineID}).OrderBy("started_at DESC").Limit(uint64(limit)).QueryContext(ctx)
+	rows, err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error", "COALESCE(executor_id, '')").From("executions").Where(squirrel.Eq{"pipeline_id": pipelineID}).OrderBy("started_at DESC").Limit(uint64(limit)).QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list executions: %w", err)
 	}
@@ -1367,7 +1404,7 @@ func (s *Store) ListExecutions(ctx context.Context, pipelineID string, limit int
 		var execution domain.Execution
 		var status, started string
 		var finished, queued, runStarted sql.NullString
-		if err := rows.Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error); err != nil {
+		if err := rows.Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error, &execution.ExecutorID); err != nil {
 			return nil, fmt.Errorf("scan execution: %w", err)
 		}
 		applyExecutionTimes(&execution, status, started, finished, queued, runStarted)
@@ -1394,7 +1431,7 @@ func (s *Store) ListRecentExecutions(ctx context.Context, limit int) ([]domain.E
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error").From("executions").OrderBy("started_at DESC").Limit(uint64(limit)).QueryContext(ctx)
+	rows, err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error", "COALESCE(executor_id, '')").From("executions").OrderBy("started_at DESC").Limit(uint64(limit)).QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list recent executions: %w", err)
 	}
@@ -1407,7 +1444,7 @@ func (s *Store) GetExecution(ctx context.Context, id string) (domain.Execution, 
 	var execution domain.Execution
 	var status, started string
 	var finished, queued, runStarted sql.NullString
-	err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error").From("executions").Where(squirrel.Eq{"id": id}).QueryRowContext(ctx).Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error)
+	err := statements(s.db).Select("id", "pipeline_id", "trigger_id", "status", "started_at", "finished_at", "queued_at", "run_started_at", "error", "COALESCE(executor_id, '')").From("executions").Where(squirrel.Eq{"id": id}).QueryRowContext(ctx).Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error, &execution.ExecutorID)
 	if err != nil {
 		return domain.Execution{}, fmt.Errorf("get execution: %w", err)
 	}
@@ -1426,7 +1463,7 @@ func (s *Store) scanExecutions(ctx context.Context, rows *sql.Rows) ([]domain.Ex
 		var execution domain.Execution
 		var status, started string
 		var finished, queued, runStarted sql.NullString
-		if err := rows.Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error); err != nil {
+		if err := rows.Scan(&execution.ID, &execution.PipelineID, &execution.TriggerID, &status, &started, &finished, &queued, &runStarted, &execution.Error, &execution.ExecutorID); err != nil {
 			return nil, fmt.Errorf("scan execution: %w", err)
 		}
 		applyExecutionTimes(&execution, status, started, finished, queued, runStarted)

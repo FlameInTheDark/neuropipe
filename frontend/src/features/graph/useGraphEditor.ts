@@ -227,8 +227,11 @@ export function useGraphEditor(options: {
   notify: (text: string, icon?: string) => void;
   definitionIndex: DefinitionIndex;
   runningMap: Record<string, boolean>;
+  /** Receives the restored viewport whenever a graph finishes loading, so the
+   *  canvas renders at the saved pan/zoom instead of a stale view. */
+  onViewport?: (viewport: Viewport) => void;
 }) {
-  const { notify, definitionIndex, runningMap } = options;
+  const { notify, definitionIndex, runningMap, onViewport } = options;
 
   const [mode, setMode] = useState<"pipeline" | "function" | null>(null);
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
@@ -557,6 +560,7 @@ export function useGraphEditor(options: {
         setNodes(hydrated.nodes);
         setEdges(hydrated.edges);
         viewRef.current = hydrated.viewport;
+        onViewport?.(hydrated.viewport);
         setPipeline(p);
         setSelectedId(null);
         setDirty(false);
@@ -592,6 +596,7 @@ export function useGraphEditor(options: {
         setNodes(withPins.map((n) => (isBoundary(n.type) ? { ...n, locked: true } : n)));
         setEdges(hydrated.edges);
         viewRef.current = hydrated.viewport;
+        onViewport?.(hydrated.viewport);
         setFn(item);
         setSelectedId(null);
         setDirty(false);

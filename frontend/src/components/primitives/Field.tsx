@@ -48,7 +48,7 @@ export function TextInput({
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-  type?: "text" | "number";
+  type?: "text" | "number" | "password";
   mono?: boolean;
   size?: "sm" | "md";
   className?: string;

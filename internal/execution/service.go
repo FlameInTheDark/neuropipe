@@ -4,6 +4,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +53,9 @@ type Service struct {
 	queue       chan queuedRun
 	workers     sync.WaitGroup
 	started     bool
+
+	remoteMu sync.RWMutex
+	remote   RemoteDispatcher
 }
 
 type queuedRun struct {
@@ -62,6 +66,31 @@ type queuedRun struct {
 	gate          pipeline.CapabilityGate
 	bindingID     string
 	chatRunID     string
+	// Remote-targeted runs carry an executor ID and skip the local engine.
+	executorID string
+	embedded   *domain.FlowDefinition
+	unattended bool
+}
+
+// RemoteDispatch describes one run handed to a remote executor. The
+// execution record is created locally first; the executor echoes the
+// execution ID in every subsequent lifecycle event.
+type RemoteDispatch struct {
+	ExecutionID        string
+	PipelineID         string
+	Revision           int64
+	TriggerNodeID      string
+	TriggerBindingID   string
+	ChatRunID          string
+	Unattended         bool
+	Input              pipeline.Packet
+	EmbeddedDefinition *domain.FlowDefinition
+}
+
+// RemoteDispatcher sends dispatched runs to remote executors.
+type RemoteDispatcher interface {
+	Dispatch(ctx context.Context, executorID string, run RemoteDispatch) error
+	CancelRun(ctx context.Context, executorID, executionID string) error
 }
 
 // ServiceOption extends an execution coordinator with optional local services.
@@ -105,6 +134,20 @@ func WithFormDialogOpener(opener nodes.FormDialogOpener) ServiceOption {
 
 // SetTwitchChatSender completes Desktop composition before workers start.
 func (s *Service) SetTwitchChatSender(sender nodes.TwitchChatSender) { s.twitch = sender }
+
+// SetRemoteDispatcher wires the remote-executor connection manager. A nil
+// dispatcher makes every run local.
+func (s *Service) SetRemoteDispatcher(dispatcher RemoteDispatcher) {
+	s.remoteMu.Lock()
+	defer s.remoteMu.Unlock()
+	s.remote = dispatcher
+}
+
+func (s *Service) currentRemote() RemoteDispatcher {
+	s.remoteMu.RLock()
+	defer s.remoteMu.RUnlock()
+	return s.remote
+}
 
 // NewService creates an execution coordinator.
 func NewService(store *persistence.Store, registry *catalog.Registry, llm pipeline.LLMRunner, emit EventSink, options ...ServiceOption) *Service {
@@ -180,6 +223,17 @@ func (s *Service) RunBinding(ctx context.Context, bindingID string, input pipeli
 	if err != nil {
 		return domain.Execution{}, err
 	}
+	executorID := s.store.PipelineExecutorID(ctx, binding.PipelineID)
+	if executorID != "" {
+		return s.dispatchRemote(ctx, queuedRun{
+			execution:     s.newQueuedExecution(ctx, binding.PipelineID, binding.ID, executorID),
+			triggerNodeID: binding.NodeID,
+			input:         input,
+			bindingID:     binding.ID,
+			executorID:    executorID,
+			unattended:    unattended,
+		})
+	}
 	execution, runErr := s.runDefinition(ctx, binding.PipelineID, binding.ID, binding.NodeID, definition, input, security.NewRevisionGate(s.store, binding.PipelineID, binding.Revision, unattended))
 	if execution.ID == "" {
 		return execution, runErr
@@ -199,10 +253,33 @@ func (s *Service) RunBinding(ctx context.Context, bindingID string, input pipeli
 	return execution, runErr
 }
 
+// newQueuedExecution creates the local pending record for a remote run.
+func (s *Service) newQueuedExecution(ctx context.Context, pipelineID, triggerID, executorID string) domain.Execution {
+	execution, err := s.store.QueueExecution(ctx, pipelineID, triggerID, executorID)
+	if err != nil {
+		return domain.Execution{}
+	}
+	return execution
+}
+
 // RunDraft executes the editor's saved draft from a selected trigger. It is a
 // manual action, so the click itself is the approval boundary; it never creates
 // or alters a trigger binding or published revision.
 func (s *Service) RunDraft(ctx context.Context, pipelineID, triggerNodeID string, definition domain.FlowDefinition, input pipeline.Packet) (domain.Execution, error) {
+	if executorID := s.store.PipelineExecutorID(ctx, pipelineID); executorID != "" {
+		job := queuedRun{
+			execution:     s.newQueuedExecution(ctx, pipelineID, "draft:"+triggerNodeID, executorID),
+			triggerNodeID: triggerNodeID,
+			definition:    definition,
+			input:         input,
+			executorID:    executorID,
+			embedded:      &definition,
+		}
+		if job.execution.ID == "" {
+			return domain.Execution{}, fmt.Errorf("queue draft run")
+		}
+		return s.dispatchRemote(ctx, job)
+	}
 	return s.runDefinition(ctx, pipelineID, "draft:"+triggerNodeID, triggerNodeID, definition, input, nil)
 }
 
@@ -226,7 +303,7 @@ func (s *Service) QueuePublished(ctx context.Context, pipelineID, triggerNodeID 
 	if err != nil {
 		return domain.Execution{}, err
 	}
-	execution, err := s.store.QueueExecution(ctx, item.ID, "api:"+triggerNodeID)
+	execution, err := s.store.QueueExecution(ctx, item.ID, "api:"+triggerNodeID, item.ExecutorID)
 	if err != nil {
 		return domain.Execution{}, err
 	}
@@ -239,7 +316,7 @@ func (s *Service) QueuePublished(ctx context.Context, pipelineID, triggerNodeID 
 		s.recordMetrics(execution)
 		return domain.Execution{}, fmt.Errorf("execution queue is not running")
 	}
-	job := queuedRun{execution: execution, triggerNodeID: triggerNodeID, definition: definition, input: input}
+	job := queuedRun{execution: execution, triggerNodeID: triggerNodeID, definition: definition, input: input, executorID: item.ExecutorID}
 	return s.enqueue(ctx, queueCtx, job)
 }
 
@@ -260,7 +337,7 @@ func (s *Service) QueueBinding(ctx context.Context, bindingID string, input pipe
 	if err != nil {
 		return domain.Execution{}, err
 	}
-	execution, err := s.store.QueueExecution(ctx, binding.PipelineID, binding.ID)
+	execution, err := s.store.QueueExecution(ctx, binding.PipelineID, binding.ID, s.store.PipelineExecutorID(ctx, binding.PipelineID))
 	if err != nil {
 		return domain.Execution{}, err
 	}
@@ -273,7 +350,7 @@ func (s *Service) QueueBinding(ctx context.Context, bindingID string, input pipe
 		s.recordMetrics(execution)
 		return domain.Execution{}, fmt.Errorf("execution queue is not running")
 	}
-	job := queuedRun{execution: execution, triggerNodeID: binding.NodeID, definition: definition, input: input, bindingID: binding.ID, gate: security.NewRevisionGate(s.store, binding.PipelineID, binding.Revision, unattended)}
+	job := queuedRun{execution: execution, triggerNodeID: binding.NodeID, definition: definition, input: input, bindingID: binding.ID, gate: security.NewRevisionGate(s.store, binding.PipelineID, binding.Revision, unattended), unattended: unattended, executorID: execution.ExecutorID}
 	return s.enqueue(ctx, queueCtx, job)
 }
 
@@ -298,7 +375,7 @@ func (s *Service) QueueChatBinding(ctx context.Context, bindingID, chatRunID str
 	if _, err := s.publishedEvent(definition, binding.NodeID); err != nil {
 		return domain.Execution{}, err
 	}
-	execution, err := s.store.QueueExecution(ctx, binding.PipelineID, "chat:"+binding.ID)
+	execution, err := s.store.QueueExecution(ctx, binding.PipelineID, "chat:"+binding.ID, s.store.PipelineExecutorID(ctx, binding.PipelineID))
 	if err != nil {
 		return domain.Execution{}, err
 	}
@@ -315,7 +392,7 @@ func (s *Service) QueueChatBinding(ctx context.Context, bindingID, chatRunID str
 		_ = s.store.UpdateChatRun(ctx, chatRunID, domain.RunFailed, "Unable to start", execution.ID, execution.Error)
 		return domain.Execution{}, fmt.Errorf("execution queue is not running")
 	}
-	job := queuedRun{execution: execution, triggerNodeID: binding.NodeID, definition: definition, input: input, bindingID: binding.ID, chatRunID: chatRunID}
+	job := queuedRun{execution: execution, triggerNodeID: binding.NodeID, definition: definition, input: input, bindingID: binding.ID, chatRunID: chatRunID, executorID: execution.ExecutorID}
 	return s.enqueue(ctx, queueCtx, job)
 }
 
@@ -328,6 +405,26 @@ func (s *Service) CancelExecution(ctx context.Context, executionID string) error
 	}
 	if execution.Status == domain.RunCompleted || execution.Status == domain.RunFailed || execution.Status == domain.RunCancelled || execution.Status == domain.RunSkipped {
 		return nil
+	}
+	if execution.ExecutorID != "" {
+		if dispatcher := s.currentRemote(); dispatcher != nil {
+			if cancelErr := dispatcher.CancelRun(ctx, execution.ExecutorID, execution.ID); cancelErr != nil {
+				// The executor is unreachable; finish the local record so the
+				// user is never stuck with a permanently running run.
+				execution.Status, execution.Error = domain.RunCancelled, "Cancelled while the executor was unreachable"
+				if completeErr := s.store.CompleteExecution(ctx, execution); completeErr != nil {
+					return completeErr
+				}
+				s.recordMetrics(execution)
+				s.emitEvent("execution:completed", execution)
+				s.release(execution.PipelineID)
+				return nil
+			}
+			s.mu.Lock()
+			s.cancelled[execution.ID] = struct{}{}
+			s.mu.Unlock()
+			return nil // final state arrives via the executor event stream
+		}
 	}
 	s.mu.Lock()
 	s.cancelled[execution.ID] = struct{}{}
@@ -434,6 +531,10 @@ func (s *Service) worker(ctx context.Context) {
 }
 
 func (s *Service) runQueued(ctx context.Context, job queuedRun) {
+	if job.executorID != "" {
+		s.dispatchRemote(ctx, job)
+		return
+	}
 	execution := job.execution
 	if s.isCancelled(execution.ID) {
 		s.completeCancelled(job, "Cancelled by user")
@@ -538,6 +639,102 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		}
 		s.emitEvent("execution:completed", execution)
 	}
+}
+
+// dispatchRemote hands one queued run to a remote executor. The local record
+// transitions to running immediately; the final state arrives through the
+// executor's event stream (ApplyRemoteRunUpdate) or reconnect reconciliation.
+func (s *Service) dispatchRemote(ctx context.Context, job queuedRun) (domain.Execution, error) {
+	execution := job.execution
+	if execution.ID == "" {
+		return domain.Execution{}, fmt.Errorf("queue remote run")
+	}
+	dispatcher := s.currentRemote()
+	if dispatcher == nil {
+		execution.Status, execution.Error = domain.RunFailed, "remote executors are not available"
+		_ = s.store.CompleteExecution(context.Background(), execution)
+		s.recordMetrics(execution)
+		s.emitEvent("execution:completed", execution)
+		return execution, nil
+	}
+	if job.bindingID == "" && !strings.HasPrefix(execution.TriggerID, "draft:") {
+		// Keep the local trigger linkage for last-run bookkeeping.
+		job.bindingID = execution.TriggerID
+	}
+	if err := s.store.MarkExecutionRunning(ctx, execution.ID); err == nil {
+		execution.Status = domain.RunRunning
+		now := time.Now().UTC()
+		execution.RunStartedAt = &now
+		s.emitEvent("execution:started", execution)
+	}
+	s.acquire(execution.PipelineID)
+	run := RemoteDispatch{
+		ExecutionID:        execution.ID,
+		PipelineID:         execution.PipelineID,
+		TriggerNodeID:      job.triggerNodeID,
+		TriggerBindingID:   job.bindingID,
+		ChatRunID:          job.chatRunID,
+		Unattended:         job.unattended,
+		Input:              job.input,
+		EmbeddedDefinition: job.embedded,
+	}
+	if err := dispatcher.Dispatch(ctx, job.executorID, run); err != nil {
+		s.release(execution.PipelineID)
+		execution.Status, execution.Error = domain.RunFailed, err.Error()
+		finished := time.Now().UTC()
+		execution.FinishedAt = &finished
+		_ = s.store.CompleteExecution(context.Background(), execution)
+		s.recordMetrics(execution)
+		if job.chatRunID != "" {
+			_ = s.store.UpdateChatRun(context.Background(), job.chatRunID, domain.RunFailed, "Failed", execution.ID, execution.Error)
+			s.emitEvent("chat.run.updated", map[string]string{"chatRunId": job.chatRunID})
+		}
+		s.emitEvent("execution:completed", execution)
+		return execution, nil
+	}
+	if job.chatRunID != "" {
+		_ = s.store.UpdateChatRun(context.Background(), job.chatRunID, domain.RunRunning, "Working", execution.ID, "")
+		s.emitEvent("chat.run.updated", map[string]string{"chatRunId": job.chatRunID})
+	}
+	return execution, nil
+}
+
+// ApplyRemoteRunUpdate records a state change reported by a remote executor
+// and finishes the local execution record when the run reaches an end state.
+func (s *Service) ApplyRemoteRunUpdate(run domain.Execution) {
+	ctx := context.Background()
+	stored, err := s.store.GetExecution(ctx, run.ID)
+	if err != nil {
+		return // unknown execution; ignore instead of inventing history
+	}
+	switch stored.Status {
+	case domain.RunCompleted, domain.RunFailed, domain.RunCancelled, domain.RunSkipped:
+		return // already finished locally (e.g. cancelled while offline)
+	}
+	stored.Status, stored.Error = run.Status, run.Error
+	stored.NodeRuns = run.NodeRuns
+	if run.RunStartedAt != nil {
+		stored.RunStartedAt = run.RunStartedAt
+	}
+	stored.FinishedAt = run.FinishedAt
+	_ = s.store.CompleteExecution(ctx, stored)
+	s.recordMetrics(stored)
+	if chatRun, ok := s.store.GetChatRunByExecutionID(ctx, stored.ID); ok {
+		statusText := "Completed"
+		switch stored.Status {
+		case domain.RunCancelled:
+			statusText = "Stopped"
+		case domain.RunFailed:
+			statusText = "Failed"
+		}
+		_ = s.store.UpdateChatRun(ctx, chatRun.ID, stored.Status, statusText, stored.ID, stored.Error)
+		s.emitEvent("chat.run.updated", map[string]string{"chatRunId": chatRun.ID})
+	}
+	if stored.TriggerID != "" && !strings.HasPrefix(stored.TriggerID, "draft:") && !strings.HasPrefix(stored.TriggerID, "api:") && !strings.HasPrefix(stored.TriggerID, "chat:") && stored.FinishedAt != nil {
+		_ = s.store.SetTriggerLastRun(ctx, stored.TriggerID, stored.Status, *stored.FinishedAt)
+	}
+	s.emitEvent("execution:completed", stored)
+	s.release(stored.PipelineID)
 }
 
 func (s *Service) completeCancelled(job queuedRun, reason string) {

@@ -274,7 +274,9 @@ function Legend({ color, label }: { color: string; label: string }) {
 
 function delta(kpi: { value: number; previousValue: number; available: boolean }, percent = false): number {
   if (!kpi.available || kpi.previousValue === 0) return 0;
-  if (percent) return (kpi.value - kpi.previousValue) * 100;
+  // percent-type KPIs (success rate) are already on a 0–100 scale, so their
+  // delta is plain percentage points; everything else is relative change.
+  if (percent) return kpi.value - kpi.previousValue;
   return ((kpi.value - kpi.previousValue) / kpi.previousValue) * 100;
 }
 

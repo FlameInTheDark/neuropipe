@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Edge, EditorComment, GraphNode, LibraryCategory, NodeGroup, PortKind } from "../types";
+import type { Edge, EditorComment, GraphNode, LibraryCategory, NodeGroup, PinDataType, PortKind } from "../types";
 import { BODY_BOTTOM, BODY_TOP, HEADER_H, NODE_BORDER, NODE_W, ROW_H, nodeHeight, portX, portY } from "../data/graph";
 
 /* footprint of a freshly-created library node (2 input + 2 output rows) */
@@ -196,6 +196,44 @@ export function Canvas({
       return { x: (cx - r.left - view.x) / view.z, y: (cy - r.top - view.y) / view.z };
     },
     [view],
+  );
+
+  /* Edge colours follow the *live* source-port contract. Persisted edges do
+     not store a data type — it is re-derived on load, and backend-resolved
+     nodes (function calls, SQL, dynamic pins) only receive their real ports
+     after an async resolve, so reading the wire's stored type would render
+     stale gray "any" connections. Wires entering a reroute knot chain are
+     traced back to the ultimate non-reroute source. */
+  const nodeById = useMemo(() => {
+    const map = new Map<string, GraphNode>();
+    for (const n of nodes) map.set(n.id, n);
+    return map;
+  }, [nodes]);
+  const incomingEdgeByNode = useMemo(() => {
+    const map = new Map<string, Edge>();
+    for (const e of edges) {
+      if (!map.has(e.to.node)) map.set(e.to.node, e);
+    }
+    return map;
+  }, [edges]);
+  const edgeDataType = useCallback(
+    (e: Edge): PinDataType | undefined => {
+      if (e.kind === "exec" || e.kind === "tool") return e.kind;
+      let cur = e;
+      for (let guard = 0; guard < 64; guard++) {
+        const src = nodeById.get(cur.from.node);
+        if (!src) return cur.dataType ?? "any";
+        if (!isReroute(src)) {
+          const port = src.outputs.find((p) => p.id === cur.from.port);
+          return port?.dataType ?? cur.dataType ?? "any";
+        }
+        const feed = incomingEdgeByNode.get(src.id);
+        if (!feed) return cur.dataType ?? "any"; // dangling knot keeps its own type
+        cur = feed;
+      }
+      return cur.dataType ?? "any";
+    },
+    [nodeById, incomingEdgeByNode],
   );
 
   /* single source of truth for where a dragged library node lands.
@@ -534,6 +572,7 @@ export function Canvas({
             if (!a || !b) return null;
             const active = selectedId === e.from.node || selectedId === e.to.node;
             const hover = hoverEdge === e.id;
+            const dataType = edgeDataType(e);
             const d = bezier(a.x, a.y, b.x, b.y);
             return (
               <g key={e.id} data-edge={e.id} className="pointer-events-auto">
@@ -561,12 +600,12 @@ export function Canvas({
                   fill="none"
                   strokeLinecap="round"
                   strokeWidth={hover ? 2.2 : active ? 1.8 : 1.3}
-                  stroke={edgeColor(e.kind, e.dataType, active, hover)}
+                  stroke={edgeColor(e.kind, dataType, active, hover)}
                   className={cn(e.kind === "exec" && "edge-dash")}
                   style={{ transition: "stroke 0.15s" }}
                 />
                 {e.kind === "data" && (
-                  <circle cx={b.x} cy={b.y} r={2.5} fill={pinPalette(e.dataType).dot} opacity={active ? 1 : 0.7} />
+                  <circle cx={b.x} cy={b.y} r={2.5} fill={pinPalette(dataType).dot} opacity={active ? 1 : 0.7} />
                 )}
               </g>
             );

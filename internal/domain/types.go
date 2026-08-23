@@ -164,10 +164,13 @@ type Pipeline struct {
 	// HasUnpublishedChanges distinguishes an editable draft from the immutable
 	// revision that triggers currently run. Trust is revision-scoped and must
 	// never make the draft read-only.
-	HasUnpublishedChanges bool      `json:"hasUnpublishedChanges"`
-	MigrationIssue        string    `json:"migrationIssue,omitempty"`
-	CreatedAt             time.Time `json:"createdAt"`
-	UpdatedAt             time.Time `json:"updatedAt"`
+	HasUnpublishedChanges bool   `json:"hasUnpublishedChanges"`
+	MigrationIssue        string `json:"migrationIssue,omitempty"`
+	// ExecutorID targets the pipeline at a remote executor. Empty means the
+	// pipeline runs inside this desktop installation.
+	ExecutorID string    `json:"executorId,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 type PipelineSummary struct {
@@ -181,6 +184,8 @@ type PipelineSummary struct {
 	PublishedRevision int            `json:"publishedRevision"`
 	TriggerCount      int            `json:"triggerCount"`
 	MigrationIssue    string         `json:"migrationIssue,omitempty"`
+	ExecutorID        string         `json:"executorId,omitempty"`
+	ExecutorName      string         `json:"executorName,omitempty"`
 	UpdatedAt         time.Time      `json:"updatedAt"`
 }
 
@@ -287,6 +292,8 @@ type Execution struct {
 	FinishedAt   *time.Time `json:"finishedAt,omitempty"`
 	Error        string     `json:"error,omitempty"`
 	NodeRuns     []NodeRun  `json:"nodeRuns,omitempty"`
+	// ExecutorID is set when the run was executed by a remote executor.
+	ExecutorID string `json:"executorId,omitempty"`
 }
 
 // Report is a Markdown document emitted by a pipeline execution and kept in
@@ -1347,4 +1354,84 @@ type PermissionGrant struct {
 	Capability Capability `json:"capability"`
 	Scope      string     `json:"scope"`
 	GrantedAt  time.Time  `json:"grantedAt"`
+}
+
+// ExecutorLLMMode selects where AI nodes resolve their provider when running
+// on a remote executor. ProxyForwards calls back through the desktop session;
+// Local uses providers configured on the executor itself.
+type ExecutorLLMMode string
+
+const (
+	ExecutorLLMProxy ExecutorLLMMode = "proxy"
+	ExecutorLLMLocal ExecutorLLMMode = "local"
+)
+
+// RemoteExecutor is a user-registered remote pipeline executor. TokenRef only
+// identifies a vault record; the shared secret is never serialised to React.
+type RemoteExecutor struct {
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Address   string          `json:"address"`
+	TokenRef  string          `json:"-"`
+	UseTLS    bool            `json:"useTLS"`
+	LLMMode   ExecutorLLMMode `json:"llmMode"`
+	CreatedAt time.Time       `json:"createdAt"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+}
+
+// SaveRemoteExecutorRequest creates or updates an executor registration.
+// A non-empty Token stores the shared secret once; it is never returned.
+type SaveRemoteExecutorRequest struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Token   string `json:"token,omitempty"`
+	UseTLS  bool   `json:"useTLS"`
+}
+
+// RemoteExecutorStatus is safe to render in Settings and never includes the
+// token, address credentials, or connection internals beyond reachability.
+type RemoteExecutorStatus struct {
+	Online        bool   `json:"online"`
+	Version       string `json:"version,omitempty"`
+	Platform      string `json:"platform,omitempty"`
+	Message       string `json:"message,omitempty"`
+	ActiveRuns    int    `json:"activeRuns"`
+	MaxConcurrent int    `json:"maxConcurrent"`
+}
+
+// RemoteExecutorProvider mirrors a provider configured on the executor for
+// local LLM mode. The API key is write-only and surfaces as APIKeySet.
+type RemoteExecutorProvider struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	BaseURL   string `json:"baseUrl"`
+	Model     string `json:"model"`
+	Enabled   bool   `json:"enabled"`
+	APIKey    string `json:"apiKey,omitempty"`
+	APIKeySet bool   `json:"apiKeySet"`
+}
+
+// RemoteExecutorConfig is the RPC-managed runtime configuration of one
+// executor. Boot settings (listen address, TLS, auth token) stay in the
+// executor's local config file by design.
+type RemoteExecutorConfig struct {
+	LLMMode           ExecutorLLMMode          `json:"llmMode"`
+	Providers         []RemoteExecutorProvider `json:"providers"`
+	DefaultProviderID string                   `json:"defaultProviderId"`
+	MaxConcurrentRuns int                      `json:"maxConcurrentRuns"`
+}
+
+// RemoteExecutorListItem pairs a registration with its cached status.
+type RemoteExecutorListItem struct {
+	RemoteExecutor
+	Status RemoteExecutorStatus `json:"status"`
+}
+
+// ExecutorCreateResult returns the registration plus the shared secret,
+// which the UI displays exactly once.
+type ExecutorCreateResult struct {
+	Executor RemoteExecutor `json:"executor"`
+	Token    string         `json:"token"`
 }

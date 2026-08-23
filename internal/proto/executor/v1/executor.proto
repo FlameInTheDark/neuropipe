@@ -1,0 +1,233 @@
+// Neuropipe Remote Executor wire contract (v1).
+//
+// The executor binary is the gRPC server; the desktop application dials it.
+// Complex graph payloads (FlowDefinition, Packet, CustomFunction) travel as
+// versioned JSON inside bytes fields: the domain types are the single source
+// of truth and already round-trip through JSON in persistence and Wails, so a
+// proto mirror would only add drift risk. Identity, control-plane, and status
+// fields are first-class proto fields.
+syntax = "proto3";
+
+package neuropipe.executor.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/FlameInTheDark/neuropipe/internal/proto/executor/v1;executorv1";
+
+// Executor is implemented by every remote executor installation. All methods
+// require an "authorization: Bearer <token>" metadata entry whose token is
+// compared constant-time against the configured shared secret.
+service Executor {
+  // GetStatus reports identity, platform, and load for health pings and the
+  // Settings status display.
+  rpc GetStatus(StatusRequest) returns (ExecutorStatus);
+  // GetConfig returns runtime configuration. Secret material is never
+  // included; write-only fields surface as *KeySet booleans instead.
+  rpc GetConfig(GetConfigRequest) returns (ExecutorConfig);
+  // UpdateConfig applies mutable runtime settings without a restart where
+  // possible. Provider API keys are accepted once here and stored in the
+  // executor's local vault; they cannot be read back.
+  rpc UpdateConfig(UpdateConfigRequest) returns (ExecutorConfig);
+  // DeployPipeline upserts one published pipeline bundle. Re-deploying the
+  // same pipeline with a new revision replaces it atomically.
+  rpc DeployPipeline(DeployPipelineRequest) returns (DeployPipelineResponse);
+  // UndeployPipeline removes a deployed bundle and stops its autonomous triggers.
+  rpc UndeployPipeline(UndeployPipelineRequest) returns (UndeployPipelineResponse);
+  // ListDeployed reports deployed bundle identities for reconciliation.
+  rpc ListDeployed(ListDeployedRequest) returns (ListDeployedResponse);
+  // StartRun begins an asynchronous run. Desktop-dispatched triggers and
+  // editor draft runs use this entry point; embedded definitions are executed
+  // ephemerally and never persisted as deployments.
+  rpc StartRun(StartRunRequest) returns (StartRunResponse);
+  // CancelRun cancels a running or queued execution.
+  rpc CancelRun(CancelRunRequest) returns (CancelRunResponse);
+  // GetRun returns the current snapshot of one execution.
+  rpc GetRun(GetRunRequest) returns (RunSnapshot);
+  // ListRuns returns recent executions, newest first, for reconnect
+  // reconciliation of runs that finished while the desktop was disconnected.
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  // StreamEvents pushes lifecycle events for executions started through this
+  // connection's session. The stream ends when the client cancels it.
+  rpc StreamEvents(StreamEventsRequest) returns (stream ExecutionEvent);
+  // Tunnel is opened by the desktop immediately after connecting and stays
+  // open for the session. The executor writes HostCall frames onto its side
+  // whenever a node needs a desktop-hosted service (LLM proxy, report and
+  // chat write-back, SQL, Twitch send); the desktop answers with HostResponse
+  // frames carrying the same request ID.
+  rpc Tunnel(stream TunnelFrame) returns (stream TunnelFrame);
+}
+
+message StatusRequest {}
+
+message ExecutorStatus {
+  string executor_version = 1;
+  string platform = 2;            // GOOS/GOARCH of the running executor
+  int32 blueprint_schema_version = 3;
+  int64 uptime_seconds = 4;
+  int32 active_runs = 5;
+  int32 max_concurrent_runs = 6;
+}
+
+message GetConfigRequest {}
+message UpdateConfigRequest {
+  ExecutorConfig config = 1;
+}
+
+// ExecutorConfig is the RPC-managed subset of executor settings. Static boot
+// settings (listen address, TLS, data dir, auth token) live in the executor's
+// config file and are intentionally not writable over the network.
+message ExecutorConfig {
+  // "proxy" forwards LLM calls to the desktop over Tunnel; "local" uses the
+  // providers below with credentials from the executor's own vault.
+  string llm_mode = 1;
+  repeated ExecutorProvider providers = 2;
+  string default_provider_id = 3;
+  int32 max_concurrent_runs = 4;
+}
+
+message ExecutorProvider {
+  string id = 1;
+  string name = 2;
+  string kind = 3;       // mirrors domain.ProviderKind
+  string base_url = 4;
+  string model = 5;
+  bool enabled = 6;
+  // Write-only on UpdateConfig; GetConfig only reports api_key_set.
+  string api_key = 7;
+  bool api_key_set = 8;
+}
+
+message DeployPipelineRequest {
+  string pipeline_id = 1;
+  string name = 2;
+  string description = 3;
+  string icon = 4;
+  string icon_color = 5;
+  string icon_background = 6;
+  int64 revision = 7;
+  int32 blueprint_schema_version = 8;
+  // JSON-encoded domain.FlowDefinition.
+  bytes definition_json = 9;
+  // JSON-encoded published domain.CustomFunction values required by the
+  // definition, resolved recursively by the desktop before deploy.
+  repeated bytes functions_json = 10;
+  // Autonomous trigger bindings carried with the deployment.
+  repeated DeployedTrigger triggers = 11;
+  // Capability allowlist granted to this revision at publish time.
+  repeated string capabilities = 12;
+}
+message DeployPipelineResponse {}
+
+message DeployedTrigger {
+  string binding_id = 1;   // desktop trigger-binding identity for last-run sync
+  string node_id = 2;
+  string node_type = 3;    // e.g. "trigger:cron", "trigger:file_watch"
+  string kind = 4;         // mirrors domain.TriggerKind
+  string label = 5;
+  bool enabled = 6;
+  bool trusted = 7;        // unattended approval captured at deploy time
+  string cron = 8;
+  string timezone = 9;
+  string watch_path = 10;  // file-watch path, resolved on the executor machine
+  bool watch_recursive = 11;
+}
+
+message UndeployPipelineRequest { string pipeline_id = 1; }
+message UndeployPipelineResponse {}
+
+message ListDeployedRequest {}
+message ListDeployedResponse {
+  repeated DeployedPipelineInfo pipelines = 1;
+}
+
+message DeployedPipelineInfo {
+  string pipeline_id = 1;
+  string name = 2;
+  int64 revision = 3;
+  int32 trigger_count = 4;
+  google.protobuf.Timestamp deployed_at = 5;
+}
+
+message StartRunRequest {
+  // Correlation ID assigned by the desktop; echoed in every event.
+  string execution_id = 1;
+  string pipeline_id = 2;
+  // Zero selects the newest deployed revision.
+  int64 revision = 3;
+  string trigger_node_id = 4;
+  string trigger_binding_id = 5;
+  bool unattended = 6;
+  // Optional chat-run correlation forwarded to chat nodes.
+  string chat_run_id = 7;
+  // JSON-encoded pipeline.Packet input.
+  bytes input_json = 8;
+  // Optional JSON-encoded domain.FlowDefinition for ephemeral draft runs.
+  bytes embedded_definition_json = 9;
+  int32 blueprint_schema_version = 10;
+}
+message StartRunResponse {}
+
+message CancelRunRequest { string execution_id = 1; }
+message CancelRunResponse {}
+
+message GetRunRequest { string execution_id = 1; }
+
+message ListRunsRequest {
+  int32 limit = 1; // zero means the executor default page size
+}
+message ListRunsResponse {
+  repeated RunSnapshot runs = 1;
+}
+
+message StreamEventsRequest {}
+
+message ExecutionEvent {
+  RunSnapshot run = 1;
+}
+
+message RunSnapshot {
+  string execution_id = 1;
+  string pipeline_id = 2;
+  string trigger_node_id = 3;
+  string trigger_binding_id = 4;
+  int64 revision = 5;
+  string status = 6;      // mirrors domain.RunStatus
+  string error = 7;
+  google.protobuf.Timestamp started_at = 8;      // record creation time
+  google.protobuf.Timestamp finished_at = 9;
+  repeated NodeRun node_runs = 10;
+  string chat_run_id = 11;
+  google.protobuf.Timestamp run_started_at = 12; // actual execution start
+}
+
+message NodeRun {
+  string node_id = 1;
+  string node_type = 2;
+  string parent_node_id = 3;
+  string function_id = 4;
+  int32 function_revision = 5;
+  string status = 6;
+  string error = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp finished_at = 9;
+}
+
+message TunnelFrame {
+  string request_id = 1;
+  oneof payload {
+    HostCall call = 2;
+    HostResponse response = 3;
+  }
+}
+
+message HostCall {
+  string kind = 1; // llm.chat | llm.converse | report.create | chat.append_reply |
+                   // chat.update_status | chat.read_history | sql.query | twitch.send_message
+  bytes payload_json = 2;
+}
+
+message HostResponse {
+  bool ok = 1;
+  bytes payload_json = 2;
+  string error = 3;
+}

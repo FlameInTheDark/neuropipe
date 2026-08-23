@@ -141,6 +141,42 @@ jobs:
             throw "NSIS installer build failed with exit code $installerExit"
           }
 
+      - name: Build remote executor binaries
+        if: steps.release.outputs.has_release == 'true'
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.tag }}"
+          mkdir -p build/bin/executors
+          for target in windows-amd64 windows-arm64 linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            goos="${target%%-*}"
+            goarch="${target##*-}"
+            ext=""
+            if [ "$goos" = "windows" ]; then ext=".exe"; fi
+            out="build/bin/executors/neuropipe-executor-${tag}-${goos}-${goarch}"
+            mkdir -p "$out"
+            GOOS="$goos" GOARCH="$goarch" go build -trimpath \
+              -ldflags "-s -w -X github.com/FlameInTheDark/neuropipe/internal/executord.ExecutorVersion=${tag}" \
+              -o "$out/neuropipe-executor${ext}" ./cmd/neuropipe-executor
+            cp README.md "$out/" || true
+          done
+
+      - name: Package remote executor archives
+        if: steps.release.outputs.has_release == 'true'
+        shell: pwsh
+        run: |
+          $root = Join-Path $PWD 'build/bin/executors'
+          Get-ChildItem $root -Directory | ForEach-Object {
+            $name = $_.Name
+            if ($name -like '*windows*') {
+              Compress-Archive -Path "$($_.FullName)/*" -DestinationPath (Join-Path $root "$name.zip") -Force
+            } else {
+              tar -czf (Join-Path $root "$name.tar.gz") -C $root $name
+            }
+          }
+
       - name: Find release artifacts
         if: steps.release.outputs.has_release == 'true'
         id: artifacts
@@ -182,6 +218,11 @@ jobs:
           $assets = @("$binary#Neuropipe-$tag-windows-amd64.exe")
           if ($installer) {
             $assets += "$installer#Neuropipe-$tag-windows-amd64-installer.exe"
+          }
+
+          $executorArchives = Get-ChildItem -Path (Join-Path $PWD 'build/bin/executors') -File -ErrorAction SilentlyContinue
+          foreach ($archive in $executorArchives) {
+            $assets += "$($archive.FullName)#$($archive.Name)"
           }
 
           Write-Host "Uploading assets: $assets"

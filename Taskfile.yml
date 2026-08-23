@@ -29,3 +29,16 @@ tasks:
     summary: Runs the application in development mode
     cmds:
       - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  gen:proto:
+    summary: Regenerates the executor gRPC contract (requires protoc + protoc-gen-go + protoc-gen-go-grpc)
+    cmds:
+      - protoc --proto_path=internal/proto --go_out=paths=source_relative:internal/proto --go-grpc_out=paths=source_relative:internal/proto internal/proto/executor/v1/executor.proto
+
+  executor:build:
+    summary: Cross-compiles the standalone executor binary (pure Go, no cgo)
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p bin
+      - go build -trimpath -ldflags "-s -w" -o bin/neuropipe-executor{{if eq OS "windows"}}.exe{{end}} ./cmd/neuropipe-executor

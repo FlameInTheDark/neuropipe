@@ -83,6 +83,13 @@ func (s *Service) Reload(ctx context.Context) error {
 	return nil
 }
 
+// CronSpec validates a five-field cron expression with an optional IANA
+// timezone and returns the robfig/cron specification string. It is shared
+// with the remote executor's autonomous scheduler.
+func CronSpec(expression, timezone string) (string, error) {
+	return cronSpec(expression, timezone)
+}
+
 func cronSpec(expression, timezone string) (string, error) {
 	if len(strings.Fields(expression)) != 5 {
 		return "", fmt.Errorf("cron expressions must have five fields")

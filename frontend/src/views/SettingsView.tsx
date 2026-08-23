@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Browser } from "@wailsio/runtime";
 import i18n from "@/i18n";
@@ -35,6 +35,7 @@ import { Icon } from "../components/icons";
 import { Dropdown } from "../components/Dropdown";
 import { Modal, ModalActions } from "../components/primitives/Modal";
 import { Field, TextInput, TextArea } from "../components/primitives/Field";
+import { RemoteExecutorsPanel } from "./RemoteExecutorsPanel";
 import { cn } from "../utils/cn";
 
 const SECTIONS = [
@@ -42,6 +43,7 @@ const SECTIONS = [
   { id: "provider", labelKey: "settings.provider", icon: "Cable" },
   { id: "models", labelKey: "settings.models", icon: "HardDrive" },
   { id: "runtime", labelKey: "settings.runtime", icon: "Activity" },
+  { id: "executors", labelKey: "executors.title", icon: "Server" },
   { id: "api", labelKey: "settings.api", icon: "Radio" },
   { id: "twitch", labelKey: "twitch.title", icon: "Radio" },
   { id: "execution", labelKey: "settings.execution", icon: "Play" },
@@ -85,7 +87,9 @@ function defaultProvider(kind: ProviderConfig["kind"]): ProviderConfig {
     case "llamacpp":
       return { id: "llama-managed", name: "Managed llama.cpp", kind, baseUrl: "", model: "", enabled: true };
     default:
-      return { id: "openai-compatible", name: "OpenAI-compatible", kind, baseUrl: "https://api.example.com/v1", model: "", enabled: true };
+      // No example URL here on purpose: an empty field plus its placeholder
+      // must never look like configuration that was loaded from settings.
+      return { id: "openai-compatible", name: "OpenAI-compatible", kind, baseUrl: "", model: "", enabled: true };
   }
 }
 
@@ -96,10 +100,15 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
     workspace.settings ? normalizeSettings(workspace.settings) : null,
   );
   const [saving, setSaving] = useState(false);
+  /* local edits must survive background workspace refreshes; the ref clears
+     after a successful save so external changes flow in again. */
+  const dirtyRef = useRef(false);
 
   /* re-sync when the workspace loads/changes settings externally */
   useEffect(() => {
-    if (workspace.settings && !saving) setDraft(normalizeSettings(workspace.settings));
+    if (!workspace.settings || saving) return;
+    if (dirtyRef.current) return; // keep unsaved local edits
+    setDraft(normalizeSettings(workspace.settings));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.settings]);
 
@@ -111,7 +120,10 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
     );
   }
 
-  const patch = (p: Partial<Settings>) => setDraft((d) => (d ? { ...d, ...p } : d));
+  const patch = (p: Partial<Settings>) => {
+    dirtyRef.current = true;
+    setDraft((d) => (d ? { ...d, ...p } : d));
+  };
 
   const save = async () => {
     if (!draft || saving) return;
@@ -135,6 +147,7 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
     setSaving(true);
     try {
       await workspace.saveSettings(next);
+      dirtyRef.current = false; // draft now matches persisted state
       workspace.notify(t("settings.saved"), "Check");
     } catch {
       workspace.notify(t("settings.saveFailed"), "AlertTriangle");
@@ -174,7 +187,7 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
 
         <div className="fade-in min-w-0 flex-1 overflow-y-auto p-5">
           {section === "general" && <GeneralPanel draft={draft} patch={patch} />}
-          {section === "provider" && <ProviderPanel draft={draft} patch={patch} />}
+          {section === "provider" && <ProviderPanel draft={draft} patch={patch} notify={workspace.notify} />}
           {section === "models" && <ModelsPanel draft={draft} patch={patch} notify={workspace.notify} />}
           {section === "runtime" && (
             <RuntimePanel
@@ -185,6 +198,7 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
             />
           )}
           {section === "api" && <ApiPanel draft={draft} patch={patch} />}
+          {section === "executors" && <RemoteExecutorsPanel workspace={workspace} />}
           {section === "twitch" && (
             <TwitchPanel draft={draft} patch={patch} triggers={workspace.triggers} refreshTriggers={workspace.refreshTriggers} />
           )}
@@ -202,7 +216,7 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
 /* shared bits                                                         */
 /* ------------------------------------------------------------------ */
 
-function SectionCard({
+export function SectionCard({
   title,
   children,
   action,
@@ -342,15 +356,21 @@ function GeneralPanel({
 function ProviderPanel({
   draft,
   patch,
+  notify,
 }: {
   draft: Settings;
   patch: (p: Partial<Settings>) => void;
+  notify: (text: string, icon?: string) => void;
 }) {
   const { t } = useTranslation();
   const [secrets, setSecrets] = useState<string[]>([]);
 
   useEffect(() => {
-    void desktop.listSecrets().then((list) => setSecrets(list.map((s) => s.name))).catch(() => undefined);
+    desktop
+      .listSecrets()
+      .then((list) => setSecrets(list.map((s) => s.name)))
+      .catch(() => notify(t("settings.secretsLoadFailed"), "AlertTriangle"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const provider = draft.providers[0];
@@ -388,7 +408,12 @@ function ProviderPanel({
           {provider.kind !== "llamacpp" ? (
             <>
               <Field label={t("provider.baseUrl")}>
-                <TextInput value={provider.baseUrl} onChange={(v) => updateProvider("baseUrl", v)} mono />
+                <TextInput
+                  value={provider.baseUrl}
+                  onChange={(v) => updateProvider("baseUrl", v)}
+                  mono
+                  placeholder={provider.kind === "ollama" ? "http://127.0.0.1:11434" : "https://api.example.com/v1"}
+                />
               </Field>
               <Field label={t("provider.model")}>
                 <TextInput value={provider.model} onChange={(v) => updateProvider("model", v)} />
@@ -441,6 +466,8 @@ function ModelsPanel({
   const [installed, setInstalled] = useState<LocalModel[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<InstallProgress | null>(null);
+  /** Installed model opened in the details pane. */
+  const [infoModel, setInfoModel] = useState<LocalModel | null>(null);
 
   const search = useCallback(
     async (q: string) => {
@@ -526,6 +553,7 @@ function ModelsPanel({
     });
     if (!ok) return;
     await desktop.deleteInstalledLlamaModel(model.path).catch(() => undefined);
+    setInfoModel((cur) => (cur?.path === model.path ? null : cur));
     await refreshInstalled();
   };
 
@@ -546,7 +574,10 @@ function ModelsPanel({
             {(["catalog", "installed"] as const).map((tabValue) => (
               <button
                 key={tabValue}
-                onClick={() => setMode(tabValue)}
+                onClick={() => {
+                  setMode(tabValue);
+                  if (tabValue === "catalog") setInfoModel(null);
+                }}
                 className={cn(
                   "rounded-md px-2 py-1.5 text-[12px] font-medium transition",
                   mode === tabValue ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
@@ -598,9 +629,7 @@ function ModelsPanel({
                       : "border-transparent hover:border-ink-700 hover:bg-ink-850/70",
                   )}
                 >
-                  <span className="mt-[1px] grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-[13px] font-semibold text-emerald-300">
-                    {(m.author ?? m.id).slice(0, 1).toUpperCase()}
-                  </span>
+                  <ModelAvatar id={m.id} author={m.author} avatarUrl={m.avatarUrl} className="mt-[1px] h-9 w-9 text-[13px]" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-semibold text-ink-50">{m.id}</span>
                     <span className="mt-0.5 block truncate text-[11px] text-ink-500">
@@ -613,27 +642,46 @@ function ModelsPanel({
             : installed.map((model) => (
                 <div
                   key={model.path}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${t("models.infoAction")}: ${model.name}`}
+                  onClick={() => setInfoModel(model)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setInfoModel(model);
+                    }
+                  }}
                   className={cn(
-                    "group mb-1.5 flex w-full items-start gap-2.5 rounded-xl border px-2.5 py-2.5 text-left transition",
-                    draft.llamaRuntime.modelPath === model.path
+                    "group mb-1.5 flex w-full cursor-pointer items-start gap-2.5 rounded-xl border px-2.5 py-2.5 text-left transition focus-visible:border-ink-400 focus-visible:outline-none",
+                    draft.llamaRuntime.modelPath === model.path || infoModel?.path === model.path
                       ? "border-ink-400 bg-ink-800"
                       : "border-transparent hover:border-ink-700 hover:bg-ink-850/70",
                   )}
                 >
-                  <button onClick={() => void selectInstalled(model.path)} className="min-w-0 flex-1 text-left">
+                  <ModelAvatar
+                    id={model.repository || model.name}
+                    author={model.author ?? model.repository?.split("/")[0]}
+                    avatarUrl={model.avatarUrl}
+                    className="mt-[1px] h-9 w-9 text-[13px]"
+                  />
+                  <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-semibold text-ink-50">{model.name}</span>
                     <span className="mt-0.5 block truncate font-mono text-[10.5px] text-ink-500">{model.path}</span>
                     <span className="mt-0.5 block text-[10.5px] text-ink-500">
                       {formatBytes(model.size)} · {formatDateTime(model.installedAt)}
                     </span>
-                  </button>
+                  </span>
                   {draft.llamaRuntime.modelPath === model.path ? (
-                    <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />
+                    <Icon name="Check" className="mt-1 h-4 w-4 shrink-0 text-emerald-300" />
                   ) : (
                     <button
-                      onClick={() => void deleteInstalled(model)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void deleteInstalled(model);
+                      }}
                       aria-label={t("common.delete")}
-                      className="grid h-6 w-6 place-items-center rounded text-ink-600 opacity-0 transition hover:bg-rose-500/15 hover:text-rose-300 group-hover:opacity-100"
+                      className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-600 opacity-0 transition hover:bg-rose-500/15 hover:text-rose-300 focus-visible:opacity-100 group-hover:opacity-100"
                     >
                       <Icon name="Trash2" className="h-3.5 w-3.5" />
                     </button>
@@ -653,7 +701,21 @@ function ModelsPanel({
 
       {/* selected model details */}
       <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/70">
-        {!detail ? (
+        {mode === "installed" ? (
+          infoModel ? (
+            <InstalledModelInfo
+              model={infoModel}
+              active={draft.llamaRuntime.modelPath === infoModel.path}
+              onSelect={() => void selectInstalled(infoModel.path)}
+              onDelete={() => void deleteInstalled(infoModel)}
+              onOpenHf={infoModel.repository ? () => void openOnHf(infoModel.repository!) : undefined}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center">
+              <EmptyState icon="HardDrive" title={t("models.pickModel")} hint={t("models.pickInstalledHint")} />
+            </div>
+          )
+        ) : !detail ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState icon="HardDrive" title={t("models.pickModel")} hint={t("models.pickModelHint")} />
           </div>
@@ -661,9 +723,7 @@ function ModelsPanel({
           <>
             <div className="border-b border-seam p-4">
               <div className="flex items-start gap-3">
-                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-[18px] font-bold text-emerald-300">
-                  {(detail.author ?? detail.id).slice(0, 1).toUpperCase()}
-                </span>
+                <ModelAvatar id={detail.id} author={detail.author} avatarUrl={detail.avatarUrl} className="h-12 w-12 rounded-2xl text-[18px]" />
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-[16px] font-semibold tracking-tight text-ink-50">{detail.id}</h2>
                   <p className="mt-1 truncate font-mono text-[11px] text-ink-500">
@@ -734,6 +794,160 @@ function ModelsPanel({
         )}
       </div>
     </div>
+  );
+}
+
+/** Hugging Face account avatar with a letter fallback. Broken or missing
+ *  images degrade back to the initial so rows never show empty frames. */
+function ModelAvatar({
+  id,
+  author,
+  avatarUrl,
+  className,
+}: {
+  id: string;
+  author?: string;
+  avatarUrl?: string;
+  className?: string;
+}) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <span
+      className={cn(
+        "relative grid shrink-0 place-items-center overflow-hidden rounded-lg border border-emerald-400/20 bg-emerald-400/10 font-semibold text-emerald-300",
+        className,
+      )}
+    >
+      {(author ?? id).slice(0, 1).toUpperCase()}
+      {avatarUrl && !broken && (
+        <img
+          src={avatarUrl}
+          alt=""
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          onError={() => setBroken(true)}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      )}
+    </span>
+  );
+}
+
+/** Details pane for one installed local model: identity, file facts, and
+ *  the use / open / delete actions. */
+function InstalledModelInfo({
+  model,
+  active,
+  onSelect,
+  onDelete,
+  onOpenHf,
+}: {
+  model: LocalModel;
+  active: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  onOpenHf?: () => void;
+}) {
+  const { t } = useTranslation();
+  const tags = (model.tags ?? []).filter(Boolean).slice(0, 8);
+  const rows: Array<{ label: string; value: string; mono?: boolean }> = [
+    { label: t("models.detailsPath"), value: model.path, mono: true },
+    ...(model.quantization ? [{ label: t("models.detailsQuantization"), value: model.quantization }] : []),
+    ...(model.sha256 ? [{ label: t("models.detailsSha"), value: model.sha256, mono: true }] : []),
+    ...(model.installedAt ? [{ label: t("models.detailsInstalled"), value: formatDateTime(model.installedAt) }] : []),
+    ...(model.lastModified ? [{ label: t("models.detailsModified"), value: formatDateTime(model.lastModified) }] : []),
+  ];
+  return (
+    <>
+      <div className="border-b border-seam p-4">
+        <div className="flex items-start gap-3">
+          <ModelAvatar
+            id={model.repository || model.name}
+            author={model.author ?? model.repository?.split("/")[0]}
+            avatarUrl={model.avatarUrl}
+            className="h-12 w-12 rounded-2xl text-[18px]"
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-[16px] font-semibold tracking-tight text-ink-50">{model.name}</h2>
+            {model.repository && (
+              <p className="mt-1 truncate font-mono text-[11px] text-ink-500">{model.repository}</p>
+            )}
+            <div className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] text-ink-400">
+              <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">{formatBytes(model.size)}</span>
+              {model.quantization && (
+                <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">{model.quantization}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <div className="rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
+          <dl className="space-y-2">
+            {rows.map((row) => (
+              <div key={row.label} className="grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-2">
+                <dt className="text-[11px] text-ink-500">{row.label}</dt>
+                <dd
+                  title={row.value}
+                  className={cn(
+                    "min-w-0 truncate text-[11.5px] text-ink-200",
+                    row.mono && "font-mono text-[11px]",
+                  )}
+                >
+                  {row.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          {tags.length > 0 && (
+            <div className="mt-3 border-t border-seam/70 pt-3">
+              <p className="mb-1.5 text-[11px] text-ink-500">{t("models.detailsTags")}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map((tag) => (
+                  <span key={tag} className="rounded-md border border-ink-700 bg-ink-850 px-2 py-0.5 text-[10.5px] text-ink-300">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {active ? (
+            <Button variant="primary" icon="Check" disabled>
+              {t("models.inUse")}
+            </Button>
+          ) : (
+            <Button variant="primary" icon="Check" onClick={onSelect}>
+              {t("models.useModel")}
+            </Button>
+          )}
+          {onOpenHf && (
+            <Button variant="solid" icon="ExternalLink" onClick={onOpenHf}>
+              {t("models.openHf")}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            icon="Trash2"
+            className="text-rose-300 hover:bg-rose-500/15 hover:text-rose-200"
+            onClick={onDelete}
+          >
+            {t("common.delete")}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-4 text-[11px] text-ink-500">
+        <span className="flex items-center gap-1.5">
+          <span className={cn("h-1.5 w-1.5 rounded-full", active ? "bg-emerald-400" : "bg-ink-600")} />
+          {active ? t("models.inUse") : t("models.localOnly")}
+        </span>
+        <span className="ml-auto truncate">{model.size > 0 ? formatBytes(model.size) : ""}</span>
+      </div>
+    </>
   );
 }
 

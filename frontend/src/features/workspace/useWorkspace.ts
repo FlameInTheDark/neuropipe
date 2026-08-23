@@ -8,6 +8,7 @@ import type {
   GlobalVariableSummary,
   Pipeline,
   Report,
+  RemoteExecutorListItem,
   SaveGlobalVariableRequest,
   Settings,
   TriggerBinding,
@@ -42,6 +43,7 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
   const [variables, setVariables] = useState<GlobalVariableSummary[]>([]);
   const [definitions, setDefinitions] = useState<ReturnType<typeof localizeDefinitions>>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [executors, setExecutors] = useState<RemoteExecutorListItem[]>([]);
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [update, setUpdate] = useState<UpdateAvailability | null>(null);
 
@@ -85,9 +87,15 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
     setFunctions(next.map(fnSummaryFromBackend));
   }, []);
 
+  const refreshExecutors = useCallback(async () => {
+    const next = await desktop.listRemoteExecutors();
+    if (!mounted.current) return;
+    setExecutors(next);
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
-      const [pipelineList, allTriggers, crons, reportList, nodes, fnList, variableList, nextSettings] =
+      const [pipelineList, allTriggers, crons, reportList, nodes, fnList, variableList, nextSettings, executorList] =
         await Promise.all([
           desktop.listPipelines(),
           desktop.listTriggers(),
@@ -97,6 +105,7 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
           desktop.listFunctions(),
           desktop.listGlobalVariables(),
           desktop.getSettings(),
+          desktop.listRemoteExecutors().catch(() => [] as RemoteExecutorListItem[]),
         ]);
       if (!mounted.current) return;
       const localized = localizeDefinitions(nodes);
@@ -108,6 +117,7 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
       setFunctions(fnList.map(fnSummaryFromBackend));
       setVariables(variableList);
       setSettings(nextSettings);
+      setExecutors(executorList);
       setError(null);
       await applySettingsLanguage(nextSettings);
     } catch (err) {
@@ -184,8 +194,8 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
   );
 
   const createPipeline = useCallback(
-    async (name: string) => {
-      const created = await desktop.createPipeline(name);
+    async (name: string, executorId?: string) => {
+      const created = executorId ? await desktop.createPipelineForExecutor(name, executorId) : await desktop.createPipeline(name);
       await refresh();
       return created;
     },
@@ -245,6 +255,7 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
     definitionIndex,
     library,
     settings,
+    executors,
     running,
     update,
     notify,
@@ -253,6 +264,7 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
     refreshReports,
     refreshVariables,
     refreshFunctions,
+    refreshExecutors,
     setUpdate,
     createPipeline,
     deletePipeline,

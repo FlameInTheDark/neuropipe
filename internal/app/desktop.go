@@ -38,6 +38,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/persistence"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
 	"github.com/FlameInTheDark/neuropipe/internal/plugins"
+	remoteexec "github.com/FlameInTheDark/neuropipe/internal/remoteexec"
 	localruntime "github.com/FlameInTheDark/neuropipe/internal/runtime"
 	"github.com/FlameInTheDark/neuropipe/internal/scheduler"
 	"github.com/FlameInTheDark/neuropipe/internal/security"
@@ -93,6 +94,7 @@ type Desktop struct {
 	updateCancel           context.CancelFunc
 	updateWG               sync.WaitGroup
 	dialogs                *dialogs.Service
+	remote                 *remoteexec.Manager
 }
 
 // New composes the desktop application from local dependencies.
@@ -176,6 +178,20 @@ func New(version string) (*Desktop, error) {
 	desktop.twitch = twitchservice.New(vault, store, desktop.runs, desktop.saveTwitchIdentity, desktop.emit)
 	desktop.twitch.Configure(settings.Twitch)
 	desktop.runs.SetTwitchChatSender(desktop.twitch)
+	bridge := &executorBridge{providers: desktop.providers, store: store, databases: databases, emit: func(event string) { desktop.emit(event, nil) }}
+	desktop.remote = remoteexec.NewManager(vault, bridge,
+		func(executorID string, execution domain.Execution) { desktop.runs.ApplyRemoteRunUpdate(execution) },
+		func(executorID string, status domain.RemoteExecutorStatus) {
+			desktop.emit("executor.status.updated", map[string]any{"id": executorID, "status": status})
+		},
+		func(target remoteexec.Target) {
+			// Reconciliation performs network work and must not delay the
+			// session pumps, so it runs on its own goroutine.
+			go desktop.reconcileExecutor(target.ID)
+		},
+	)
+	bridge.twitch = desktop.twitch
+	desktop.runs.SetRemoteDispatcher(executorDispatch{manager: desktop.remote})
 	desktop.chat = chatservice.NewService(store, desktop.runs, desktop.providers, desktop.emit)
 	desktop.scheduler = scheduler.New(store, desktop.runs)
 	desktop.hotkeys = hotkey.New(store, desktop.runs)
@@ -204,6 +220,11 @@ func (d *Desktop) Startup(app *application.App) {
 	d.runs.Start(d.ctx)
 	d.chat.Start(d.ctx)
 	d.metrics.Start(d.ctx, d.settings.Metrics)
+	if executors, err := d.store.ListRemoteExecutors(d.ctx); err == nil {
+		for _, item := range executors {
+			_ = d.remote.Ensure(remoteexec.Target{ID: item.ID, Address: item.Address, TokenRef: item.TokenRef, UseTLS: item.UseTLS})
+		}
+	}
 	_, _ = d.plugins.Reload()
 	_ = d.refreshFunctionRegistry(d.ctx)
 	_ = d.store.PurgeExecutions(d.ctx, d.settings.RetentionDays)
@@ -225,6 +246,7 @@ func (d *Desktop) Startup(app *application.App) {
 func (d *Desktop) Shutdown(context.Context) {
 	d.stopUpdateChecks()
 	_ = d.api.Stop(context.Background())
+	d.remote.Stop()
 	d.hotkeys.Stop()
 	d.scheduler.Stop()
 	d.twitch.Stop()
@@ -310,7 +332,16 @@ func (d *Desktop) ListPipelines() ([]domain.PipelineSummary, error) {
 }
 
 func (d *Desktop) CreatePipeline(name string) (domain.Pipeline, error) {
-	return d.store.CreatePipeline(d.context(), name, defaultDefinition())
+	return d.store.CreatePipeline(d.context(), name, "", defaultDefinition())
+}
+
+// CreatePipelineForExecutor creates a draft pipeline targeted at one remote
+// executor. The draft runs locally in the editor; publishing deploys it.
+func (d *Desktop) CreatePipelineForExecutor(name, executorID string) (domain.Pipeline, error) {
+	if _, err := d.store.GetRemoteExecutor(d.context(), executorID); err != nil {
+		return domain.Pipeline{}, err
+	}
+	return d.store.CreatePipeline(d.context(), name, executorID, defaultDefinition())
 }
 
 // DeletePipeline permanently removes a user-selected pipeline and all of its
@@ -335,7 +366,7 @@ func (d *Desktop) DuplicatePipeline(id string) (domain.Pipeline, error) {
 	if !isCurrentBlueprintSchema(original.DraftDefinition.SchemaVersion) {
 		return domain.Pipeline{}, fmt.Errorf("legacy pipelines must be rebuilt instead of duplicated")
 	}
-	copy, err := d.store.CreatePipeline(d.context(), original.Name+" copy", original.DraftDefinition)
+	copy, err := d.store.CreatePipeline(d.context(), original.Name+" copy", original.ExecutorID, original.DraftDefinition)
 	if err != nil {
 		return domain.Pipeline{}, err
 	}
@@ -406,6 +437,13 @@ func (d *Desktop) PublishPipeline(pipeline domain.Pipeline) (domain.Pipeline, er
 	}
 
 	d.twitch.Reconcile()
+	if published.ExecutorID != "" {
+		if err := d.DeployPipelineToExecutor(published.ID); err != nil {
+			// Local publication stands; the executor syncs automatically on
+			// reconnect, but surface the failure so it can be retried.
+			d.emit("executor.deploy.failed", map[string]any{"pipelineId": published.ID, "executorId": published.ExecutorID, "error": err.Error()})
+		}
+	}
 	return published, nil
 }
 

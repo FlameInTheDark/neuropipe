@@ -117,7 +117,7 @@ func TestDeleteGlobalVariableReferencedByPipeline(t *testing.T) {
 	store, ctx := newStore(t)
 	// Definition references the variable inside the new node type.
 	definition := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{{ID: "read", Type: "data:get_global_variable", Data: map[string]any{"config": map[string]any{"name": "shared"}}}, {ID: "start", Type: "trigger:button"}}}
-	pipeline, err := store.CreatePipeline(ctx, "uses-variable", definition)
+	pipeline, err := store.CreatePipeline(ctx, "uses-variable", "", definition)
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
