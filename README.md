@@ -53,9 +53,9 @@ The executable and installer are written to `build/bin`.
 
 ```bash
 cd frontend
-bun install --frozen-lockfile
-bun run check
-bun run build
+npm install
+npm run check
+npm run build
 
 cd ..
 go vet ./...

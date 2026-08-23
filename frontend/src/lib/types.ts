@@ -1,4 +1,31 @@
-import type { Edge, Node, Viewport } from "@xyflow/react";
+/** Minimal persisted graph-node shape. The renderer never imports a flow
+ * library; only these plain fields cross the Wails boundary. */
+export interface FlowNode {
+  id: string;
+  type?: string;
+  position: { x: number; y: number };
+  data: {
+    type?: string;
+    config?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+export type FlowEdge = {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  kind?: PinKind;
+  waypoints?: { x: number; y: number }[];
+  [key: string]: unknown;
+};
+export interface Viewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
 
 export type PipelineStatus = "draft" | "active" | "archived" | "legacy";
 export type TriggerKind = "button" | "cron" | "file" | "hotkey" | "webhook" | "chat" | "twitch";
@@ -41,18 +68,36 @@ export interface TypeFieldSpec {
 export type NodeExecutionMode = "event" | "impure" | "pure" | "visual";
 export type FunctionKind = "function" | "tool";
 
-export type FlowNode = Node<{
-  type?: string;
-  config?: Record<string, unknown>;
-  [key: string]: unknown;
-}>;
-export type FlowEdge = Edge & { kind?: PinKind; waypoints?: { x: number; y: number }[] };
+export interface FlowGroup {
+  id: string;
+  title: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+}
 
 export interface FlowDefinition {
   schemaVersion: number;
   nodes: FlowNode[];
   edges: FlowEdge[];
   viewport: Viewport;
+  /** renderer-owned visual frames; the engine ignores them */
+  groups?: FlowGroup[];
+  /** renderer-owned sticky notes; the engine ignores them */
+  comments?: EditorCommentData[];
+}
+
+/** Wire shape for a sticky note on the canvas. */
+export interface EditorCommentData {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
 }
 
 export interface Pipeline {

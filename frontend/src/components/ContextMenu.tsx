@@ -1,110 +1,203 @@
-import { type ReactNode, useEffect, useRef } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Icon } from "./icons";
+import { cn } from "../utils/cn";
 
-import { cn } from "@/lib/utils";
-
-export interface ContextMenuPoint {
-  clientX: number;
-  clientY: number;
+export interface MenuItem {
+  type?: "item" | "sep";
+  label?: string;
+  icon?: string;
+  hint?: string;
+  danger?: boolean;
+  disabled?: boolean;
+  done?: boolean;
+  checked?: boolean;
+  onSelect?: () => void;
 }
 
-export interface ContextMenuPosition {
+interface MenuState {
   x: number;
   y: number;
+  items: MenuItem[];
 }
 
-export interface ContextMenuSize {
-  width: number;
-  height: number;
+const Ctx = createContext<(e: { preventDefault: () => void; clientX: number; clientY: number }, items: MenuItem[]) => void>(() => {});
+
+export function useCtxMenu() {
+  return useContext(Ctx);
 }
 
-/** Clamps a cursor-triggered menu so every action remains in the viewport. */
-export function contextMenuPosition(
-  point: ContextMenuPoint,
-  size: ContextMenuSize,
-  containerBounds?: Pick<DOMRect, "left" | "top" | "width" | "height">,
-): ContextMenuPosition {
-  const gutter = 8;
-  if (containerBounds) {
-    const relativeX = point.clientX - containerBounds.left;
-    const relativeY = point.clientY - containerBounds.top;
-    return {
-      x: Math.max(gutter, Math.min(relativeX, Math.max(gutter, containerBounds.width - size.width - gutter))),
-      y: Math.max(gutter, Math.min(relativeY, Math.max(gutter, containerBounds.height - size.height - gutter))),
-    };
-  }
-  const viewportWidth = typeof window === "undefined" ? point.clientX + size.width + gutter : window.innerWidth;
-  const viewportHeight = typeof window === "undefined" ? point.clientY + size.height + gutter : window.innerHeight;
-  return {
-    x: Math.max(gutter, Math.min(point.clientX, viewportWidth - size.width - gutter)),
-    y: Math.max(gutter, Math.min(point.clientY, viewportHeight - size.height - gutter)),
-  };
-}
-
-/** Uses a predictable in-row location for keyboard context-menu shortcuts. */
-export function contextMenuPointFromElement(element: HTMLElement): ContextMenuPoint {
-  const bounds = element.getBoundingClientRect();
-  return { clientX: bounds.left + 24, clientY: bounds.top + 24 };
-}
-
-/**
- * Shared accessible menu surface for list and canvas context actions.
- * It owns focus, outside-click dismissal, Escape, and viewport-safe placement.
- */
-export function ContextMenu({
-  position,
-  ariaLabel,
-  onClose,
+export function ContextTrigger({
+  items,
   children,
   className,
-  positionMode = "fixed",
 }: {
-  position: ContextMenuPosition;
-  ariaLabel: string;
-  onClose: () => void;
-  children: ReactNode;
+  items: MenuItem[];
+  children: React.ReactNode;
   className?: string;
-  positionMode?: "fixed" | "absolute";
 }) {
+  const open = useContext(Ctx);
+  return (
+    <div className={className} onContextMenu={(e) => open(e, items)}>
+      {children}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+
+export function ContextMenuProvider({ children, onAnyAction }: { children: React.ReactNode; onAnyAction?: () => void }) {
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [glyph, setGlyph] = useState<{ x: number; y: number; icon?: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const open = useCallback(
+    (e: { preventDefault: () => void; clientX: number; clientY: number }, items: MenuItem[]) => {
+      e.preventDefault();
+      setMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [],
+  );
+
+  const close = useCallback(() => setMenu(null), []);
+
+  const action = useCallback(
+    (item: MenuItem) => {
+      setGlyph({ x: menu?.x ?? 0, y: menu?.y ?? 0, icon: item.icon ?? "Check" });
+      window.setTimeout(() => setGlyph(null), 260);
+      onAnyAction?.();
+    },
+    [menu, onAnyAction],
+  );
+
+  /* dismiss */
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    const focusInitialItem = () => {
-      const menu = menuRef.current;
-      const target = menu?.querySelector<HTMLElement>("[data-context-menu-initial-focus], [role='menuitem']:not([disabled])");
-      target?.focus();
+    if (!menu) return;
+    const onDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) close();
     };
-    const animationFrame = requestAnimationFrame(focusInitialItem);
-    const dismiss = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+      if (menuRef.current && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter")) {
+        const btns = [...menuRef.current.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+        const cur = btns.indexOf(document.activeElement as HTMLButtonElement);
+        if (e.key === "ArrowDown") (btns[cur + 1] ?? btns[0])?.focus();
+        if (e.key === "ArrowUp") (btns[cur - 1] ?? btns[btns.length - 1])?.focus();
+        if (e.key === "Enter" && cur >= 0) btns[cur]?.click();
+      }
     };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("pointerdown", dismiss);
-    window.addEventListener("keydown", escape);
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("resize", close);
     return () => {
-      cancelAnimationFrame(animationFrame);
-      window.removeEventListener("pointerdown", dismiss);
-      window.removeEventListener("keydown", escape);
-      previousFocus?.focus();
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("resize", close);
     };
-  }, [onClose]);
+  }, [menu, close]);
+
+  return (
+    <Ctx.Provider value={open}>
+      {children}
+      {menu && createPortal(<Menu menu={menu} menuRef={menuRef} close={close} action={action} />, document.body)}
+      {glyph && (
+        <div
+          className="action-glyph pointer-events-none fixed z-[70] rounded-full border border-ink-500/60 bg-ink-800 p-1.5 text-ink-100"
+          style={{ left: glyph.x - 26, top: glyph.y + 14 }}
+        >
+          <Icon name={glyph.icon ?? "Check"} className="h-3 w-3" />
+        </div>
+      )}
+    </Ctx.Provider>
+  );
+}
+
+function Menu({
+  menu,
+  menuRef,
+  close,
+  action,
+}: {
+  menu: MenuState;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  close: () => void;
+  action: (item: MenuItem) => void;
+}) {
+  const [pos, setPos] = useState<{ left: number; top: number; origin: string }>({
+    left: menu.x,
+    top: menu.y,
+    origin: "top left",
+  });
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const { innerWidth, innerHeight } = window;
+    const r = el.getBoundingClientRect();
+    let left = menu.x;
+    let top = menu.y;
+    let origin = "top left";
+    if (left + r.width > innerWidth - 8) left = menu.x - r.width;
+    if (top + r.height > innerHeight - 8) top = menu.y - r.height;
+    if (left !== menu.x && top !== menu.y) origin = "bottom right";
+    else if (left !== menu.x) origin = "top right";
+    else if (top !== menu.y) origin = "bottom left";
+    setPos({ left: Math.max(8, left), top: Math.max(8, top), origin });
+  }, [menu, menuRef]);
+
+  /* focus first item for keyboard nav */
+  useEffect(() => {
+    menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, [menuRef]);
 
   return (
     <div
       ref={menuRef}
       role="menu"
-      aria-label={ariaLabel}
-      className={cn(
-        positionMode === "fixed" ? "fixed" : "absolute",
-        "z-50 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl shadow-black/60",
-        className,
-      )}
-      style={{ left: position.x, top: position.y }}
-      onContextMenu={(event) => event.preventDefault()}
+      style={{ left: pos.left, top: pos.top, transformOrigin: pos.origin }}
+      className="timeline-menu fixed z-[60] min-w-[200px] rounded-[9px] border border-ink-650 bg-ink-850/95 p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.02)_inset] backdrop-blur-xl"
+      onContextMenu={(e) => e.preventDefault()}
     >
-      {children}
+      {menu.items.map((item, i) =>
+        item.type === "sep" ? (
+          <div key={i} className="mx-1.5 my-1 h-px bg-ink-700/80" />
+        ) : (
+          <button
+            key={i}
+            role="menuitem"
+            disabled={item.disabled}
+            onClick={() => {
+              close();
+              if (item.onSelect) {
+                item.onSelect();
+                action(item);
+              }
+            }}
+            className={cn(
+              "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] outline-none transition-colors",
+              item.danger
+                ? "text-rose-300 hover:bg-rose-500/15 focus:bg-rose-500/15"
+                : item.disabled
+                  ? "cursor-not-allowed text-ink-600"
+                  : "text-ink-100 hover:bg-ink-650/80 focus:bg-ink-650/80",
+            )}
+          >
+            {item.icon ? (
+              <Icon
+                name={item.icon}
+                className={cn("h-[14px] w-[14px] shrink-0", item.disabled ? "text-ink-600" : item.danger ? "text-rose-300/80" : "text-ink-400")}
+              />
+            ) : (
+              <span className="w-[14px] shrink-0" />
+            )}
+            <span className="min-w-0 truncate">{item.label}</span>
+            {item.checked && <Icon name="Check" className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-200" />}
+            {item.hint && <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-500">{item.hint}</span>}
+          </button>
+        ),
+      )}
     </div>
   );
 }

@@ -11,7 +11,6 @@ export function typeSpecFromDataType(dataType: DataType): TypeSpec {
     default: return { kind: "any" };
   }
 }
-
 /** Go-style assignment for Blueprint V3: no implicit conversion or any narrowing. */
 export function isTypeAssignable(source?: TypeSpec, target?: TypeSpec): boolean {
   if (!source || !target) return false;

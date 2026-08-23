@@ -1,211 +1,214 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, Copy, Loader2, MoreHorizontal, Plus, Search, Square, Trash2, Workflow } from 'lucide-react'
-import { ContextMenu, contextMenuPointFromElement, contextMenuPosition, type ContextMenuPoint, type ContextMenuPosition } from '@/components/ContextMenu'
-import { EmptyState } from '@/components/EmptyState'
-import { LucideIcon } from '@/components/LucideIconPicker'
-import { PageHeader } from '@/components/PageHeader'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Tooltip } from '@/components/ui/tooltip'
-import { desktop } from '@/lib/bridge'
-import { formatDate } from '@/lib/utils'
-import type { PipelineSummary } from '@/lib/types'
-import { useConfirmationStore } from '@/stores/confirmation'
-import { useUIStore } from '@/stores/ui'
-import { useTranslation } from 'react-i18next'
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { Workspace } from "@/features/workspace/useWorkspace";
+import type { NavApi } from "@/features/workspace/useWorkspaceNav";
+import { formatDateTime } from "@/lib/format";
+import type { UiPipeline } from "@/lib/adapters";
+import { ask } from "@/stores/confirmation";
+import { Card, EmptyState, SearchInput, StatusPill, ViewShell } from "../components/ViewShell";
+import { Button } from "../components/ui";
+import { Icon } from "../components/icons";
+import { useCtxMenu } from "../components/ContextMenu";
+import { SegmentedControl } from "../components/primitives/SegmentedControl";
 
-interface PipelineMenu {
-  pipeline: PipelineSummary
-  position: ContextMenuPosition
-}
+type Filter = "all" | "published" | "draft" | "legacy";
 
-export function PipelinesView({ pipelines, onRefresh }: { pipelines: PipelineSummary[]; onRefresh: () => Promise<void> }) {
-  const { t } = useTranslation()
-  const { setScreen, setError } = useUIStore()
-  const [query, setQuery] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [name, setName] = useState('')
-  const [menu, setMenu] = useState<PipelineMenu>()
-  const [actionID, setActionID] = useState('')
-  const [runningPipelines, setRunningPipelines] = useState<Record<string, boolean>>({})
-  const requestConfirmation = useConfirmationStore((state) => state.ask)
-  const filtered = useMemo(() => pipelines.filter((pipeline) => `${pipeline.name} ${pipeline.description}`.toLowerCase().includes(query.toLowerCase())), [pipelines, query])
+export default function PipelinesView({ workspace, nav }: { workspace: Workspace; nav: NavApi }) {
+  const { t } = useTranslation();
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [newName, setNewName] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const ctx = useCtxMenu();
 
-  // Poll running state for pipelines that have button triggers. The backend
-  // tracks active runs in a mutex-protected map; this lightweight poll keeps
-  // the Stop button in sync without requiring a Wails event per status change.
-  useEffect(() => {
-    if (pipelines.length === 0) return
-    let cancelled = false
-    const poll = async () => {
-      try {
-        const results = await Promise.all(
-          pipelines.map(async (pipeline) => ({
-            id: pipeline.id,
-            running: await desktop.isPipelineRunning(pipeline.id),
-          })),
-        )
-        if (cancelled) return
-        const next: Record<string, boolean> = {}
-        for (const result of results) {
-          if (result.running) next[result.id] = true
-        }
-        setRunningPipelines(next)
-      } catch {
-        // ignore polling errors — the UI just won't show running state
-      }
-    }
-    void poll()
-    const interval = window.setInterval(poll, 2000)
-    return () => { cancelled = true; window.clearInterval(interval) }
-  }, [pipelines])
+  const source = workspace.pipelines;
 
-  const stopPipeline = async (pipeline: PipelineSummary) => {
-    try {
-      setActionID(pipeline.id)
-      await desktop.cancelPipelineExecution(pipeline.id)
-      await onRefresh()
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t('pipelines.stopFailed'))
-    } finally {
-      setActionID('')
-      setRunningPipelines((current) => { const next = { ...current }; delete next[pipeline.id]; return next })
-    }
-  }
+  const pipelineMenu = (e: React.MouseEvent, p: UiPipeline) => {
+    const items = [
+      {
+        label: t("pipelines.open"),
+        icon: "ArrowUpRight",
+        onSelect: () => void nav.openPipeline(p),
+      },
+      ...(p.status !== "legacy"
+        ? [
+            {
+              label: t("pipelines.duplicate"),
+              icon: "Copy",
+              onSelect: () => {
+                void workspace.duplicatePipeline(p.id).then((copy) => {
+                  if (copy) void nav.openPipeline({ ...pipelineFrom(copy) });
+                });
+              },
+            },
+          ]
+        : []),
+      { type: "sep" as const },
+      {
+        label: t("common.delete"),
+        icon: "Trash2",
+        danger: true,
+        onSelect: async () => {
+          const ok = await ask({
+            title: t("pipelines.deleteTitle"),
+            description: t("pipelines.deleteDescription", { name: p.name }),
+            confirmLabel: t("pipelines.deleteConfirm"),
+            danger: true,
+          });
+          if (!ok) return;
+          setBusyId(p.id);
+          await workspace.deletePipeline(p.id);
+          setBusyId(null);
+        },
+      },
+    ];
+    ctx(e, items);
+  };
+
+  const list = useMemo(
+    () =>
+      source.filter(
+        (p) =>
+          (filter === "all" || p.status === filter) &&
+          (p.name.toLowerCase().includes(q.toLowerCase()) || p.desc.toLowerCase().includes(q.toLowerCase())),
+      ),
+    [q, filter, source],
+  );
 
   const create = async () => {
+    const name = newName.trim() || t("pipelines.namePlaceholder");
     try {
-      setCreating(true)
-      const pipeline = await desktop.createPipeline(name)
-      await onRefresh()
-      setScreen('editor', pipeline.id)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t('pipelines.createFailed'))
-    } finally {
-      setCreating(false)
+      const created = await workspace.createPipeline(name);
+      setNewName("");
+      if (created) await nav.openPipeline(pipelineFrom(created));
+    } catch {
+      workspace.notify(t("pipelines.createFailed"), "AlertTriangle");
     }
-  }
+  };
 
-  const openMenu = (point: ContextMenuPoint, pipeline: PipelineSummary) => {
-    setMenu({
-      pipeline,
-      position: contextMenuPosition(point, { width: 192, height: 128 }),
-    })
-  }
-
-  const duplicate = async (pipeline: PipelineSummary) => {
-    try {
-      setActionID(pipeline.id)
-      const copy = await desktop.duplicatePipeline(pipeline.id)
-      setMenu(undefined)
-      await onRefresh()
-      setScreen('editor', copy.id)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t('pipelines.duplicateFailed'))
-    } finally {
-      setActionID('')
-    }
-  }
-
-  const remove = async (pipeline: PipelineSummary) => {
-    const confirmed = await requestConfirmation({
-      title: t('pipelines.deleteTitle'),
-      description: t('pipelines.deleteDescription', { name: pipeline.name }),
-      confirmLabel: t('pipelines.deleteConfirm'),
-    })
-    if (!confirmed) return
-    try {
-      setActionID(pipeline.id)
-      await desktop.deletePipeline(pipeline.id)
-      await onRefresh()
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t('pipelines.deleteFailed'))
-    } finally {
-      setActionID('')
-    }
-  }
-
-  return <section className="flex h-full min-h-0 flex-col">
-    <PageHeader
-      title={t('pipelines.title')}
-      description={t('pipelines.description')}
-      actions={<Button onClick={() => void create()} disabled={creating}>{creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}{t('pipelines.new')}</Button>}
-    />
-    <div className="muted-scroll min-h-0 flex-1 overflow-y-auto p-8">
-      <div className="mb-5 flex max-w-xl items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-zinc-600" />
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-8" placeholder={t('pipelines.search')} />
-        </div>
-        <Input value={name} onChange={(event) => setName(event.target.value)} className="max-w-52" placeholder={t('pipelines.name')} />
-      </div>
-      {pipelines.length === 0 ? <EmptyState icon={Workflow} title={t('pipelines.emptyTitle')} description={t('pipelines.emptyDescription')} action={{ label: t('pipelines.new'), onClick: () => void create() }} /> : <div className="overflow-hidden rounded-xl border border-zinc-800">
-        <div className="grid grid-cols-[minmax(0,1fr)_130px_110px_42px] border-b border-zinc-800 bg-zinc-900/50 px-4 py-2 text-xs font-medium text-zinc-500">
-          <span>{t('pipelines.pipeline')}</span><span>{t('pipelines.status')}</span><span>{t('pipelines.updated')}</span><span />
-        </div>
-        {filtered.map((pipeline) => <div
-          key={pipeline.id}
-          onContextMenu={(event) => { event.preventDefault(); openMenu(event, pipeline) }}
-          className="group relative grid grid-cols-[minmax(0,1fr)_130px_110px_42px] items-center border-b border-zinc-800 px-4 py-4 transition-colors last:border-0 hover:bg-zinc-900"
-        >
-          <button
-            type="button"
-            onClick={() => setScreen('editor', pipeline.id)}
-            onKeyDown={(event) => {
-              if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
-              event.preventDefault()
-              openMenu(contextMenuPointFromElement(event.currentTarget), pipeline)
-            }}
-            // The button's pseudo-element stretches across the whole row (the
-            // row is its positioned ancestor) so every part of it opens the
-            // pipeline; later positioned row actions stack above it and keep
-            // their own clicks.
-            className="flex min-w-0 items-center gap-3 rounded text-left outline-none after:absolute after:inset-0 after:rounded focus-visible:ring-2 focus-visible:ring-zinc-500"
-          >
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-zinc-800" style={{ color: pipeline.iconColor, backgroundColor: pipeline.iconBackground }}><LucideIcon name={pipeline.icon} className="size-4" /></span>
-            <span className="min-w-0"><span className="block truncate text-sm font-medium text-zinc-100">{pipeline.name}</span>
-            <span className="mt-1 block truncate text-xs text-zinc-500">{pipeline.description || t('pipelines.triggerCount', { count: pipeline.triggerCount })}</span>
-            {pipeline.migrationIssue ? <Tooltip content={pipeline.migrationIssue} side="bottom" align="start"><span className="mt-1 flex items-center gap-1 text-[11px] text-amber-300"><AlertTriangle className="size-3" />{t('pipelines.migrationRequired')}</span></Tooltip> : null}</span>
-          </button>
-          <span><span className={pipeline.status === 'active' ? 'rounded bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300' : pipeline.status === 'legacy' ? 'rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-300' : 'rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400'}>{pipeline.status === 'active' ? t('pipelines.published', { version: pipeline.publishedRevision }) : pipeline.status === 'legacy' ? t('pipelines.legacy') : t('pipelines.draft')}</span></span>
-          <span className="text-xs text-zinc-500">{formatDate(pipeline.updatedAt)}</span>
-          <div className="relative flex items-center justify-end gap-1">
-            {runningPipelines[pipeline.id] ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="danger"
-                className="h-7 px-2 text-xs"
-                disabled={actionID === pipeline.id}
-                onClick={(event) => { event.stopPropagation(); void stopPipeline(pipeline) }}
-                aria-label={t('pipelines.stop')}
-              >
-                {actionID === pipeline.id ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
-                {t('pipelines.stop')}
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="size-7 p-0 text-zinc-500 hover:text-zinc-100 focus-visible:text-zinc-100"
-              onClick={(event) => openMenu(contextMenuPointFromElement(event.currentTarget), pipeline)}
-              aria-label={t('pipelines.options', { name: pipeline.name })}
-              aria-haspopup="menu"
-              aria-expanded={menu?.pipeline.id === pipeline.id}
-            >
-              <MoreHorizontal className="size-4" />
-            </Button>
+  return (
+    <ViewShell
+      title={t("pipelines.title")}
+      subtitle={t("status.count", { count: source.length })}
+      actions={
+        <Button icon="Plus" variant="primary" onClick={() => void create()}>
+          {t("pipelines.new")}
+        </Button>
+      }
+      toolbar={
+        <>
+          <SearchInput value={q} onChange={setQ} placeholder={t("pipelines.search")} className="w-[240px]" />
+          <SegmentedControl
+            value={filter}
+            onChange={(v) => setFilter(v)}
+            segments={[
+              { value: "all", label: t("common.all") },
+              { value: "published", label: t("pipelines.publishedTab") },
+              { value: "draft", label: t("functions.draft") },
+              { value: "legacy", label: t("pipelines.legacy") },
+            ]}
+          />
+          <span className="ml-auto text-[11.5px] text-ink-500">{t("pipelines.clickToOpen")}</span>
+        </>
+      }
+    >
+      {list.length === 0 ? (
+        <EmptyState icon="Cable" title={t("pipelines.emptyTitle")} hint={t("pipelines.emptyDescription")} />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-ink-700/80">
+          <div className="grid grid-cols-[minmax(0,1fr)_110px_110px_150px_32px] items-center gap-3 border-b border-seam bg-ink-850/70 px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">
+            <span>{t("pipelines.pipeline")}</span>
+            <span>{t("pipelines.status")}</span>
+            <span className="text-right">{t("pipelines.triggersHeader")}</span>
+            <span>{t("pipelines.updated")}</span>
+            <span />
           </div>
-        </div>)}
-      </div>}
-      {pipelines.length > 0 && filtered.length === 0 && <div className="py-16 text-center text-sm text-zinc-500"><Copy className="mx-auto mb-3 size-5" />{t('pipelines.noMatches', { query })}</div>}
-      {menu ? <ContextMenu position={menu.position} ariaLabel={t('pipelines.options', { name: menu.pipeline.name })} className="w-48" onClose={() => setMenu(undefined)}>
-        <button role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500" onClick={() => { setMenu(undefined); setScreen('editor', menu.pipeline.id) }}><ArrowRight className="size-3.5" />{t('pipelines.open')}</button>
-        <button role="menuitem" disabled={actionID !== '' || menu.pipeline.status === 'legacy'} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void duplicate(menu.pipeline)}>{actionID === menu.pipeline.id ? <Loader2 className="size-3.5 animate-spin" /> : <Copy className="size-3.5" />}{t('pipelines.duplicate')}</button>
-        <div className="my-1 border-t border-zinc-800" />
-        <button role="menuitem" disabled={actionID !== ''} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => { void remove(menu.pipeline); setMenu(undefined) }}><Trash2 className="size-3.5" />{t('common.delete')}</button>
-      </ContextMenu> : null}
-    </div>
-  </section>
+          {list.map((p) => {
+            const isRunning = Boolean(workspace.running[p.id]);
+            return (
+              <button
+                key={p.id}
+                onClick={() => void nav.openPipeline(p)}
+                onContextMenu={(e) => pipelineMenu(e, p)}
+                disabled={busyId === p.id}
+                className="group grid w-full grid-cols-[minmax(0,1fr)_110px_110px_150px_32px] items-center gap-3 border-b border-seam/70 px-3 py-2.5 text-left transition last:border-b-0 hover:bg-ink-850"
+              >
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-300 transition group-hover:border-ink-500 group-hover:text-ink-50">
+                    <Icon name={isRunning ? "Loader2" : p.icon} className={isRunning ? "h-[15px] w-[15px] animate-spin" : "h-[15px] w-[15px]"} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-[13px] font-medium text-ink-50">{p.name}</span>
+                      {p.status === "published" && (
+                        <span className="font-mono text-[10px] text-ink-500">{p.version}</span>
+                      )}
+                      {p.migrationIssue && (
+                        <Icon name="AlertTriangle" className="h-3 w-3 shrink-0 text-amber-300" />
+                      )}
+                    </span>
+                    <span className="mt-[1px] block truncate text-[11.5px] text-ink-500">{p.desc}</span>
+                  </span>
+                </span>
+                <span>
+                  {isRunning ? <StatusPill status="running" /> : <StatusPill status={p.status} />}
+                </span>
+                <span className="text-right font-mono text-[11.5px] text-ink-300">
+                  {p.triggers > 0 ? t("pipelines.triggerCount", { count: p.triggers }) : "–"}
+                </span>
+                <span className="truncate text-[11.5px] text-ink-400">{p.updated}</span>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isRunning) void workspace.stopPipeline(p.id);
+                  }}
+                  className={cnStop(isRunning)}
+                >
+                  <Icon name={isRunning ? "Square" : "ChevronRight"} className="h-4 w-4" />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="mt-3 flex items-center gap-1.5 px-1 text-[11.5px] text-ink-500">
+        <Icon name="Info" className="h-3.5 w-3.5 shrink-0" />
+        {t("pipelines.boardNote")}
+      </p>
+
+      <Card onClick={() => void create()} hoverable className="mt-4 flex items-center gap-3 p-3">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-300">
+          <Icon name="Plus" className="h-4 w-4" />
+        </span>
+        <span>
+          <span className="block text-[12.5px] font-medium text-ink-100">{t("pipelines.blankTitle")}</span>
+          <span className="block text-[11px] text-ink-500">{t("pipelines.blankHint")}</span>
+        </span>
+      </Card>
+    </ViewShell>
+  );
 }
+
+function cnStop(running: boolean) {
+  return running
+    ? "grid h-6 w-6 place-items-center rounded text-rose-300 transition hover:bg-rose-500/15"
+    : "grid h-6 w-6 place-items-center rounded text-ink-600 transition group-hover:text-ink-100";
+}
+
+/** Adapts a freshly returned Pipeline into the summary shape for the editor nav. */
+function pipelineFrom(created: import("@/lib/types").Pipeline): UiPipeline {
+  return {
+    id: created.id,
+    name: created.name,
+    desc: created.description,
+    icon: created.icon || "Cable",
+    status: created.status === "active" ? "published" : created.status === "legacy" ? "legacy" : "draft",
+    version: created.publishedRevision > 0 ? `v${created.publishedRevision}` : "",
+    triggers: 0,
+    updated: formatDateTime(created.updatedAt),
+  };
+}
+

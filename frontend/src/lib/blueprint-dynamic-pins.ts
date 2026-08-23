@@ -162,7 +162,7 @@ export function switchConfigFromValue(
   const seen = new Set<string>();
   return {
     comparator,
-    cases: items.flatMap((item, index) => {
+    cases: items.flatMap((item) => {
       if (!isRecord(item) || typeof item.id !== "string") return [];
       const id = item.id.trim();
       if (!id || seen.has(id)) return [];

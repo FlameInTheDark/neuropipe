@@ -25,10 +25,12 @@ jobs:
           go-version: "1.26.0"
           cache: true
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          bun-version: "1.2.22"
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Ensure frontend/dist exists for go:embed
         shell: pwsh
@@ -40,15 +42,15 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: bun install --frozen-lockfile
+        run: npm ci
 
       - name: Check frontend types
         working-directory: frontend
-        run: bun run check
+        run: npm run check
 
       - name: Build frontend
         working-directory: frontend
-        run: bun run build
+        run: npm run build
 
       - name: Install Wails v3 CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.8
@@ -93,3 +95,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx --yes semantic-release@25
+
+
+

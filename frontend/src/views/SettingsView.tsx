@@ -1,2541 +1,1715 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import {
-  BadgeCheck,
-  BarChart3,
-  Check,
-  ChevronRight,
-  CircleHelp,
-  Code2,
-  Copy,
-  Cpu,
-  Download,
-  ExternalLink,
-  FolderOpen,
-  HardDrive,
-  KeyRound,
-        Link,
-  Loader2,
-  Network,
-  Package,
-  Play,
-  PlugZap,
-  RefreshCw,
-        HelpCircle,
-  Radio,
-  Save,
-  Search,
-  Server,
-  Settings2,
-  ShieldAlert,
-  Square,
-  Trash2,
-  Workflow,
-} from "lucide-react";
-import { Browser, Events } from "@wailsio/runtime";
-import { PageHeader } from "@/components/PageHeader";
-import { Tooltip } from "@/components/ui/tooltip";
-import { MarkdownContent } from "@/components/MarkdownContent";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Progress } from "@/components/ui/progress";
-import { Select } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Dialog } from "@/components/ui/dialog";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Browser } from "@wailsio/runtime";
+import i18n from "@/i18n";
 import { desktop } from "@/lib/bridge";
-import { usePersistedChoice } from "@/lib/preferences";
 import type {
   APIStatus,
   InstallProgress,
   LlamaRuntimeCatalogStatus,
-  LlamaRuntimeInstallRequest,
   LlamaRuntimeRelease,
+  LlamaRuntimeSettings,
   LlamaRuntimeStatus,
   LocalModel,
   ModelDetail,
-  ModelFile,
   ModelSearchRequest,
   ModelSearchResult,
   PluginStatus,
   ProviderConfig,
+  RuntimeMode,
   SecretMetadata,
   Settings,
-        TwitchDeviceAuthorization,
-        TwitchIdentity,
-        TwitchEventDescriptor,
+  TriggerBinding,
+  TwitchDeviceAuthorization,
+  TwitchEventDescriptor,
+  TwitchIdentity,
+  TwitchManualIdentityRequest,
   TwitchStatus,
-        TriggerBinding,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { useConfirmationStore } from "@/stores/confirmation";
-import { useUIStore } from "@/stores/ui";
-import i18n from "@/i18n";
-import { languages, type AppLanguage } from "@/i18n/resources";
-import { useTranslation } from "react-i18next";
+import { formatBytes, formatCompact, formatDateTime } from "@/lib/format";
+import type { Workspace } from "@/features/workspace/useWorkspace";
+import { ask } from "@/stores/confirmation";
+import { Card, ViewShell, EmptyState } from "../components/ViewShell";
+import { Button, Toggle } from "../components/ui";
+import { Icon } from "../components/icons";
+import { Dropdown } from "../components/Dropdown";
+import { Modal, ModalActions } from "../components/primitives/Modal";
+import { Field, TextInput, TextArea } from "../components/primitives/Field";
+import { cn } from "../utils/cn";
 
-interface SettingsViewProps {
-  settings: Settings;
-  onSettingsChange: (settings: Settings) => void;
-  onRefresh: () => Promise<void>;
-}
+const SECTIONS = [
+  { id: "general", labelKey: "settings.general", icon: "Settings2" },
+  { id: "provider", labelKey: "settings.provider", icon: "Cable" },
+  { id: "models", labelKey: "settings.models", icon: "HardDrive" },
+  { id: "runtime", labelKey: "settings.runtime", icon: "Activity" },
+  { id: "api", labelKey: "settings.api", icon: "Radio" },
+  { id: "twitch", labelKey: "twitch.title", icon: "Radio" },
+  { id: "execution", labelKey: "settings.execution", icon: "Play" },
+  { id: "metrics", labelKey: "settings.metrics", icon: "Activity" },
+  { id: "extensions", labelKey: "settings.extensions", icon: "Sparkles" },
+  { id: "secrets", labelKey: "settings.secrets", icon: "KeyRound" },
+] as const;
 
-type SettingsCategory =
-  | "general"
-  | "provider"
-  | "models"
-  | "runtime"
-  | "api"
-        | "twitch"
-  | "execution"
-  | "metrics"
-  | "extensions"
-  | "secrets";
-type ModelMode = "catalog" | "installed";
-type ModelSort = ModelSearchRequest["sort"];
+type SectionId = (typeof SECTIONS)[number]["id"];
 
-const categories: ReadonlyArray<{
-  id: SettingsCategory;
-  labelKey: string;
-  icon: typeof Cpu;
-  helpKey: string;
-}> = [
-  {
-    id: "general",
-    labelKey: "settings.general",
-    icon: Settings2,
-    helpKey: "settings.generalHelp",
-  },
-  {
-    id: "provider",
-    labelKey: "settings.provider",
-    icon: Cpu,
-    helpKey: "settings.providerHelp",
-  },
-  {
-    id: "models",
-    labelKey: "settings.models",
-    icon: HardDrive,
-    helpKey: "settings.modelsHelp",
-  },
-  {
-    id: "runtime",
-    labelKey: "settings.runtime",
-    icon: Server,
-    helpKey: "settings.runtimeHelp",
-  },
-  {
-    id: "api",
-    labelKey: "settings.api",
-    icon: Network,
-    helpKey: "settings.apiHelp",
-  },
-  {
-    id: "twitch",
-    labelKey: "twitch.title",
-    icon: Radio,
-    helpKey: "twitch.help",
-  },
-  {
-    id: "execution",
-    labelKey: "settings.execution",
-    icon: Workflow,
-    helpKey: "settings.executionHelp",
-  },
-  {
-    id: "metrics",
-    labelKey: "settings.metrics",
-    icon: BarChart3,
-    helpKey: "settings.metricsHelp",
-  },
-  {
-    id: "extensions",
-    labelKey: "settings.extensions",
-    icon: PlugZap,
-    helpKey: "settings.extensionsHelp",
-  },
-  {
-    id: "secrets",
-    labelKey: "settings.secrets",
-    icon: KeyRound,
-    helpKey: "settings.secretsHelp",
-  },
-];
-
-function asArray<T>(value: T[] | null | undefined): T[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function providerForKind(
-  kind: ProviderConfig["kind"],
-  current?: ProviderConfig,
-): ProviderConfig {
-  const previous = current?.kind === kind ? current : undefined;
-  if (kind === "llamacpp")
-    return {
-      id: "llama-managed",
-      name: "Managed llama.cpp",
-      kind,
-      baseUrl: previous?.baseUrl ?? "",
-      model: previous?.model ?? "",
-      enabled: true,
-    };
-  if (kind === "openai-compatible")
-    return {
-      id: "openai-compatible",
-      name: "OpenAI-compatible",
-      kind,
-      baseUrl: previous?.baseUrl ?? "https://api.example.com/v1",
-      model: previous?.model ?? "",
-      apiKeyRef: previous?.apiKeyRef ?? "",
-      enabled: true,
-    };
+/** Normalises a loaded Settings object before it enters the editor draft. */
+function normalizeSettings(input: Settings): Settings {
+  const providers = input.providers.length > 0 ? input.providers : [defaultProvider("openai-compatible")];
   return {
-    id: "ollama-local",
-    name: "Local Ollama",
-    kind: "ollama",
-    baseUrl: previous?.baseUrl ?? "http://127.0.0.1:11434",
-    model: previous?.model ?? "",
-    enabled: true,
-  };
-}
-
-function normalizeSettings(settings: Settings): Settings {
-  const providers = asArray(settings.providers);
-  const selected =
-    providers.find((provider) => provider.id === settings.defaultProviderId) ??
-    providers[0];
-  const provider = providerForKind(selected?.kind ?? "ollama", selected);
-  return {
-    ...settings,
-    language: ["de", "fr", "ru"].includes(settings.language) ? settings.language : "en",
-    hideToTrayOnClose: settings.hideToTrayOnClose ?? false,
-    contentDirectory: settings.contentDirectory ?? "",
-    pluginDirectory: settings.pluginDirectory ?? "",
-    defaultProviderId: provider.id,
-    providers: [provider],
-    api: {
-      enabled: settings.api?.enabled ?? false,
-      bindAddress: settings.api?.bindAddress ?? "127.0.0.1",
-      port: settings.api?.port || settings.webhookPort || 7878,
-      authMode: settings.api?.authMode ?? "token",
-      allowedOrigins: asArray(settings.api?.allowedOrigins),
-      adminEnabled: settings.api?.adminEnabled ?? false,
-      exposureAcknowledged: settings.api?.exposureAcknowledged ?? false,
-    },
+    ...input,
+    language: ["en", "de", "fr", "ru"].includes(input.language) ? input.language : "en",
+    api: { ...input.api, port: input.api.port || input.webhookPort || 7878 },
     llamaRuntime: {
-      binaryPath: settings.llamaRuntime?.binaryPath ?? "",
-      modelPath: settings.llamaRuntime?.modelPath ?? "",
-      runtimeVersion: settings.llamaRuntime?.runtimeVersion ?? "",
-      mode: settings.llamaRuntime?.mode ?? "auto",
-      contextSize: settings.llamaRuntime?.contextSize ?? 8192,
-      autoStart: settings.llamaRuntime?.autoStart ?? false,
+      ...input.llamaRuntime,
+      binaryPath: input.llamaRuntime.binaryPath ?? "",
+      modelPath: input.llamaRuntime.modelPath ?? "",
+      mode: input.llamaRuntime.mode ?? ("auto" as const),
+      contextSize: input.llamaRuntime.contextSize ?? 8192,
+      autoStart: input.llamaRuntime.autoStart ?? false,
     },
     metrics: {
-      detailRetentionDays: settings.metrics?.detailRetentionDays ?? 30,
-      rollupRetentionDays: settings.metrics?.rollupRetentionDays ?? 365,
-      sampleIntervalSeconds: settings.metrics?.sampleIntervalSeconds ?? 30,
-      priceRates: asArray(settings.metrics?.priceRates),
+      ...input.metrics,
+      detailRetentionDays: input.metrics.detailRetentionDays ?? 30,
+      rollupRetentionDays: input.metrics.rollupRetentionDays ?? 365,
+      sampleIntervalSeconds: input.metrics.sampleIntervalSeconds ?? 30,
+      priceRates: input.metrics.priceRates ?? [],
     },
-                twitch: {
-                        clientId: settings.twitch?.clientId ?? "",
-                        defaultBotIdentityId: settings.twitch?.defaultBotIdentityId ?? "",
-                        identities: asArray(settings.twitch?.identities),
-                },
+    providers,
   };
 }
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
+function defaultProvider(kind: ProviderConfig["kind"]): ProviderConfig {
+  switch (kind) {
+    case "ollama":
+      return { id: "ollama-local", name: "Ollama (local)", kind, baseUrl: "http://127.0.0.1:11434", model: "", enabled: true };
+    case "llamacpp":
+      return { id: "llama-managed", name: "Managed llama.cpp", kind, baseUrl: "", model: "", enabled: true };
+    default:
+      return { id: "openai-compatible", name: "OpenAI-compatible", kind, baseUrl: "https://api.example.com/v1", model: "", enabled: true };
   }
-  return `${value.toFixed(unit === 0 || value >= 10 ? 0 : 1)} ${units[unit]}`;
 }
 
-function formatSpeed(bytesPerSecond: number): string {
-  return bytesPerSecond > 0
-    ? `${formatBytes(bytesPerSecond)}/s`
-    : "Calculating speed…";
-}
-function formatDate(value?: string): string {
-  return value
-    ? new Date(value).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
-    : "Unknown";
-}
-function compactNumber(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-function errorMessage(value: unknown, fallback: string): string {
-  return value instanceof Error && value.message
-    ? value.message
-    : typeof value === "string" && value
-      ? value
-      : fallback;
-}
-function apiOriginList(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-function isLoopback(address: string): boolean {
-  return address === "127.0.0.1" || address === "::1";
-}
+export function SettingsView({ workspace }: { workspace: Workspace }) {
+  const { t } = useTranslation();
+  const [section, setSection] = useState<SectionId>("general");
+  const [draft, setDraft] = useState<Settings | null>(
+    workspace.settings ? normalizeSettings(workspace.settings) : null,
+  );
+  const [saving, setSaving] = useState(false);
 
-function normalizeInstallProgress(value: unknown): InstallProgress | null {
-  if (!value || typeof value !== "object") return null;
-  const progress = value as Partial<InstallProgress>;
-  return (progress.kind === "runtime" || progress.kind === "model") &&
-    typeof progress.stage === "string"
-    ? (progress as InstallProgress)
-    : null;
-}
+  /* re-sync when the workspace loads/changes settings externally */
+  useEffect(() => {
+    if (workspace.settings && !saving) setDraft(normalizeSettings(workspace.settings));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.settings]);
 
-function Help({ children }: { children: string }) {
+  if (!draft) {
+    return (
+      <ViewShell title={t("nav.settings")} subtitle={t("settings.description")}>
+        <EmptyState icon="AlertTriangle" title={t("common.unavailable")} />
+      </ViewShell>
+    );
+  }
+
+  const patch = (p: Partial<Settings>) => setDraft((d) => (d ? { ...d, ...p } : d));
+
+  const save = async () => {
+    if (!draft || saving) return;
+    // exposure handshake: non-loopback or unauthenticated API listeners need
+    // explicit consent before they are persisted.
+    const api = draft.api;
+    const isLoopback = api.bindAddress === "127.0.0.1" || api.bindAddress === "::1";
+    const risky = api.enabled && (!isLoopback || api.authMode === "none");
+    let next = draft;
+    if (risky && !api.exposureAcknowledged) {
+      const ok = await ask({
+        title: t("api.exposureTitle"),
+        description: t("api.exposureDescription"),
+        confirmLabel: t("api.exposureConfirm"),
+        danger: true,
+      });
+      if (!ok) return;
+      next = { ...draft, api: { ...draft.api, exposureAcknowledged: true } };
+      setDraft(next);
+    }
+    setSaving(true);
+    try {
+      await workspace.saveSettings(next);
+      workspace.notify(t("settings.saved"), "Check");
+    } catch {
+      workspace.notify(t("settings.saveFailed"), "AlertTriangle");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex size-4 items-center justify-center rounded-full text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
-          aria-label="More information"
-        >
-          <CircleHelp className="size-3.5" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-64 p-3 text-xs leading-5 text-zinc-300">
-        {children}
-      </PopoverContent>
-    </Popover>
+    <ViewShell
+      title={t("nav.settings")}
+      subtitle={t("settings.description")}
+      padded={false}
+      actions={
+        <Button icon="Save" variant="primary" onClick={() => void save()} disabled={saving}>
+          {saving ? t("common.saving") : t("settings.save")}
+        </Button>
+      }
+    >
+      <div className="flex h-full min-h-0">
+        <aside className="w-[210px] shrink-0 overflow-y-auto border-r border-seam p-2">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSection(s.id)}
+              className={cn(
+                "mb-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-[12.5px] transition",
+                section === s.id ? "bg-ink-750 text-ink-50" : "text-ink-400 hover:bg-ink-850 hover:text-ink-100",
+              )}
+            >
+              <Icon name={s.icon} className="h-[15px] w-[15px] shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{t(s.labelKey)}</span>
+              {section === s.id && <Icon name="ChevronRight" className="h-3.5 w-3.5 text-ink-500" />}
+            </button>
+          ))}
+        </aside>
+
+        <div className="fade-in min-w-0 flex-1 overflow-y-auto p-5">
+          {section === "general" && <GeneralPanel draft={draft} patch={patch} />}
+          {section === "provider" && <ProviderPanel draft={draft} patch={patch} />}
+          {section === "models" && <ModelsPanel draft={draft} patch={patch} notify={workspace.notify} />}
+          {section === "runtime" && (
+            <RuntimePanel
+              draft={draft}
+              patch={patch}
+              notify={workspace.notify}
+              onSaveDraft={() => workspace.saveSettings(draft)}
+            />
+          )}
+          {section === "api" && <ApiPanel draft={draft} patch={patch} />}
+          {section === "twitch" && (
+            <TwitchPanel draft={draft} patch={patch} triggers={workspace.triggers} refreshTriggers={workspace.refreshTriggers} />
+          )}
+          {section === "execution" && <ExecutionPanel draft={draft} patch={patch} />}
+          {section === "metrics" && <MetricsPanel draft={draft} patch={patch} />}
+          {section === "extensions" && <ExtensionsPanel draft={draft} patch={patch} />}
+          {section === "secrets" && <SecretsPanel />}
+        </div>
+      </div>
+    </ViewShell>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* shared bits                                                         */
+/* ------------------------------------------------------------------ */
 
 function SectionCard({
   title,
-  help,
   children,
-  className,
+  action,
 }: {
   title: string;
-  help: string;
   children: React.ReactNode;
-  className?: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <section className={cn("surface rounded-xl p-5", className)}>
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-zinc-100">{title}</h2>
-        <Help>{help}</Help>
+    <Card className="p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <h3 className="text-[12.5px] font-semibold tracking-wide text-ink-100 uppercase">{title}</h3>
+        {action && <div className="ml-auto">{action}</div>}
       </div>
       {children}
-    </section>
+    </Card>
   );
 }
 
-function InstallProgressBar({ progress }: { progress: InstallProgress }) {
-  const complete =
-    progress.stage === "complete" || progress.stage === "installed";
-  const failed = progress.stage === "failed";
-  const remaining = Math.max(0, progress.totalBytes - progress.downloadedBytes);
-  const eta =
-    progress.stage === "downloading" &&
-    progress.bytesPerSecond > 0 &&
-    remaining > 0
-      ? `${Math.ceil(remaining / progress.bytesPerSecond)}s remaining`
-      : "";
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-3">
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span
-          className={cn(
-            "truncate font-medium text-zinc-300",
-            complete && "text-emerald-300",
-            failed && "text-red-300",
-          )}
-        >
-          {progress.label}
-        </span>
-        <span className="font-mono text-zinc-500">
-          {Math.round(progress.percentage)}%
-        </span>
-      </div>
-      <Progress
-        className="mt-2"
-        value={progress.percentage}
-        indicatorClassName={
-          failed ? "bg-red-400" : complete ? "bg-emerald-400" : undefined
-        }
-      />
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px] text-zinc-600">
-        <span>
-          {progress.totalBytes
-            ? `${formatBytes(progress.downloadedBytes)} / ${formatBytes(progress.totalBytes)}`
-            : "Preparing transfer"}
-        </span>
-        {progress.stage === "downloading" ? (
-          <span>{formatSpeed(progress.bytesPerSecond)}</span>
-        ) : null}
-        {eta ? <span>~{eta}</span> : null}
-      </div>
-    </div>
-  );
-}
-
-function TokenDialog({
-  token,
-  onClose,
+function ToggleRow({
+  title,
+  description,
+  on,
+  onChange,
 }: {
-  token: string;
-  onClose: () => void;
+  title: string;
+  description: string;
+  on: boolean;
+  onChange: (v: boolean) => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    await navigator.clipboard?.writeText(token);
-    setCopied(true);
-  };
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="api-token-title"
-        className="w-full max-w-lg rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl shadow-black/70"
-      >
-        <div className="border-b border-zinc-800 px-5 py-4">
-          <h2 id="api-token-title" className="text-sm font-semibold">
-            New API token
-          </h2>
-          <p className="mt-1 text-xs leading-5 text-zinc-500">
-            Copy it now. Neuropipe stores the token with Windows DPAPI and will
-            not show it again.
-          </p>
-        </div>
-        <div className="p-5">
-          <code className="block break-all rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-xs text-zinc-200">
-            {token}
-          </code>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-4">
-          <Button variant="outline" onClick={() => void copy()}>
-            {copied ? (
-              <Check className="size-3.5" />
-            ) : (
-              <Copy className="size-3.5" />
-            )}
-            {copied ? "Copied" : "Copy token"}
-          </Button>
-          <Button onClick={onClose}>Done</Button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Readme({ markdown, baseURL }: { markdown: string; baseURL: string }) {
-  return markdown.trim() ? (
-    <MarkdownContent markdown={markdown} baseURL={baseURL} />
-  ) : (
-    <p className="text-sm text-zinc-500">
-      No model card was published for this repository.
-    </p>
-  );
-}
-
-function RepositoryAvatar({
-  id,
-  author,
-  avatarUrl,
-}: {
-  id: string;
-  author?: string;
-  avatarUrl?: string;
-}) {
-  const account = author || id.split("/")[0];
-  return (
-    <span className="relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 text-sm font-semibold text-zinc-300">
-      {id.slice(-1).toUpperCase()}
-      {avatarUrl ? (
-        <img
-          src={avatarUrl}
-          alt={`${account} avatar`}
-          referrerPolicy="no-referrer"
-          onError={(event) => {
-            event.currentTarget.style.display = "none";
-          }}
-          className="absolute inset-0 size-full bg-zinc-900 object-cover"
-        />
-      ) : null}
-    </span>
-  );
-}
-
-function ModelRow({
-  model,
-  avatarUrl,
-  selected,
-  pending,
-  onSelect,
-}: {
-  model: ModelSearchResult;
-  avatarUrl?: string;
-  selected: boolean;
-  pending: boolean;
-  onSelect: () => void;
-}) {
-  const tags = asArray(model.tags)
-    .filter((tag) => !tag.includes(":"))
-    .slice(0, 2);
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={pending}
-      className={cn(
-        "flex w-full gap-3 border-b border-zinc-900 px-3 py-3 text-left outline-none transition hover:bg-zinc-900/80 focus-visible:bg-zinc-800 disabled:opacity-50",
-        selected && "bg-zinc-800 ring-1 ring-inset ring-zinc-600",
-      )}
-    >
-      <RepositoryAvatar
-        id={model.id}
-        author={model.author}
-        avatarUrl={avatarUrl || model.avatarUrl}
-      />
+    <Card className="flex items-center gap-3 p-3.5">
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-medium text-zinc-200">
-            {model.id.split("/").at(-1)}
-          </span>
-          <BadgeCheck className="size-3.5 shrink-0 text-zinc-500" />
-        </span>
-        <span className="mt-0.5 block truncate text-xs text-zinc-500">
-          {model.author || model.id.split("/")[0]} ·{" "}
-          {compactNumber(model.downloads)} downloads
-        </span>
-        {tags.length ? (
-          <span className="mt-1.5 flex gap-1 overflow-hidden">
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="truncate rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500"
-              >
-                {tag}
-              </span>
-            ))}
-          </span>
-        ) : null}
+        <span className="block text-[12.5px] font-medium text-ink-100">{title}</span>
+        <span className="mt-0.5 block text-[11.5px] text-ink-500">{description}</span>
       </span>
-      {model.lastModified ? (
-        <span className="shrink-0 pt-0.5 text-[10px] text-zinc-600">
-          {formatDate(model.lastModified)}
-        </span>
-      ) : null}
-    </button>
+      <Toggle on={on} onChange={onChange} />
+    </Card>
   );
 }
 
-function installedModelTitle(model: LocalModel) {
-  return model.repository?.split("/").at(-1) || model.name;
-}
-
-function installedModelSubtitle(model: LocalModel) {
-  const author = model.author || model.repository?.split("/")[0];
-  const source = author
-    ? `${author} · ${compactNumber(model.downloads)} downloads`
-    : formatBytes(model.size);
-  return model.quantization ? `${source} · ${model.quantization}` : source;
-}
-
-function GeneralPanel({ language, hideToTrayOnClose, onLanguageChange, onHideToTrayOnCloseChange }: { language: AppLanguage; hideToTrayOnClose: boolean; onLanguageChange: (language: AppLanguage) => void; onHideToTrayOnCloseChange: (enabled: boolean) => void }) {
-  const { t } = useTranslation();
-  return <div className="mx-auto max-w-2xl space-y-5">
-    <section className="surface rounded-xl p-5">
-      <h2 className="text-sm font-semibold text-zinc-100">{t("settings.languageTitle")}</h2>
-      <p className="mt-1.5 max-w-xl text-xs leading-5 text-zinc-500">{t("settings.languageDescription")}</p>
-      <label className="mt-5 block max-w-sm text-xs font-medium text-zinc-300">
-        {t("common.language")}
-        <Select className="mt-2 w-full" value={language} onValueChange={(value) => onLanguageChange(value as AppLanguage)} options={languages.map((item) => ({ value: item.value, label: t(item.labelKey) }))} ariaLabel={t("common.language")} />
-      </label>
-    </section>
-    <section className="surface flex items-center justify-between gap-5 rounded-xl p-5">
-      <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-zinc-100">{t("settings.hideToTrayOnCloseTitle")}</h2>
-        <p className="mt-1.5 max-w-xl text-xs leading-5 text-zinc-500">{t("settings.hideToTrayOnCloseDescription")}</p>
-      </div>
-      <Switch label={t("settings.hideToTrayOnCloseTitle")} checked={hideToTrayOnClose} onCheckedChange={onHideToTrayOnCloseChange} />
-    </section>
-  </div>;
-}
-
-export function SettingsView({
-  settings,
-  onSettingsChange,
-  onRefresh,
-}: SettingsViewProps) {
-  const { setError } = useUIStore();
-  const { t } = useTranslation();
-  const ask = useConfirmationStore((state) => state.ask);
-  const [category, setCategory] = usePersistedChoice<SettingsCategory>(
-    "neuropipe.settings.category.v1",
-    categories.map((item) => item.id),
-    "general",
-  );
-  const [modelMode, setModelMode] = usePersistedChoice<ModelMode>(
-    "neuropipe.models.mode.v1",
-    ["catalog", "installed"],
-    "catalog",
-  );
-  const [draft, setDraft] = useState(() => normalizeSettings(settings));
-  const [secrets, setSecrets] = useState<SecretMetadata[]>([]);
-  const [plugins, setPlugins] = useState<PluginStatus[]>([]);
-  const [runtime, setRuntime] = useState<LlamaRuntimeStatus | null>(null);
-  const [runtimeCatalog, setRuntimeCatalog] =
-    useState<LlamaRuntimeCatalogStatus | null>(null);
-  const [runtimeReleases, setRuntimeReleases] = useState<LlamaRuntimeRelease[]>(
-    [],
-  );
-  const [installedModels, setInstalledModels] = useState<LocalModel[]>([]);
-  const [apiStatus, setAPIStatus] = useState<APIStatus | null>(null);
-  const [twitchStatus, setTwitchStatus] = useState<TwitchStatus | null>(null);
-        const [twitchTriggers, setTwitchTriggers] = useState<TriggerBinding[]>([]);
-        const [twitchCatalog, setTwitchCatalog] = useState<TwitchEventDescriptor[]>([]);
-        const [deviceAuthorization, setDeviceAuthorization] = useState<TwitchDeviceAuthorization | null>(null);
-        const [connectDialogOpen, setConnectDialogOpen] = useState(false);
-        const [reconnectIdentity, setReconnectIdentity] = useState<TwitchIdentity | null>(null);
-        const [manualDialogOpen, setManualDialogOpen] = useState(false);
-  const [modelQuery, setModelQuery] = useState("");
-  const [modelSort, setModelSort] = useState<ModelSort>("recommended");
-  const [modelResults, setModelResults] = useState<ModelSearchResult[]>([]);
-  const [modelDetail, setModelDetail] = useState<ModelDetail | null>(null);
-  const [selectedModelFile, setSelectedModelFile] = useState("");
-  const [selectedRelease, setSelectedRelease] = useState("");
-  const [runtimeInstallProgress, setRuntimeInstallProgress] =
-    useState<InstallProgress | null>(null);
-  const [modelInstallProgress, setModelInstallProgress] =
-    useState<InstallProgress | null>(null);
-  const [secretName, setSecretName] = useState("");
-  const [secretValue, setSecretValue] = useState("");
-  const [apiToken, setAPIToken] = useState("");
-  const [busy, setBusy] = useState("");
-  const searchSequence = useRef(0);
-  const detailSequence = useRef(0);
-
-  const activeProvider = draft.providers[0];
-  const selectedExternalModel =
-    draft.llamaRuntime.modelPath &&
-    !installedModels.some(
-      (model) => model.path === draft.llamaRuntime.modelPath,
-    );
-  const runtimeChoices = useMemo(
-    () =>
-      (runtimeCatalog?.installed ?? []).flatMap((runtime) =>
-        (
-          [
-            ["cpu", runtime.cpuInstalled],
-            ["cuda", runtime.cudaInstalled],
-            ["vulkan", runtime.vulkanInstalled],
-            ["hip", runtime.hipInstalled],
-          ] as const
-        )
-          .filter(([, installed]) => installed)
-          .map(([mode]) => ({
-            value: `${runtime.version}:${mode}`,
-            label: `${runtime.version} · ${mode.toUpperCase()}`,
-          })),
-      ),
-    [runtimeCatalog],
-  );
-  const selectedRuntime = draft.llamaRuntime.runtimeVersion
-    ? `${draft.llamaRuntime.runtimeVersion}:${draft.llamaRuntime.mode}`
-    : "";
-  const selectedFile = modelDetail?.files.find(
-    (file) => file.name === selectedModelFile,
-  );
-  const modelBusy =
-    busy === "model-search" ||
-    busy.startsWith("model-detail") ||
-    busy === "model-install";
-
-  useEffect(() => setDraft(normalizeSettings(settings)), [settings]);
-  useEffect(() => {
-    const stopRuntime = Events.On(
-      "runtime.install.progress",
-      (event: unknown) => {
-        const value = (event as { data?: unknown })?.data ?? event;
-        const progress = normalizeInstallProgress(value);
-        if (progress) setRuntimeInstallProgress(progress);
-      },
-    );
-    const stopModel = Events.On("model.install.progress", (event: unknown) => {
-      const value = (event as { data?: unknown })?.data ?? event;
-      const progress = normalizeInstallProgress(value);
-      if (progress) setModelInstallProgress(progress);
-    });
-    return () => {
-      stopRuntime();
-      stopModel();
-    };
-  }, []);
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [
-          nextSecrets,
-          nextPlugins,
-          nextRuntime,
-          nextCatalog,
-          nextModels,
-          nextAPI,
-                  nextTwitch,
-                  nextTwitchTriggers,
-                  nextTwitchCatalog,
-        ] = await Promise.all([
-          desktop.listSecrets(),
-          desktop.listPlugins(),
-          desktop.getLlamaRuntimeStatus(),
-          desktop.getLlamaRuntimeCatalogStatus(),
-          desktop.listInstalledLlamaModels(),
-          desktop.getAPIStatus(),
-                  desktop.getTwitchStatus(),
-                  desktop.listTwitchTriggers(),
-                  desktop.listTwitchEventCatalog(),
-        ]);
-        setSecrets(asArray(nextSecrets));
-        setPlugins(asArray(nextPlugins));
-        setRuntime(nextRuntime);
-        setRuntimeCatalog(nextCatalog);
-        setInstalledModels(asArray(nextModels));
-        setAPIStatus(nextAPI);
-                setTwitchStatus(nextTwitch);
-                setTwitchTriggers(asArray(nextTwitchTriggers));
-                setTwitchCatalog(asArray(nextTwitchCatalog));
-      } catch (reason) {
-        setError(errorMessage(reason, "Unable to load Settings"));
-      }
-    };
-    void load();
-  }, [setError]);
-  useEffect(() => {
-    if (category !== "models" || modelMode !== "catalog" || modelResults.length)
-      return;
-    void searchModels();
-    // searchModels is intentionally event-like and guarded with request sequence state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, modelMode]);
-  useEffect(() => {
-    const kind = busy.startsWith("runtime-")
-      ? "runtime"
-      : busy === "model-install"
-        ? "model"
-        : "";
-    if (!kind) return;
-    const timer = window.setInterval(() => {
-      void desktop
-        .getInstallProgress(kind as "runtime" | "model")
-        .then(normalizeInstallProgress)
-        .then((progress) => {
-          if (progress)
-            kind === "runtime"
-              ? setRuntimeInstallProgress(progress)
-              : setModelInstallProgress(progress);
-        })
-        .catch(() => undefined);
-    }, 300);
-    return () => window.clearInterval(timer);
-  }, [busy]);
-
-  const refreshRuntimeData = async () => {
-    const [nextRuntime, nextCatalog, nextModels] = await Promise.all([
-      desktop.getLlamaRuntimeStatus(),
-      desktop.getLlamaRuntimeCatalogStatus(),
-      desktop.listInstalledLlamaModels(),
-    ]);
-    setRuntime(nextRuntime);
-    setRuntimeCatalog(nextCatalog);
-    setInstalledModels(asArray(nextModels));
-  };
-  const save = async () => {
-    let next = normalizeSettings(draft);
-    if (
-      next.api.enabled &&
-      (!isLoopback(next.api.bindAddress) || next.api.authMode === "none") &&
-      !next.api.exposureAcknowledged
-    ) {
-      const confirmed = await ask({
-        title: "Confirm HTTP API exposure",
-        description:
-          "The API uses plain HTTP. Keep it loopback-only whenever possible, and use a reverse proxy for TLS when exposing it to a network.",
-        confirmLabel: "I understand",
-      });
-      if (!confirmed) return;
-      next = { ...next, api: { ...next.api, exposureAcknowledged: true } };
-    }
-    try {
-      setBusy("settings");
-      await desktop.saveSettings(next);
-      setDraft(next);
-      onSettingsChange(next);
-      await i18n.changeLanguage(next.language);
-      await Promise.all([
-        onRefresh(),
-        desktop.getAPIStatus().then(setAPIStatus),
-      ]);
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to save Settings"));
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const clearMetrics = async () => {
-    const confirmed = await ask({
-      title: "Clear local metrics?",
-      description: "This removes local metric facts and daily rollups. Pipelines, execution logs, chats, reports, and Settings remain unchanged.",
-      confirmLabel: "Clear metrics",
-    });
-    if (!confirmed) return;
-    try {
-      setBusy("metrics-clear");
-      await desktop.clearMetrics();
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to clear metrics"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const searchModels = async () => {
-    const sequence = ++searchSequence.current;
-    try {
-      setBusy("model-search");
-      const results = asArray(
-        await desktop.searchLlamaModels({ query: modelQuery, sort: modelSort }),
-      );
-      if (sequence !== searchSequence.current) return;
-      setModelResults(results);
-      const first = results[0];
-      if (first) await selectModelRepository(first.id, sequence);
-      else {
-        setModelDetail(null);
-        setSelectedModelFile("");
-      }
-    } catch (reason) {
-      if (sequence === searchSequence.current)
-        setError(errorMessage(reason, "Unable to search GGUF models"));
-    } finally {
-      if (sequence === searchSequence.current) setBusy("");
-    }
-  };
-  const selectModelRepository = async (
-    repository: string,
-    searchToken?: number,
-  ) => {
-    const sequence = ++detailSequence.current;
-    try {
-      setBusy(`model-detail-${repository}`);
-      const detail = await desktop.getLlamaModelDetail(repository);
-      if (
-        sequence !== detailSequence.current ||
-        (searchToken !== undefined && searchToken !== searchSequence.current)
-      )
-        return;
-      setModelDetail(detail);
-      setSelectedModelFile(
-        detail.files.find((file) => file.recommended)?.name ??
-          detail.files[0]?.name ??
-          "",
-      );
-    } catch (reason) {
-      if (sequence === detailSequence.current)
-        setError(errorMessage(reason, "Unable to load model details"));
-    } finally {
-      if (sequence === detailSequence.current) setBusy("");
-    }
-  };
-  const installModel = async () => {
-    if (!modelDetail || !selectedModelFile) return;
-    try {
-      setBusy("model-install");
-      setModelInstallProgress({
-        kind: "model",
-        stage: "preparing",
-        label: "Preparing GGUF model",
-        downloadedBytes: 0,
-        totalBytes: 0,
-        bytesPerSecond: 0,
-        percentage: 0,
-      });
-      await desktop.installLlamaModel({
-        repository: modelDetail.id,
-        file: selectedModelFile,
-      });
-      const next = normalizeSettings(await desktop.getSettings());
-      setDraft(next);
-      onSettingsChange(next);
-      setInstalledModels(asArray(await desktop.listInstalledLlamaModels()));
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to install this GGUF model"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const selectInstalledModel = async (path: string) => {
-    try {
-      setBusy(`select-${path}`);
-      await desktop.selectInstalledLlamaModel(path);
-      const next = normalizeSettings(await desktop.getSettings());
-      setDraft(next);
-      onSettingsChange(next);
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to select installed model"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const deleteInstalled = async (model: LocalModel) => {
-    if (
-      !(await ask({
-        title: "Delete installed model?",
-        description: `Remove “${model.name}” from Neuropipe’s local content folder? This cannot be undone.`,
-        confirmLabel: "Delete model",
-      }))
-    )
-      return;
-    try {
-      setBusy(`delete-${model.path}`);
-      await desktop.deleteInstalledLlamaModel(model.path);
-      setInstalledModels(asArray(await desktop.listInstalledLlamaModels()));
-      const next = normalizeSettings(await desktop.getSettings());
-      setDraft(next);
-      onSettingsChange(next);
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to delete installed model"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const chooseContentDirectory = async () => {
-    try {
-      setBusy("content");
-      const folder = await desktop.chooseContentDirectory();
-      if (folder)
-        setDraft((current) => ({ ...current, contentDirectory: folder }));
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to choose a content folder"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const loadReleases = async () => {
-    try {
-      setBusy("runtime-releases");
-      const releases = asArray(await desktop.listLlamaRuntimeReleases());
-      setRuntimeReleases(releases);
-      setSelectedRelease((current) => current || releases[0]?.version || "");
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to load llama.cpp releases"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const installRuntime = async (mode: LlamaRuntimeInstallRequest["mode"]) => {
-    if (!selectedRelease) return;
-    try {
-      setBusy(`runtime-${mode}`);
-      setRuntimeInstallProgress({
-        kind: "runtime",
-        stage: "preparing",
-        label: "Preparing official runtime",
-        downloadedBytes: 0,
-        totalBytes: 0,
-        bytesPerSecond: 0,
-        percentage: 0,
-      });
-      setRuntimeCatalog(
-        await desktop.installLlamaRuntime({ version: selectedRelease, mode }),
-      );
-      const next = normalizeSettings(await desktop.getSettings());
-      setDraft(next);
-      onSettingsChange(next);
-      await refreshRuntimeData();
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to install llama.cpp runtime"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const startRuntime = async () => {
-    try {
-      setBusy("runtime");
-      await desktop.saveSettings(normalizeSettings(draft));
-      setRuntime(await desktop.startLlamaRuntime());
-      const next = normalizeSettings(await desktop.getSettings());
-      setDraft(next);
-      onSettingsChange(next);
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to start llama.cpp"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const saveSecret = async () => {
-    try {
-      setBusy("secret");
-      await desktop.saveSecret(secretName, secretValue);
-      setSecretName("");
-      setSecretValue("");
-      setSecrets(asArray(await desktop.listSecrets()));
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to save secret"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const deleteSecret = async (name: string) => {
-    try {
-      setBusy(name);
-      await desktop.deleteSecret(name);
-      setSecrets(asArray(await desktop.listSecrets()));
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to delete secret"));
-    } finally {
-      setBusy("");
-    }
-  };
-  const rotateToken = async () => {
-    try {
-      setBusy("api-token");
-      setAPIToken(await desktop.rotateAPIToken());
-      setAPIStatus(await desktop.getAPIStatus());
-    } catch (reason) {
-      setError(errorMessage(reason, "Unable to create an API token"));
-    } finally {
-      setBusy("");
-    }
-  };
-        const startTwitchDeviceAuthorization = async (label: string, scopes: string[]) => {
-    try {
-      setBusy("twitch-connect");
-      const next = normalizeSettings(draft);
-      await desktop.saveSettings(next);
-      setDraft(next);
-      onSettingsChange(next);
-                setDeviceAuthorization(await desktop.startTwitchDeviceAuthorization({ identityId: reconnectIdentity?.id, label, scopes }));
-    } catch (reason) {
-      setError(errorMessage(reason, t("twitch.connectFailed")));
-    } finally { setBusy(""); }
-  };
-  const addTwitchManualIdentity = async (label: string, accessToken: string) => {
-    try {
-      setBusy("twitch-manual");
-      await desktop.addTwitchManualIdentity({ label, accessToken });
-      const next = normalizeSettings(await desktop.getSettings());
-      setDraft(next); onSettingsChange(next); setManualDialogOpen(false);
-      setTwitchStatus(await desktop.getTwitchStatus());
-    } catch (reason) { setError(errorMessage(reason, t("twitch.connectFailed"))); } finally { setBusy(""); }
-  };
-  const removeTwitchIdentity = async (identity: TwitchIdentity) => {
-    if (!(await ask({ title: t("twitch.removeTitle"), description: t("twitch.removeDescription", { name: identity.label }), confirmLabel: t("twitch.remove") }))) return;
-    try { setBusy(`twitch-remove-${identity.id}`); await desktop.removeTwitchIdentity(identity.id); const next=normalizeSettings(await desktop.getSettings()); setDraft(next); onSettingsChange(next); } catch(reason) { setError(errorMessage(reason,t("twitch.removeFailed"))); } finally { setBusy(""); }
-  };
-        const setTwitchTriggerEnabled = async (binding: TriggerBinding, enabled: boolean) => {
-                try { setBusy(`twitch-trigger-${binding.id}`); await desktop.setTwitchTriggerEnabled(binding.id, enabled); setTwitchTriggers(asArray(await desktop.listTwitchTriggers())); } catch (reason) { setError(errorMessage(reason, t("twitch.triggerUpdateFailed"))); } finally { setBusy(""); }
-        };
-        const trustTwitchTrigger = async (binding: TriggerBinding) => {
-                try { setBusy(`twitch-trust-${binding.id}`); await desktop.trustTwitchTrigger(binding.id); setTwitchTriggers(asArray(await desktop.listTwitchTriggers())); } catch (reason) { setError(errorMessage(reason, t("twitch.triggerTrustFailed"))); } finally { setBusy(""); }
-        };
-  const updateProvider = (
-    key: "baseUrl" | "model" | "apiKeyRef",
-    value: string,
-  ) =>
-    setDraft((current) => ({
-      ...current,
-      providers: [{ ...current.providers[0], [key]: value }],
-    }));
-  const selectProvider = (kind: ProviderConfig["kind"]) =>
-    setDraft((current) => {
-      const provider = providerForKind(kind, current.providers[0]);
-      return {
-        ...current,
-        defaultProviderId: provider.id,
-        providers: [provider],
-      };
-    });
-
-  return (
-    <section className="flex h-full min-h-0 flex-col">
-      <PageHeader
-        title={t("common.settings")}
-        description={t("settings.description")}
-        actions={
-          <Button onClick={() => void save()} disabled={busy === "settings"}>
-            {busy === "settings" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Save className="size-4" />
-            )}
-            {t("settings.save")}
-          </Button>
-        }
-      />
-      <div className="min-h-0 flex flex-1">
-        <aside className="muted-scroll w-60 min-w-60 max-w-60 shrink-0 overflow-y-auto border-r border-zinc-800 bg-zinc-950/40 p-3">
-          {categories.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setCategory(item.id)}
-                className={cn(
-                  "mb-1 flex w-full min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500",
-                  category === item.id
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300",
-                )}
-              >
-                <Icon className="size-4 shrink-0" />
-                <span className="min-w-0 flex-1 whitespace-nowrap">
-                  {t(item.labelKey)}
-                </span>
-                {category === item.id ? (
-                  <ChevronRight className="size-3.5 shrink-0 text-zinc-500" />
-                ) : null}
-              </button>
-            );
-          })}
-        </aside>
-        <main className="muted-scroll min-w-0 flex-1 overflow-y-auto p-6 lg:p-8">
-          {category === "general" ? <GeneralPanel language={draft.language} hideToTrayOnClose={draft.hideToTrayOnClose} onLanguageChange={(language) => { setDraft((current) => ({ ...current, language })); void i18n.changeLanguage(language); }} onHideToTrayOnCloseChange={(hideToTrayOnClose) => setDraft((current) => ({ ...current, hideToTrayOnClose }))} /> : null}
-          {category === "provider" ? (
-            <ProviderPanel
-              provider={activeProvider}
-              secrets={secrets}
-              onProviderKind={selectProvider}
-              onChange={updateProvider}
-            />
-          ) : null}
-          {category === "models" ? (
-            <ModelsPanel
-              mode={modelMode}
-              onMode={setModelMode}
-              query={modelQuery}
-              onQuery={setModelQuery}
-              sort={modelSort}
-              onSort={setModelSort}
-              onSearch={() => void searchModels()}
-              results={modelResults}
-              detail={modelDetail}
-              selectedFile={selectedModelFile}
-              onSelectFile={setSelectedModelFile}
-              onSelectRepository={(id) => void selectModelRepository(id)}
-              busy={modelBusy}
-              installBusy={busy === "model-install"}
-              onInstall={() => void installModel()}
-              installProgress={modelInstallProgress}
-              contentDirectory={draft.contentDirectory}
-              installed={installedModels}
-              activePath={draft.llamaRuntime.modelPath}
-              onSelectInstalled={(path) => void selectInstalledModel(path)}
-              onDeleteInstalled={(model) => void deleteInstalled(model)}
-            />
-          ) : null}
-          {category === "runtime" ? (
-            <RuntimePanel
-              draft={draft}
-              setDraft={setDraft}
-              runtime={runtime}
-              runtimeChoices={runtimeChoices}
-              selectedRuntime={selectedRuntime}
-              selectedExternalModel={Boolean(selectedExternalModel)}
-              installedModels={installedModels}
-              busy={busy}
-              runtimeReleases={runtimeReleases}
-              selectedRelease={selectedRelease}
-              onSelectedRelease={setSelectedRelease}
-              onChooseFolder={() => void chooseContentDirectory()}
-              onRefresh={() => void refreshRuntimeData()}
-              onStartStop={() =>
-                void (runtime?.running
-                  ? desktop.stopLlamaRuntime().then(setRuntime)
-                  : startRuntime())
-              }
-              onBrowseReleases={() => void loadReleases()}
-              onInstall={(mode) => void installRuntime(mode)}
-              progress={runtimeInstallProgress}
-            />
-          ) : null}
-          {category === "api" ? (
-            <APIPanel
-              draft={draft}
-              setDraft={setDraft}
-              status={apiStatus}
-              busy={busy}
-              onRotate={() => void rotateToken()}
-            />
-          ) : null}
-                  {category === "twitch" ? (
-                        <TwitchPanel draft={draft} setDraft={setDraft} status={twitchStatus} triggers={twitchTriggers} busy={busy} onConnect={() => { setReconnectIdentity(null); setConnectDialogOpen(true); }} onReconnect={(identity) => { setReconnectIdentity(identity); setConnectDialogOpen(true); }} onManual={() => setManualDialogOpen(true)} onRemove={(identity) => void removeTwitchIdentity(identity)} onEnable={(binding, enabled) => void setTwitchTriggerEnabled(binding, enabled)} onTrust={(binding) => void trustTwitchTrigger(binding)} />
-                  ) : null}
-          {category === "execution" ? (
-            <ExecutionPanel draft={draft} setDraft={setDraft} />
-          ) : null}
-          {category === "metrics" ? (
-            <MetricsPanel draft={draft} setDraft={setDraft} provider={activeProvider} busy={busy === "metrics-clear"} onClear={() => void clearMetrics()} />
-          ) : null}
-          {category === "extensions" ? (
-            <ExtensionsPanel
-              draft={draft}
-              setDraft={setDraft}
-              plugins={plugins}
-              busy={busy}
-              onReload={async () => {
-                try {
-                  setBusy("plugins");
-                  setPlugins(asArray(await desktop.rediscoverPlugins()));
-                } catch (reason) {
-                  setError(
-                    errorMessage(reason, "Unable to rediscover plugins"),
-                  );
-                } finally {
-                  setBusy("");
-                }
-              }}
-            />
-          ) : null}
-          {category === "secrets" ? (
-            <SecretsPanel
-              secrets={secrets}
-              name={secretName}
-              value={secretValue}
-              setName={setSecretName}
-              setValue={setSecretValue}
-              busy={busy}
-              onSave={() => void saveSecret()}
-              onDelete={(name) => void deleteSecret(name)}
-            />
-          ) : null}
-        </main>
-      </div>
-      {apiToken ? (
-        <TokenDialog token={apiToken} onClose={() => setAPIToken("")} />
-      ) : null}
-          <TwitchConnectDialog open={connectDialogOpen} identity={reconnectIdentity} catalog={twitchCatalog} authorization={deviceAuthorization} pending={busy === "twitch-connect"} onStart={startTwitchDeviceAuthorization} onClose={() => { if (deviceAuthorization) void desktop.cancelTwitchDeviceAuthorization(deviceAuthorization.id); setDeviceAuthorization(null); setReconnectIdentity(null); setConnectDialogOpen(false); }} />
-          <TwitchManualDialog open={manualDialogOpen} pending={busy === "twitch-manual"} onSave={addTwitchManualIdentity} onClose={() => setManualDialogOpen(false)} />
-    </section>
-  );
-}
-
-function TwitchPanel({
-  draft,
-  setDraft,
-  status,
-        triggers,
-  busy,
-        onConnect,
-        onReconnect,
-  onManual,
-  onRemove,
-        onEnable,
-        onTrust,
-}: {
-  draft: Settings;
-        setDraft: Dispatch<SetStateAction<Settings>>;
-  status: TwitchStatus | null;
-        triggers: TriggerBinding[];
-  busy: string;
-        onConnect: () => void;
-        onReconnect: (identity: TwitchIdentity) => void;
-  onManual: () => void;
-  onRemove: (identity: TwitchIdentity) => void;
-        onEnable: (binding: TriggerBinding, enabled: boolean) => void;
-        onTrust: (binding: TriggerBinding) => void;
-}) {
-  const { t } = useTranslation();
-  const connected = status?.connected ?? false;
-  return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <SectionCard title={t("twitch.connection")} help={t("twitch.connectionHelp")}>
-        <div className="mt-4 space-y-4">
-          <label className="block text-xs font-medium text-zinc-300">
-            {t("twitch.clientId")}
-            <Input value={draft.twitch.clientId} onChange={(event) => setDraft((current) => ({ ...current, twitch: { ...current.twitch, clientId: event.target.value } }))} placeholder={t("twitch.clientIdPlaceholder")} className="mt-2" />
-          </label>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-zinc-200">{connected ? t("twitch.connected") : t("twitch.disconnected")}</p>
-              <p className="mt-1 text-xs text-zinc-500">{status?.lastError || t("twitch.eventSubDescription", { count: status?.activeSubscriptions ?? 0 })}</p>
-            </div>
-            <BadgeCheck className={cn("size-5 shrink-0", connected ? "text-emerald-300" : "text-zinc-600")} />
-          </div>
-        </div>
-      </SectionCard>
-      <SectionCard title={t("twitch.identities")} help={t("twitch.identitiesHelp")}>
-                <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" onClick={onConnect} disabled={!draft.twitch.clientId.trim()}>
-            <Link className="size-3.5" />{t("twitch.connect")}
-          </Button>
-          <Button size="sm" variant="outline" onClick={onManual}>{t("twitch.manualToken")}</Button>
-                </div>
-                {draft.twitch.identities.length > 0 ? <label className="mt-4 block text-xs font-medium text-zinc-300">{t("twitch.defaultBotIdentity")}<Select className="mt-2 max-w-sm" value={draft.twitch.defaultBotIdentityId ?? ""} onValueChange={(defaultBotIdentityId) => setDraft((current) => ({ ...current, twitch: { ...current.twitch, defaultBotIdentityId } }))} options={draft.twitch.identities.filter((identity) => identity.status === "connected").map((identity) => ({ value: identity.id, label: identity.label }))} placeholder={t("twitch.defaultBotIdentityPlaceholder")} ariaLabel={t("twitch.defaultBotIdentity")} /></label> : null}
-        <div className="mt-4 space-y-2">
-          {draft.twitch.identities.length === 0 ? <p className="rounded-md border border-dashed border-zinc-800 px-3 py-4 text-xs text-zinc-500">{t("twitch.noIdentities")}</p> : draft.twitch.identities.map((identity) => (
-            <div key={identity.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2.5">
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-zinc-200">{identity.label}</p><p className="truncate text-xs text-zinc-500">{identity.login} · {identity.scopes.join(", ") || t("twitch.noScopes")}</p></div>
-              <span className={cn("rounded px-2 py-1 text-[10px] font-medium", identity.status === "connected" ? "bg-emerald-500/10 text-emerald-300" : "bg-amber-500/10 text-amber-300")}>{identity.status === "connected" ? t("twitch.connected") : t("twitch.reconnectRequired")}</span>
-                                <Button size="sm" variant="outline" onClick={() => onReconnect(identity)} disabled={busy === "twitch-connect"}>{t("twitch.reconnect")}</Button>
-                                <Button size="sm" variant="ghost" aria-label={t("twitch.removeIdentity", { name: identity.label })} onClick={() => onRemove(identity)} disabled={busy === `twitch-remove-${identity.id}`}><Trash2 className="size-3.5" /></Button>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-          <SectionCard title={t("twitch.triggers")} help={t("twitch.triggersHelp")}>
-                <div className="mt-4 space-y-2">{triggers.length === 0 ? <p className="text-xs text-zinc-500">{t("twitch.noTriggers")}</p> : triggers.map((binding) => <div key={binding.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3"><span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{binding.label}</span>{!binding.trusted ? <Button size="sm" variant="outline" onClick={() => onTrust(binding)} disabled={busy === `twitch-trust-${binding.id}`}>{t("twitch.trust")}</Button> : <Switch checked={binding.enabled} onCheckedChange={(enabled) => onEnable(binding, enabled)} label={t("twitch.enableTrigger", { name: binding.label })} />}</div>)}</div>
-          </SectionCard>
-    </div>
-  );
-}
-
-function TwitchConnectDialog({ open, identity, catalog, authorization, pending, onStart, onClose }: { open: boolean; identity: TwitchIdentity | null; catalog: TwitchEventDescriptor[]; authorization: TwitchDeviceAuthorization | null; pending: boolean; onStart: (label: string, scopes: string[]) => void; onClose: () => void }) {
-  const { t } = useTranslation();
-  const [label, setLabel] = useState("");
-  const scopes = [...new Set(["user:read:chat", "user:write:chat", ...catalog.flatMap((event) => event.requiredScopes)])];
-  return <Dialog open={open} title={t("twitch.connectTitle")} description={t("twitch.connectDescription")} onOpenChange={(next) => { if (!next) onClose(); }} className="max-w-lg">
-    <div className="space-y-4 p-5">
-      {authorization ? <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 p-4"><p className="text-xs text-violet-200">{t("twitch.verificationCode")}</p><p className="mt-2 font-mono text-2xl font-semibold tracking-[.2em] text-zinc-100">{authorization.userCode}</p><p className="mt-3 text-xs leading-5 text-zinc-400">{t("twitch.openVerification", { url: authorization.verificationUri })}</p><Button size="sm" className="mt-3" onClick={() => void Browser.OpenURL(authorization.verificationUri)}><ExternalLink className="size-3.5" />{t("twitch.openTwitch")}</Button></div> : <label className="block text-xs font-medium text-zinc-300">{t("twitch.identityLabel")}<Input autoFocus value={label || identity?.label || ""} onChange={(event) => setLabel(event.target.value)} placeholder={t("twitch.identityLabelPlaceholder")} className="mt-2" /></label>}
-    </div>
-    <div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-4"><Button variant="outline" onClick={onClose}>{t("common.cancel")}</Button>{!authorization ? <Button onClick={() => onStart(label, scopes)} disabled={pending}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Link className="size-4" />}{t("twitch.startAuthorization")}</Button> : null}</div>
-  </Dialog>;
-}
-
-function TwitchManualDialog({ open, pending, onSave, onClose }: { open: boolean; pending: boolean; onSave: (label: string, accessToken: string) => void; onClose: () => void }) {
-  const { t } = useTranslation(); const [label, setLabel] = useState(""); const [token, setToken] = useState("");
-  return <Dialog open={open} title={t("twitch.manualTitle")} description={t("twitch.manualDescription")} onOpenChange={(next) => { if (!next) onClose(); }} className="max-w-lg"><div className="space-y-4 p-5"><label className="block text-xs font-medium text-zinc-300">{t("twitch.identityLabel")}<Input autoFocus value={label} onChange={(event) => setLabel(event.target.value)} className="mt-2" /></label><label className="block text-xs font-medium text-zinc-300">{t("twitch.accessToken")}<Input type="password" value={token} onChange={(event) => setToken(event.target.value)} className="mt-2" /></label></div><div className="flex justify-end gap-2 border-t border-zinc-800 px-5 py-4"><Button variant="outline" onClick={onClose}>{t("common.cancel")}</Button><Button onClick={() => onSave(label, token)} disabled={pending || !token.trim()}>{pending ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}{t("twitch.connect")}</Button></div></Dialog>;
-}
-
-function ProviderPanel({
-  provider,
-  secrets,
-  onProviderKind,
-  onChange,
-}: {
-  provider: ProviderConfig;
-  secrets: SecretMetadata[];
-  onProviderKind: (kind: ProviderConfig["kind"]) => void;
-  onChange: (key: "baseUrl" | "model" | "apiKeyRef", value: string) => void;
-}) {
-  const { t } = useTranslation();
-  // Saved secrets become a pick list; a reference to a deleted secret stays
-  // selectable so nothing is silently cleared.
-  const secretOptions = useMemo(() => {
-    const names = secrets.map((secret) => secret.name).filter(Boolean);
-    const current = provider.apiKeyRef ?? "";
-    if (current && !names.includes(current)) {
-      names.unshift(current);
-    }
-    return [
-      { value: "", label: t("settings.noApiKey") },
-      ...names.map((name) => ({ value: name, label: name })),
-    ];
-  }, [secrets, provider.apiKeyRef, t]);
-  return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <SectionCard
-        title="Provider"
-        help="Neuropipe intentionally keeps one active provider to make model routing predictable."
-      >
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <label className="text-xs text-zinc-500">
-            Provider type
-            <Select
-              className="mt-1.5"
-              value={provider.kind}
-              onValueChange={(value) =>
-                onProviderKind(value as ProviderConfig["kind"])
-              }
-              options={[
-                { value: "ollama", label: "Ollama" },
-                { value: "llamacpp", label: "Managed llama.cpp" },
-                { value: "openai-compatible", label: "OpenAI-compatible" },
-              ]}
-              ariaLabel="Provider type"
-            />
-          </label>
-          {provider.kind === "ollama" ? (
-            <>
-              <Field
-                label="Endpoint"
-                value={provider.baseUrl}
-                onChange={(value) => onChange("baseUrl", value)}
-                placeholder="http://127.0.0.1:11434"
-              />
-              <Field
-                label="Model"
-                value={provider.model}
-                onChange={(value) => onChange("model", value)}
-                placeholder="qwen3"
-              />
-            </>
-          ) : null}
-          {provider.kind === "openai-compatible" ? (
-            <>
-              <Field
-                label="Base URL"
-                value={provider.baseUrl}
-                onChange={(value) => onChange("baseUrl", value)}
-                placeholder="https://api.example.com/v1"
-              />
-              <Field
-                label="Model"
-                value={provider.model}
-                onChange={(value) => onChange("model", value)}
-                placeholder="Model ID"
-              />
-              <label className="text-xs text-zinc-500">
-                <span className="inline-flex items-center gap-1">
-                  Saved API key
-                  <Tooltip content={t("settings.apiKeyHelp")} side="top" size="body">
-                    <span
-                      tabIndex={0}
-                      aria-label="Saved API key"
-                      className="inline-flex cursor-help text-zinc-600 outline-none hover:text-zinc-300 focus-visible:text-zinc-200"
-                    >
-                      <HelpCircle className="size-3.5" />
-                    </span>
-                  </Tooltip>
-                </span>
-                <Select
-                  className="mt-1.5"
-                  value={provider.apiKeyRef ?? ""}
-                  onValueChange={(value) => onChange("apiKeyRef", value)}
-                  options={secretOptions}
-                  ariaLabel="Saved API key"
-                />
-              </label>
-            </>
-          ) : null}
-          {provider.kind === "llamacpp" ? (
-            <div className="md:col-span-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-4 text-sm text-zinc-400">
-              The selected GGUF model and loopback endpoint are controlled in
-              Models and Runtime.
-            </div>
-          ) : null}
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-function ModelsPanel(props: {
-  mode: ModelMode;
-  onMode: (value: ModelMode) => void;
-  query: string;
-  onQuery: (value: string) => void;
-  sort: ModelSort;
-  onSort: (value: ModelSort) => void;
-  onSearch: () => void;
-  results: ModelSearchResult[];
-  detail: ModelDetail | null;
-  selectedFile: string;
-  onSelectFile: (value: string) => void;
-  onSelectRepository: (value: string) => void;
-  busy: boolean;
-  installBusy: boolean;
-  onInstall: () => void;
-  installProgress: InstallProgress | null;
-  contentDirectory: string;
-  installed: LocalModel[];
-  activePath: string;
-  onSelectInstalled: (path: string) => void;
-  onDeleteInstalled: (model: LocalModel) => void;
-}) {
-  const {
-    mode,
-    onMode,
-    query,
-    onQuery,
-    sort,
-    onSort,
-    onSearch,
-    results,
-    detail,
-    selectedFile,
-    onSelectFile,
-    onSelectRepository,
-    busy,
-    installBusy,
-    onInstall,
-    installProgress,
-    contentDirectory,
-    installed,
-    activePath,
-    onSelectInstalled,
-    onDeleteInstalled,
-  } = props;
-  const files = detail?.files ?? [];
-  return (
-    <div className="mx-auto flex h-[calc(100vh-10.5rem)] min-h-[38rem] max-w-7xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
-      <aside className="flex w-[22rem] shrink-0 flex-col border-r border-zinc-800 bg-zinc-950/70">
-        <div className="border-b border-zinc-800 p-3">
-          <div className="flex rounded-md border border-zinc-800 bg-zinc-900/70 p-0.5">
-            <button
-              type="button"
-              onClick={() => onMode("catalog")}
-              className={cn(
-                "flex-1 rounded px-2 py-1.5 text-xs",
-                mode === "catalog"
-                  ? "bg-zinc-700 text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-300",
-              )}
-            >
-              Catalog
-            </button>
-            <button
-              type="button"
-              onClick={() => onMode("installed")}
-              className={cn(
-                "flex-1 rounded px-2 py-1.5 text-xs",
-                mode === "installed"
-                  ? "bg-zinc-700 text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-300",
-              )}
-            >
-              Installed ({installed.length})
-            </button>
-          </div>
-          {mode === "catalog" ? (
-            <>
-              <div className="relative mt-3">
-                <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-zinc-600" />
-                <Input
-                  value={query}
-                  onChange={(event) => onQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") onSearch();
-                  }}
-                  className="pl-9"
-                  placeholder="Search Hugging Face GGUF"
-                />
-              </div>
-              <div className="mt-2 flex gap-2">
-                <Select
-                  className="flex-1"
-                  value={sort}
-                  onValueChange={(value) => onSort(value as ModelSort)}
-                  options={[
-                    { value: "recommended", label: "Recommended" },
-                    { value: "downloads", label: "Most downloaded" },
-                    { value: "recent", label: "Recently updated" },
-                  ]}
-                  ariaLabel="Model catalog sort"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={onSearch}
-                >
-                  {busy ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-3.5" />
-                  )}
-                </Button>
-              </div>
-            </>
-          ) : null}
-        </div>
-        <div className="muted-scroll min-h-0 flex-1 overflow-y-auto">
-          {mode === "catalog" ? (
-            results.length ? (
-              results.map((model) => (
-                <ModelRow
-                  key={model.id}
-                  model={model}
-                  avatarUrl={
-                    detail?.id === model.id ? detail.avatarUrl : undefined
-                  }
-                  selected={detail?.id === model.id}
-                  pending={busy}
-                  onSelect={() => onSelectRepository(model.id)}
-                />
-              ))
-            ) : (
-              <p className="px-4 py-8 text-center text-sm text-zinc-600">
-                Search public, non-gated GGUF repositories.
-              </p>
-            )
-          ) : installed.length ? (
-            installed.map((model) => (
-              <div
-                key={model.path}
-                className={cn(
-                  "flex items-center gap-3 border-b border-zinc-900 px-3 py-3",
-                  activePath === model.path && "bg-zinc-900",
-                )}
-              >
-                <RepositoryAvatar
-                  id={model.repository || model.name}
-                  author={model.author}
-                  avatarUrl={model.avatarUrl}
-                />
-                <button
-                  type="button"
-                  onClick={() => onSelectInstalled(model.path)}
-                  className="min-w-0 flex-1 text-left"
-                >
-                  <span className="block truncate text-sm font-medium text-zinc-200">
-                    {installedModelTitle(model)}
-                  </span>
-                  <span className="mt-1 block truncate text-[11px] text-zinc-500">
-                    {installedModelSubtitle(model)}
-                  </span>
-                  <span className="mt-0.5 block font-mono text-[10px] text-zinc-600">
-                    {formatBytes(model.size)}
-                  </span>
-                </button>
-                {activePath === model.path ? (
-                  <span className="text-[10px] text-emerald-400">Active</span>
-                ) : null}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`Delete ${model.name}`}
-                  onClick={() => onDeleteInstalled(model)}
-                >
-                  <Trash2 className="size-3.5 text-red-300" />
-                </Button>
-              </div>
-            ))
-          ) : (
-            <p className="px-4 py-8 text-center text-sm text-zinc-600">
-              No GGUF models are installed.
-            </p>
-          )}
-        </div>
-      </aside>
-      <section className="muted-scroll min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-6">
-        {mode === "installed" ? (
-          <InstalledDetail installed={installed} activePath={activePath} />
-        ) : detail ? (
-          <ModelDetailPane
-            detail={detail}
-            files={files}
-            selectedFile={selectedFile}
-            onSelectFile={onSelectFile}
-            onInstall={onInstall}
-            installBusy={installBusy}
-            progress={installProgress}
-            contentDirectory={contentDirectory}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-zinc-600">
-            Select a GGUF repository to view its available downloads.
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function ModelDetailPane({
-  detail,
-  files,
-  selectedFile,
-  onSelectFile,
-  onInstall,
-  installBusy,
-  progress,
-  contentDirectory,
-}: {
-  detail: ModelDetail;
-  files: ModelFile[];
-  selectedFile: string;
-  onSelectFile: (value: string) => void;
-  onInstall: () => void;
-  installBusy: boolean;
-  progress: InstallProgress | null;
-  contentDirectory: string;
-}) {
-  const selected = files.find((file) => file.name === selectedFile);
-  return (
-    <div className="mx-auto min-w-0 max-w-3xl space-y-7">
-      <header className="flex min-w-0 items-start gap-4">
-        <RepositoryAvatar
-          id={detail.id}
-          author={detail.author}
-          avatarUrl={detail.avatarUrl}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="truncate text-2xl font-semibold tracking-tight text-zinc-100">
-              {detail.id.split("/").at(-1)}
-            </h2>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                void Browser.OpenURL(`https://huggingface.co/${detail.id}`)
-              }
-            >
-              Open on Hugging Face
-              <ExternalLink className="size-3.5" />
-            </Button>
-          </div>
-          <p className="mt-1 break-all text-sm text-zinc-500">{detail.id}</p>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-500">
-            <span className="rounded-md bg-zinc-900 px-2 py-1">
-              {compactNumber(detail.downloads)} downloads
-            </span>
-            <span className="rounded-md bg-zinc-900 px-2 py-1">
-              {detail.likes} likes
-            </span>
-            <span className="rounded-md bg-zinc-900 px-2 py-1">
-              Updated {formatDate(detail.lastModified)}
-            </span>
-          </div>
-        </div>
-      </header>
-      <section>
-        <div className="mb-3 flex items-center gap-2">
-          <h3 className="text-sm font-semibold">Download options</h3>
-          <Help>
-            Each option is a full GGUF model file. Neuropipe resumes downloads
-            and checks files against the repository checksum when available.
-          </Help>
-        </div>
-        <Select
-          value={selectedFile}
-          onValueChange={onSelectFile}
-          options={files.map((file) => ({
-            value: file.name,
-            label: `${file.quantization || "GGUF"} · ${formatBytes(file.size)}`,
-            description: file.recommended
-              ? `${file.name} · Recommended`
-              : file.name,
-          }))}
-          placeholder="Select a GGUF download"
-          ariaLabel="GGUF download option"
-        />
-        {selected ? (
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
-            <span className="font-mono text-zinc-400">{selected.name}</span>
-            {selected.sha256 ? (
-              <span className="text-emerald-400">SHA-256 verified</span>
-            ) : (
-              <span>Checksum unavailable</span>
-            )}
-          </div>
-        ) : null}
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-          <span className="min-w-0 break-all text-xs text-zinc-500">
-            Install to{" "}
-            <span className="font-mono text-zinc-400">
-              {contentDirectory || "Neuropipe content folder"}
-            </span>
-          </span>
-          <Button disabled={!selectedFile || installBusy} onClick={onInstall}>
-            {installBusy ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Download className="size-4" />
-            )}
-            Install {selected?.size ? formatBytes(selected.size) : "model"}
-          </Button>
-        </div>
-        {progress ? (
-          <div className="mt-3">
-            <InstallProgressBar progress={progress} />
-          </div>
-        ) : null}
-      </section>
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/35 p-4">
-        <h3 className="text-sm font-semibold">Details</h3>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {asArray(detail.tags)
-            .slice(0, 12)
-            .map((tag) => (
-              <span
-                key={tag}
-                className="break-all rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-400"
-              >
-                {tag}
-              </span>
-            ))}
-        </div>
-      </section>
-      <section className="min-w-0">
-        <h3 className="mb-3 text-sm font-semibold">README</h3>
-        <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/35 p-5">
-          <Readme
-            markdown={detail.readme ?? ""}
-            baseURL={`https://huggingface.co/${detail.id}/resolve/main/`}
-          />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function InstalledDetail({
-  installed,
-  activePath,
-}: {
-  installed: LocalModel[];
-  activePath: string;
-}) {
-  const active = installed.find((model) => model.path === activePath);
-  return (
-    <div className="mx-auto flex h-full max-w-xl flex-col justify-center text-center">
-      <HardDrive className="mx-auto size-8 text-zinc-600" />
-      <h2 className="mt-4 text-lg font-semibold">Installed GGUF models</h2>
-      <p className="mt-2 text-sm leading-6 text-zinc-500">
-        Select a local model in the list to make it active for managed
-        llama.cpp.
-      </p>
-      {active ? (
-        <div className="mx-auto mt-5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">
-          Active: {installedModelTitle(active)}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function RuntimePanel({
-  draft,
-  setDraft,
-  runtime,
-  runtimeChoices,
-  selectedRuntime,
-  selectedExternalModel,
-  installedModels,
-  busy,
-  runtimeReleases,
-  selectedRelease,
-  onSelectedRelease,
-  onChooseFolder,
-  onRefresh,
-  onStartStop,
-  onBrowseReleases,
-  onInstall,
-  progress,
-}: {
-  draft: Settings;
-  setDraft: React.Dispatch<React.SetStateAction<Settings>>;
-  runtime: LlamaRuntimeStatus | null;
-  runtimeChoices: { value: string; label: string }[];
-  selectedRuntime: string;
-  selectedExternalModel: boolean;
-  installedModels: LocalModel[];
-  busy: string;
-  runtimeReleases: LlamaRuntimeRelease[];
-  selectedRelease: string;
-  onSelectedRelease: (value: string) => void;
-  onChooseFolder: () => void;
-  onRefresh: () => void;
-  onStartStop: () => void;
-  onBrowseReleases: () => void;
-  onInstall: (mode: LlamaRuntimeInstallRequest["mode"]) => void;
-  progress: InstallProgress | null;
-}) {
-  return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <SectionCard
-        title="Managed llama.cpp"
-        help="Neuropipe manages only llama-server processes it launched and binds them to loopback."
-      >
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <div className="md:col-span-2">
-            <div className="flex gap-2">
-              <Input
-                value={draft.contentDirectory}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    contentDirectory: event.target.value,
-                  }))
-                }
-                placeholder="C:\\Neuropipe"
-              />
-              <Button
-                variant="outline"
-                onClick={onChooseFolder}
-                disabled={busy === "content"}
-              >
-                <FolderOpen className="size-4" />
-                Browse
-              </Button>
-            </div>
-          </div>
-          <label className="text-xs text-zinc-500">
-            Installed runtime
-            <Select
-              className="mt-1.5"
-              value={selectedRuntime}
-              onValueChange={(value) => {
-                const [version, mode] = value.split(":");
-                setDraft((current) => ({
-                  ...current,
-                  llamaRuntime: {
-                    ...current.llamaRuntime,
-                    runtimeVersion: version,
-                    mode: mode as Settings["llamaRuntime"]["mode"],
-                  },
-                }));
-              }}
-              options={runtimeChoices}
-              placeholder="Choose an installed runtime"
-              ariaLabel="Installed managed runtime"
-            />
-          </label>
-          <label className="text-xs text-zinc-500">
-            Context tokens
-            <Input
-              className="mt-1.5"
-              type="number"
-              min={1024}
-              step={1024}
-              value={draft.llamaRuntime.contextSize}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  llamaRuntime: {
-                    ...current.llamaRuntime,
-                    contextSize: Number(event.target.value),
-                  },
-                }))
-              }
-            />
-          </label>
-          <label className="text-xs text-zinc-500 md:col-span-2">
-            Installed model
-            <Select
-              className="mt-1.5"
-              value={draft.llamaRuntime.modelPath}
-              onValueChange={(path) =>
-                setDraft((current) => ({
-                  ...current,
-                  llamaRuntime: { ...current.llamaRuntime, modelPath: path },
-                }))
-              }
-              options={[
-                ...(selectedExternalModel
-                  ? [
-                      {
-                        value: draft.llamaRuntime.modelPath,
-                        label: "Previously selected model",
-                      },
-                    ]
-                  : []),
-                ...installedModels.map((model) => ({
-                  value: model.path,
-                  label: installedModelTitle(model),
-                  description: `${installedModelSubtitle(model)} · ${formatBytes(model.size)}`,
-                })),
-              ]}
-              placeholder="Choose a model from Models"
-              ariaLabel="Installed GGUF model"
-            />
-          </label>
-          <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-3 py-2.5 md:col-span-2">
-            <span className="text-sm text-zinc-400">Start with Neuropipe</span>
-            <Switch
-              label="Start managed llama.cpp with Neuropipe"
-              checked={draft.llamaRuntime.autoStart}
-              onCheckedChange={(autoStart) =>
-                setDraft((current) => ({
-                  ...current,
-                  llamaRuntime: { ...current.llamaRuntime, autoStart },
-                }))
-              }
-            />
-          </div>
-        </div>
-        <div className="mt-5 flex items-center gap-2">
-          <Button disabled={busy === "runtime"} onClick={onStartStop}>
-            {busy === "runtime" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : runtime?.running ? (
-              <Square className="size-4" />
-            ) : (
-              <Play className="size-4" />
-            )}
-            {runtime?.running ? "Stop runtime" : "Start runtime"}
-          </Button>
-          <Button variant="outline" onClick={onRefresh}>
-            <RefreshCw className="size-4" />
-            Refresh
-          </Button>
-          {runtime?.endpoint ? (
-            <span className="font-mono text-xs text-zinc-500">
-              {runtime.endpoint}
-            </span>
-          ) : null}
-        </div>
-      </SectionCard>
-      <SectionCard
-        title="Official runtime installer"
-        help="Downloads are resumable, SHA-256 verified, and atomically installed in your content folder."
-      >
-        <div className="mt-4 flex gap-2">
-          <Select
-            className="flex-1"
-            value={selectedRelease}
-            onValueChange={onSelectedRelease}
-            options={runtimeReleases.map((release) => ({
-              value: release.version,
-              label: release.version,
-              description: formatDate(release.publishedAt),
-            }))}
-            placeholder="Browse releases"
-            ariaLabel="Official llama.cpp release"
-          />
-          <Button
-            variant="outline"
-            onClick={onBrowseReleases}
-            disabled={busy === "runtime-releases"}
-          >
-            {busy === "runtime-releases" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="size-4" />
-            )}
-            Browse releases
-          </Button>
-        </div>
-        {runtimeReleases.length ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(["cpu", "cuda", "vulkan", "hip"] as const).map((mode) => {
-              const release = runtimeReleases.find(
-                (item) => item.version === selectedRelease,
-              );
-              const available = Boolean(release?.[mode]?.url);
-              return (
-                <Button
-                  key={mode}
-                  size="sm"
-                  variant="outline"
-                  disabled={!available || busy !== ""}
-                  onClick={() => onInstall(mode)}
-                >
-                  <Download className="size-3.5" />
-                  Install {mode.toUpperCase()}
-                </Button>
-              );
-            })}
-          </div>
-        ) : null}
-        {progress ? (
-          <div className="mt-3">
-            <InstallProgressBar progress={progress} />
-          </div>
-        ) : null}
-      </SectionCard>
-    </div>
-  );
-}
-
-function APIPanel({
-  draft,
-  setDraft,
-  status,
-  busy,
-  onRotate,
-}: {
-  draft: Settings;
-  setDraft: React.Dispatch<React.SetStateAction<Settings>>;
-  status: APIStatus | null;
-  busy: string;
-  onRotate: () => void;
-}) {
-  const api = draft.api;
-  return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <SectionCard
-        title="HTTP API"
-        help="Runs a configurable local Fiber server. It is disabled by default; it does not provide TLS."
-      >
-        <div className="mt-5 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2.5">
-          <div>
-            <p className="text-sm font-medium text-zinc-300">Enable API</p>
-            <p className="mt-0.5 text-xs text-zinc-600">
-              Webhooks are available only while the API is running.
-            </p>
-          </div>
-          <Switch
-            label="Enable HTTP API"
-            checked={api.enabled}
-            onCheckedChange={(enabled) =>
-              setDraft((current) => ({
-                ...current,
-                api: { ...current.api, enabled },
-              }))
-            }
-          />
-        </div>
-        <div
-          className={cn(
-            "mt-4 grid gap-4 md:grid-cols-2",
-            !api.enabled && "pointer-events-none opacity-45",
-          )}
-        >
-          <Field
-            label="Bind address"
-            value={api.bindAddress}
-            onChange={(bindAddress) =>
-              setDraft((current) => ({
-                ...current,
-                api: { ...current.api, bindAddress },
-              }))
-            }
-            placeholder="127.0.0.1"
-          />
-          <label className="text-xs text-zinc-500">
-            Port
-            <Input
-              className="mt-1.5"
-              type="number"
-              min={1024}
-              max={65535}
-              value={api.port}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  api: { ...current.api, port: Number(event.target.value) },
-                }))
-              }
-            />
-          </label>
-          <label className="text-xs text-zinc-500">
-            Authentication
-            <Select
-              className="mt-1.5"
-              value={api.authMode}
-              onValueChange={(authMode) =>
-                setDraft((current) => ({
-                  ...current,
-                  api: {
-                    ...current.api,
-                    authMode: authMode as Settings["api"]["authMode"],
-                    adminEnabled:
-                      authMode === "none" ? false : current.api.adminEnabled,
-                  },
-                }))
-              }
-              options={[
-                { value: "token", label: "Bearer token" },
-                {
-                  value: "none",
-                  label: "No authentication",
-                  description: "Operational endpoints only",
-                },
-              ]}
-              ariaLabel="API authentication"
-            />
-          </label>
-          <div className="flex items-end gap-2">
-            <Button
-              variant="outline"
-              disabled={busy === "api-token"}
-              onClick={onRotate}
-            >
-              {busy === "api-token" ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <KeyRound className="size-4" />
-              )}
-              {status?.tokenConfigured ? "Rotate token" : "Create token"}
-            </Button>
-            {status?.tokenConfigured ? (
-              <span className="pb-2 text-xs text-emerald-400">
-                Token configured
-              </span>
-            ) : null}
-          </div>
-          <label className="text-xs text-zinc-500 md:col-span-2">
-            Allowed CORS origins
-            <Input
-              className="mt-1.5"
-              value={api.allowedOrigins.join(", ")}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  api: {
-                    ...current.api,
-                    allowedOrigins: apiOriginList(event.target.value),
-                  },
-                }))
-              }
-              placeholder="https://dashboard.example.com"
-            />
-          </label>
-          {api.authMode === "token" ? (
-            <div className="flex items-center justify-between rounded-lg border border-zinc-800 px-3 py-2.5 md:col-span-2">
-              <span className="text-sm text-zinc-400">Administrative API</span>
-              <Switch
-                label="Enable administrative API"
-                checked={api.adminEnabled}
-                onCheckedChange={(adminEnabled) =>
-                  setDraft((current) => ({
-                    ...current,
-                    api: { ...current.api, adminEnabled },
-                  }))
-                }
-              />
-            </div>
-          ) : (
-            <div className="md:col-span-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs leading-5 text-amber-200">
-              Unauthenticated mode disables administrative endpoints. Keep this
-              mode loopback-only.
-            </div>
-          )}
-        </div>
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-2.5">
-          <span
-            className={
-              status?.running
-                ? "size-2 rounded-full bg-emerald-400"
-                : "size-2 rounded-full bg-zinc-600"
-            }
-          />
-          <span className="text-xs text-zinc-400">
-            {status?.running
-              ? status.endpoint
-              : status?.message || "API is disabled"}
-          </span>
-        </div>
-        {api.enabled && !isLoopback(api.bindAddress) ? (
-          <div className="mt-3 flex gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-5 text-amber-100">
-            <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-            Use a reverse proxy to terminate TLS before exposing this HTTP
-            listener outside your machine.
-          </div>
-        ) : null}
-      </SectionCard>
-    </div>
-  );
-}
-
-function ExecutionPanel({
-  draft,
-  setDraft,
-}: {
-  draft: Settings;
-  setDraft: React.Dispatch<React.SetStateAction<Settings>>;
-}) {
-  return (
-    <div className="mx-auto max-w-3xl">
-      <SectionCard
-        title="Execution"
-        help="Limits protect local resources. Per-pipeline overlapping runs are still skipped and recorded."
-      >
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <NumberField
-            label="Retention days"
-            value={draft.retentionDays}
-            onChange={(retentionDays) =>
-              setDraft((current) => ({ ...current, retentionDays }))
-            }
-            min={1}
-          />
-          <NumberField
-            label="Parallel pipeline runs"
-            value={draft.maxConcurrentRuns}
-            onChange={(maxConcurrentRuns) =>
-              setDraft((current) => ({ ...current, maxConcurrentRuns }))
-            }
-            min={1}
-            max={16}
-          />
-          <NumberField
-            label="Parallel LLM runs"
-            value={draft.maxConcurrentLLMRuns}
-            onChange={(maxConcurrentLLMRuns) =>
-              setDraft((current) => ({ ...current, maxConcurrentLLMRuns }))
-            }
-            min={1}
-            max={8}
-          />
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-function MetricsPanel({
-  draft,
-  setDraft,
-  provider,
-  busy,
-  onClear,
-}: {
-  draft: Settings;
-  setDraft: React.Dispatch<React.SetStateAction<Settings>>;
-  provider: ProviderConfig;
-  busy: boolean;
-  onClear: () => void;
-}) {
-  const rates = draft.metrics.priceRates;
-  const updateRate = (index: number, patch: Partial<(typeof rates)[number]>) => setDraft((current) => ({ ...current, metrics: { ...current.metrics, priceRates: current.metrics.priceRates.map((rate, currentIndex) => currentIndex === index ? { ...rate, ...patch } : rate) } }));
-  const addRate = () => setDraft((current) => ({ ...current, metrics: { ...current.metrics, priceRates: [...current.metrics.priceRates, { providerId: provider.id, model: provider.model || "", inputUsdPerMillion: 0, outputUsdPerMillion: 0 }] } }));
-  const removeRate = (index: number) => setDraft((current) => ({ ...current, metrics: { ...current.metrics, priceRates: current.metrics.priceRates.filter((_, currentIndex) => currentIndex !== index) } }));
-  return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <SectionCard title="Local metrics" help="Neuropipe stores numerical timing and outcome facts locally. Prompts, responses, packets, secrets, URLs, API headers, and IP addresses are never collected.">
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <NumberField label="Detailed facts (days)" value={draft.metrics.detailRetentionDays} min={1} max={365} onChange={(detailRetentionDays) => setDraft((current) => ({ ...current, metrics: { ...current.metrics, detailRetentionDays } }))} />
-          <NumberField label="Daily rollups (days)" value={draft.metrics.rollupRetentionDays} min={30} max={3650} onChange={(rollupRetentionDays) => setDraft((current) => ({ ...current, metrics: { ...current.metrics, rollupRetentionDays } }))} />
-          <NumberField label="Process sample (seconds)" value={draft.metrics.sampleIntervalSeconds} min={10} max={300} onChange={(sampleIntervalSeconds) => setDraft((current) => ({ ...current, metrics: { ...current.metrics, sampleIntervalSeconds } }))} />
-        </div>
-        <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2.5"><p className="text-xs leading-5 text-zinc-500">Only Neuropipe and its managed llama.cpp process are sampled for CPU and memory.</p><Button size="sm" variant="outline" onClick={onClear} disabled={busy}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}Clear metrics</Button></div>
-      </SectionCard>
-      <SectionCard title="Cost estimates" help="Optional rates estimate hosted-model spend from provider-reported token counts. Local Ollama and managed llama.cpp calls are shown as local, not provider billing.">
-        <div className="mt-5 space-y-2">
-          {rates.map((rate, index) => <div key={`${rate.providerId}-${rate.model}-${index}`} className="grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 md:grid-cols-[minmax(9rem,1fr)_minmax(8rem,.8fr)_minmax(8rem,.8fr)_auto]">
-            <Input value={rate.model} onChange={(event) => updateRate(index, { model: event.target.value })} placeholder="Model name" aria-label="Price rate model" />
-            <label className="text-[11px] text-zinc-500">Input / 1M<Input className="mt-1" type="number" min={0} step="0.0001" value={rate.inputUsdPerMillion} onChange={(event) => updateRate(index, { inputUsdPerMillion: Number(event.target.value) })} aria-label="Input dollars per million tokens" /></label>
-            <label className="text-[11px] text-zinc-500">Output / 1M<Input className="mt-1" type="number" min={0} step="0.0001" value={rate.outputUsdPerMillion} onChange={(event) => updateRate(index, { outputUsdPerMillion: Number(event.target.value) })} aria-label="Output dollars per million tokens" /></label>
-            <Button size="sm" variant="ghost" className="self-end text-zinc-500 hover:text-red-300" onClick={() => removeRate(index)} aria-label={`Remove ${rate.model || "price rate"}`}><Trash2 className="size-3.5" /></Button>
-          </div>)}
-          {rates.length === 0 ? <p className="rounded-lg border border-dashed border-zinc-800 px-3 py-4 text-xs text-zinc-500">No hosted-model price rates. Usage remains visible, but cost stays unpriced.</p> : null}
-        </div>
-        <Button className="mt-4" size="sm" variant="outline" onClick={addRate}>Add price rate</Button>
-      </SectionCard>
-    </div>
-  );
-}
-
-function ExtensionsPanel({
-  draft,
-  setDraft,
-  plugins,
-  busy,
-  onReload,
-}: {
-  draft: Settings;
-  setDraft: React.Dispatch<React.SetStateAction<Settings>>;
-  plugins: PluginStatus[];
-  busy: string;
-  onReload: () => Promise<void>;
-}) {
-  return (
-    <div className="mx-auto max-w-3xl">
-      <SectionCard
-        title="Extensions"
-        help="Plugins run as local bundles and declare their own nodes and capabilities."
-      >
-        <Input
-          className="mt-5"
-          value={draft.pluginDirectory}
-          onChange={(event) =>
-            setDraft((current) => ({
-              ...current,
-              pluginDirectory: event.target.value,
-            }))
-          }
-        />
-        <div className="mt-4 divide-y divide-zinc-800 rounded-lg border border-zinc-800">
-          {plugins.length ? (
-            plugins.map((plugin) => (
-              <div
-                key={plugin.path}
-                className="flex items-center justify-between gap-3 px-3 py-3 text-xs"
-              >
-                <span className="min-w-0">
-                  <strong className="truncate text-zinc-300">
-                    {plugin.name}
-                  </strong>
-                  <span className="ml-2 text-zinc-600">
-                    v{plugin.version} · {plugin.nodeCount} nodes
-                  </span>
-                </span>
-                <span
-                  className={
-                    plugin.healthy ? "text-emerald-400" : "text-red-300"
-                  }
-                >
-                  {plugin.healthy ? "Healthy" : plugin.error || "Unavailable"}
-                </span>
-              </div>
-            ))
-          ) : (
-            <p className="px-3 py-4 text-sm text-zinc-600">
-              No plugin bundles found.
-            </p>
-          )}
-        </div>
-        <Button
-          className="mt-4"
-          variant="outline"
-          onClick={() => void onReload()}
-          disabled={busy === "plugins"}
-        >
-          {busy === "plugins" ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <RefreshCw className="size-4" />
-          )}
-          Rediscover plugins
-        </Button>
-      </SectionCard>
-    </div>
-  );
-}
-
-function SecretsPanel({
-  secrets,
-  name,
-  value,
-  setName,
-  setValue,
-  busy,
-  onSave,
-  onDelete,
-}: {
-  secrets: SecretMetadata[];
-  name: string;
-  value: string;
-  setName: (value: string) => void;
-  setValue: (value: string) => void;
-  busy: string;
-  onSave: () => void;
-  onDelete: (name: string) => void;
-}) {
-  return (
-    <div className="mx-auto max-w-3xl">
-      <SectionCard
-        title="Secrets"
-        help="Values are encrypted with Windows DPAPI and never return to the renderer."
-      >
-        <div className="mt-5 grid gap-2 md:grid-cols-[1fr_1.5fr_auto]">
-          <Input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Secret name"
-          />
-          <Input
-            type="password"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder="Secret value"
-          />
-          <Button
-            onClick={onSave}
-            disabled={busy === "secret" || !name.trim() || !value.trim()}
-          >
-            {busy === "secret" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Check className="size-4" />
-            )}
-            Save
-          </Button>
-        </div>
-        <div className="mt-4 divide-y divide-zinc-800 rounded-lg border border-zinc-800">
-          {secrets.length ? (
-            secrets.map((secret) => (
-              <div
-                key={secret.name}
-                className="flex items-center justify-between px-3 py-2.5"
-              >
-                <span className="font-mono text-sm text-zinc-300">
-                  {secret.name}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onDelete(secret.name)}
-                  disabled={busy === secret.name}
-                >
-                  <Trash2 className="size-3.5 text-red-300" />
-                </Button>
-              </div>
-            ))
-          ) : (
-            <p className="px-3 py-4 text-sm text-zinc-600">No secrets saved.</p>
-          )}
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  hint,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  hint?: string;
-}) {
-  return (
-    <label className="text-xs text-zinc-500">
-      <span className="inline-flex items-center gap-1">
-        {label}
-        {hint ? (
-          <Tooltip content={hint} side="top" size="body">
-            <span
-              tabIndex={0}
-              aria-label={label}
-              className="inline-flex cursor-help text-zinc-600 outline-none hover:text-zinc-300 focus-visible:text-zinc-200"
-            >
-              <HelpCircle className="size-3.5" />
-            </span>
-          </Tooltip>
-        ) : null}
-      </span>
-      <Input
-        className="mt-1.5"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-      />
-    </label>
-  );
-}
-function NumberField({
-  label,
+function NumberInput({
   value,
   onChange,
   min,
   max,
 }: {
-  label: string;
   value: number;
-  onChange: (value: number) => void;
-  min: number;
+  onChange: (v: number) => void;
+  min?: number;
   max?: number;
 }) {
   return (
-    <label className="text-xs text-zinc-500">
-      {label}
-      <Input
-        className="mt-1.5"
-        type="number"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </label>
+    <input
+      type="number"
+      value={Number.isFinite(value) ? value : ""}
+      min={min}
+      max={max}
+      onChange={(e) => {
+        const n = Number(e.target.value);
+        if (!Number.isNaN(n)) onChange(Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min ?? 0, n)));
+      }}
+      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+    />
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* general                                                             */
+/* ------------------------------------------------------------------ */
+
+function GeneralPanel({
+  draft,
+  patch,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+}) {
+  const { t } = useTranslation();
+
+  const changeLanguage = async (language: string) => {
+    await i18n.changeLanguage(language);
+    patch({ language: language as Settings["language"] });
+  };
+
+  const browse = async () => {
+    try {
+      const dir = await desktop.chooseContentDirectory();
+      if (dir) patch({ contentDirectory: dir });
+    } catch {
+      /* picker canceled */
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-[640px] space-y-3">
+      <SectionCard title={t("settings.languageTitle")}>
+        <Field label={t("common.language")} hint={t("settings.languageDescription")}>
+          <Dropdown
+            value={draft.language}
+            onChange={(v) => void changeLanguage(v)}
+            options={[
+              { value: "en", label: t("common.english") },
+              { value: "de", label: t("common.german") },
+              { value: "fr", label: t("common.french") },
+              { value: "ru", label: t("common.russian") },
+            ]}
+          />
+        </Field>
+      </SectionCard>
+
+      <ToggleRow
+        title={t("settings.hideToTrayOnCloseTitle")}
+        description={t("settings.hideToTrayOnCloseDescription")}
+        on={draft.hideToTrayOnClose}
+        onChange={(v) => patch({ hideToTrayOnClose: v })}
+      />
+
+      <SectionCard title={t("runtime.contentDirectory")}>
+        <Field label={t("datastores.workingDirHint")}>
+          <div className="flex gap-2">
+            <TextInput mono value={draft.contentDirectory} onChange={(v) => patch({ contentDirectory: v })} />
+            <Button icon="HardDrive" variant="solid" onClick={() => void browse()}>
+              {t("databases.chooseFile")}
+            </Button>
+          </div>
+        </Field>
+      </SectionCard>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* provider                                                            */
+/* ------------------------------------------------------------------ */
+
+function ProviderPanel({
+  draft,
+  patch,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+}) {
+  const { t } = useTranslation();
+  const [secrets, setSecrets] = useState<string[]>([]);
+
+  useEffect(() => {
+    void desktop.listSecrets().then((list) => setSecrets(list.map((s) => s.name))).catch(() => undefined);
+  }, []);
+
+  const provider = draft.providers[0];
+
+  const selectProvider = (kind: ProviderConfig["kind"]) => {
+    const next = defaultProvider(kind);
+    patch({ providers: [next], defaultProviderId: next.id });
+  };
+
+  const updateProvider = (key: "baseUrl" | "model" | "apiKeyRef", value: string) => {
+    patch({
+      providers: draft.providers.map((p) =>
+        p.id === provider.id ? { ...p, [key]: value || undefined } : p,
+      ),
+    });
+  };
+
+  if (!provider) return null;
+
+  return (
+    <div className="mx-auto max-w-[720px]">
+      <SectionCard title={t("settings.providerHelp")}>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t("provider.kind")}>
+            <Dropdown
+              value={provider.kind}
+              onChange={(v) => selectProvider(v as ProviderConfig["kind"])}
+              options={[
+                { value: "openai-compatible", label: t("provider.openaiCompatible") },
+                { value: "ollama", label: t("provider.ollama") },
+                { value: "llamacpp", label: t("provider.managedLlamaCpp") },
+              ]}
+            />
+          </Field>
+          {provider.kind !== "llamacpp" ? (
+            <>
+              <Field label={t("provider.baseUrl")}>
+                <TextInput value={provider.baseUrl} onChange={(v) => updateProvider("baseUrl", v)} mono />
+              </Field>
+              <Field label={t("provider.model")}>
+                <TextInput value={provider.model} onChange={(v) => updateProvider("model", v)} />
+              </Field>
+              {provider.kind === "openai-compatible" && (
+                <Field label={t("provider.apiKeyRef")} hint={t("settings.apiKeyHelp")}>
+                  <Dropdown
+                    value={provider.apiKeyRef ?? ""}
+                    onChange={(v) => updateProvider("apiKeyRef", v)}
+                    placeholder={t("settings.noApiKey")}
+                    options={[
+                      { value: "", label: t("settings.noApiKey") },
+                      ...secrets.map((name) => ({ value: name, label: name, icon: "KeyRound" })),
+                    ]}
+                  />
+                </Field>
+              )}
+            </>
+          ) : (
+            <p className="col-span-2 self-end rounded-md border border-ink-700 bg-ink-900/60 px-3 py-2 text-[11.5px] leading-relaxed text-ink-400">
+              {t("provider.llamacppNote")}
+            </p>
+          )}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* models                                                              */
+/* ------------------------------------------------------------------ */
+
+function ModelsPanel({
+  draft,
+  patch,
+  notify,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+  notify: (text: string, icon?: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<"catalog" | "installed">("catalog");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<ModelSearchRequest["sort"]>("recommended");
+  const [results, setResults] = useState<ModelSearchResult[]>([]);
+  const [detail, setDetail] = useState<ModelDetail | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string>("");
+  const [installed, setInstalled] = useState<LocalModel[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<InstallProgress | null>(null);
+
+  const search = useCallback(
+    async (q: string) => {
+      setBusy("search");
+      try {
+        const list = await desktop.searchLlamaModels({ query: q.trim(), sort });
+        setResults(list);
+        if (list[0]) await loadDetail(list[0].id);
+      } catch {
+        notify(t("models.searchFailed"), "AlertTriangle");
+      } finally {
+        setBusy(null);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sort],
+  );
+
+  const loadDetail = async (repository: string) => {
+    setBusy(`detail-${repository}`);
+    try {
+      const d = await desktop.getLlamaModelDetail(repository);
+      setDetail(d);
+      setSelectedFile(d.files.find((f) => f.recommended)?.name ?? d.files[0]?.name ?? "");
+    } catch {
+      /* keep previous detail */
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const refreshInstalled = useCallback(async () => {
+    const list = await desktop.listInstalledLlamaModels().catch(() => [] as LocalModel[]);
+    setInstalled(list);
+  }, []);
+
+  useEffect(() => {
+    void refreshInstalled();
+  }, [refreshInstalled]);
+
+  /* install progress arrives via push events and is polled while busy */
+  useEffect(() => {
+    const off = (window as unknown as { __wailsEvents?: unknown }).__wailsEvents; // no-op guard for plain-browser runs
+    void off;
+    const timer = window.setInterval(async () => {
+      if (busy !== "model-install") return;
+      try {
+        setProgress(await desktop.getInstallProgress("model"));
+      } catch {
+        /* ignore */
+      }
+    }, 400);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
+  const installModel = async () => {
+    if (!detail || !selectedFile) return;
+    setBusy("model-install");
+    setProgress({ kind: "model", stage: "preparing", label: t("models.preparing"), downloadedBytes: 0, totalBytes: 0, bytesPerSecond: 0, percentage: 0 });
+    try {
+      await desktop.installLlamaModel({ repository: detail.id, file: selectedFile });
+      await refreshInstalled();
+      notify(t("models.installed"), "Check");
+    } catch {
+      notify(t("models.installFailed"), "AlertTriangle");
+    } finally {
+      setBusy(null);
+      setProgress(null);
+    }
+  };
+
+  const selectInstalled = async (path: string) => {
+    await desktop.selectInstalledLlamaModel(path).catch(() => undefined);
+    patch({ llamaRuntime: { ...draft.llamaRuntime, modelPath: path } });
+  };
+
+  const deleteInstalled = async (model: LocalModel) => {
+    const ok = await ask({
+      title: t("models.deleteTitle"),
+      description: t("models.deleteDescription", { name: model.name }),
+      confirmLabel: t("common.delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    await desktop.deleteInstalledLlamaModel(model.path).catch(() => undefined);
+    await refreshInstalled();
+  };
+
+  const openOnHf = async (repo: string) => {
+    try {
+      await Browser.OpenURL(`https://huggingface.co/${repo}`);
+    } catch {
+      /* outside Wails */
+    }
+  };
+
+  return (
+    <div className="grid h-full min-h-[520px] grid-cols-[minmax(300px,0.85fr)_minmax(420px,1.15fr)] gap-3">
+      {/* catalog browser */}
+      <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/70">
+        <div className="border-b border-seam p-3">
+          <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg border border-ink-700 bg-ink-950 p-1">
+            {(["catalog", "installed"] as const).map((tabValue) => (
+              <button
+                key={tabValue}
+                onClick={() => setMode(tabValue)}
+                className={cn(
+                  "rounded-md px-2 py-1.5 text-[12px] font-medium transition",
+                  mode === tabValue ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                )}
+              >
+                {tabValue === "installed" ? `${t("models.installedTab")} (${installed.length})` : t("models.catalogTab")}
+              </button>
+            ))}
+          </div>
+
+          {mode === "catalog" && (
+            <>
+              <div className="mt-2 grid grid-cols-[minmax(0,1fr)_140px] gap-2">
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void search(query)}
+                  placeholder={t("models.searchPlaceholder")}
+                  aria-label={t("models.searchPlaceholder")}
+                  className="flex h-8 w-full items-center gap-2 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-50 placeholder:text-ink-500 focus:border-ink-500"
+                />
+                <Dropdown
+                  value={sort}
+                  onChange={(v) => setSort(v as ModelSearchRequest["sort"])}
+                  options={[
+                    { value: "recommended", label: t("models.sortRecommended"), icon: "Sparkles" },
+                    { value: "downloads", label: t("models.sortDownloads"), icon: "TrendingUp" },
+                    { value: "recent", label: t("models.sortRecent"), icon: "History" },
+                  ]}
+                />
+              </div>
+              <Button icon="Search" variant="solid" className="mt-2 w-full justify-center" onClick={() => void search(query)} disabled={busy === "search"}>
+                {busy === "search" ? t("common.loading") : t("common.search")}
+              </Button>
+            </>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {mode === "catalog"
+            ? results.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => void loadDetail(m.id)}
+                  className={cn(
+                    "group mb-1.5 flex w-full items-start gap-2.5 rounded-xl border px-2.5 py-2.5 text-left transition",
+                    detail?.id === m.id
+                      ? "border-ink-400 bg-ink-800 shadow-[0_0_0_1px_rgba(236,237,241,0.08)_inset]"
+                      : "border-transparent hover:border-ink-700 hover:bg-ink-850/70",
+                  )}
+                >
+                  <span className="mt-[1px] grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-[13px] font-semibold text-emerald-300">
+                    {(m.author ?? m.id).slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] font-semibold text-ink-50">{m.id}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-ink-500">
+                      {m.author} · ↓{formatCompact(m.downloads)} · ♥{formatCompact(m.likes)}
+                    </span>
+                  </span>
+                  <Icon name="ChevronRight" className="mt-1 h-4 w-4 shrink-0 text-ink-700 group-hover:text-ink-400" />
+                </button>
+              ))
+            : installed.map((model) => (
+                <div
+                  key={model.path}
+                  className={cn(
+                    "group mb-1.5 flex w-full items-start gap-2.5 rounded-xl border px-2.5 py-2.5 text-left transition",
+                    draft.llamaRuntime.modelPath === model.path
+                      ? "border-ink-400 bg-ink-800"
+                      : "border-transparent hover:border-ink-700 hover:bg-ink-850/70",
+                  )}
+                >
+                  <button onClick={() => void selectInstalled(model.path)} className="min-w-0 flex-1 text-left">
+                    <span className="block truncate text-[12.5px] font-semibold text-ink-50">{model.name}</span>
+                    <span className="mt-0.5 block truncate font-mono text-[10.5px] text-ink-500">{model.path}</span>
+                    <span className="mt-0.5 block text-[10.5px] text-ink-500">
+                      {formatBytes(model.size)} · {formatDateTime(model.installedAt)}
+                    </span>
+                  </button>
+                  {draft.llamaRuntime.modelPath === model.path ? (
+                    <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />
+                  ) : (
+                    <button
+                      onClick={() => void deleteInstalled(model)}
+                      aria-label={t("common.delete")}
+                      className="grid h-6 w-6 place-items-center rounded text-ink-600 opacity-0 transition hover:bg-rose-500/15 hover:text-rose-300 group-hover:opacity-100"
+                    >
+                      <Icon name="Trash2" className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+          {((mode === "catalog" && results.length === 0) || (mode === "installed" && installed.length === 0)) && (
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+              <Icon name="Search" className="h-5 w-5 text-ink-600" />
+              <p className="text-[12px] text-ink-500">
+                {mode === "catalog" ? t("models.searchEmpty") : t("models.noInstalled")}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* selected model details */}
+      <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/70">
+        {!detail ? (
+          <div className="flex flex-1 items-center justify-center">
+            <EmptyState icon="HardDrive" title={t("models.pickModel")} hint={t("models.pickModelHint")} />
+          </div>
+        ) : (
+          <>
+            <div className="border-b border-seam p-4">
+              <div className="flex items-start gap-3">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-emerald-400/20 bg-emerald-400/10 text-[18px] font-bold text-emerald-300">
+                  {(detail.author ?? detail.id).slice(0, 1).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-[16px] font-semibold tracking-tight text-ink-50">{detail.id}</h2>
+                  <p className="mt-1 truncate font-mono text-[11px] text-ink-500">
+                    {detail.author}/{detail.id.split("/").pop()}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] text-ink-400">
+                    <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">↓ {formatCompact(detail.downloads)}</span>
+                    <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">♥ {formatCompact(detail.likes)}</span>
+                    {detail.lastModified && (
+                      <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">{formatDateTime(detail.lastModified)}</span>
+                    )}
+                  </div>
+                </div>
+                <Button icon="ExternalLink" variant="solid" onClick={() => void openOnHf(detail.id)}>
+                  {t("models.openHf")}
+                </Button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
+                <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-ink-400 uppercase">{t("models.installPackage")}</h3>
+                <div className="grid grid-cols-[1fr_130px] gap-2">
+                  <Dropdown
+                    value={selectedFile}
+                    onChange={setSelectedFile}
+                    options={detail.files.slice(0, 40).map((f) => ({
+                      value: f.name,
+                      label: `${f.name}${f.size ? ` · ${formatBytes(f.size)}` : ""}`,
+                      icon: "HardDrive",
+                    }))}
+                  />
+                  <Button
+                    icon={busy === "model-install" ? "Loader2" : "Download"}
+                    spin={busy === "model-install"}
+                    variant="primary"
+                    onClick={() => void installModel()}
+                    disabled={!selectedFile || busy === "model-install"}
+                  >
+                    {t("models.install")}
+                  </Button>
+                </div>
+                {progress && busy === "model-install" && (
+                  <div className="mt-2">
+                    <ProgressBar progress={progress} />
+                  </div>
+                )}
+              </div>
+
+              {detail.readme && (
+                <div className="mt-4 rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
+                  <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-ink-400 uppercase">README</h3>
+                  <pre className="max-h-[240px] overflow-auto rounded-lg border border-ink-700 bg-ink-950/50 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-300">
+                    {detail.readme}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-4 text-[11px] text-ink-500">
+              <span className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                {t("models.localOnly")}
+              </span>
+              <span className="ml-auto">{draft.contentDirectory}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProgressBar({ progress }: { progress: InstallProgress }) {
+  const pct = Math.max(0, Math.min(100, progress.percentage));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[10.5px] text-ink-400">
+        <span>{progress.label}</span>
+        <span>{Math.round(pct)}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-ink-800">
+        <div className="h-full rounded-full bg-ink-100 transition-[width]" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* runtime                                                             */
+/* ------------------------------------------------------------------ */
+
+function RuntimePanel({
+  draft,
+  patch,
+  notify,
+  onSaveDraft,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+  notify: (text: string, icon?: string) => void;
+  onSaveDraft: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<LlamaRuntimeStatus | null>(null);
+  const [catalog, setCatalog] = useState<LlamaRuntimeCatalogStatus | null>(null);
+  const [releases, setReleases] = useState<LlamaRuntimeRelease[]>([]);
+  const [releaseVersion, setReleaseVersion] = useState("");
+  const [models, setModels] = useState<LocalModel[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState<InstallProgress | null>(null);
+
+  const refresh = useCallback(async () => {
+    const [st, cat, rels, mdl] = await Promise.all([
+      desktop.getLlamaRuntimeStatus().catch(() => null),
+      desktop.getLlamaRuntimeCatalogStatus().catch(() => null),
+      desktop.listLlamaRuntimeReleases().catch(() => []),
+      desktop.listInstalledLlamaModels().catch(() => []),
+    ]);
+    setStatus(st);
+    setCatalog(cat);
+    setReleases(rels);
+    setModels(mdl);
+    setReleaseVersion((v) => v || rels[0]?.version || "");
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      const kind = busy?.startsWith("runtime-") ? "runtime" : null;
+      if (!kind) return;
+      try {
+        setProgress(await desktop.getInstallProgress(kind));
+      } catch {
+        /* ignore */
+      }
+    }, 400);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
+  const startStop = async () => {
+    setBusy("start");
+    try {
+      await onSaveDraft();
+      setStatus(status?.running ? await desktop.stopLlamaRuntime() : await desktop.startLlamaRuntime());
+    } catch {
+      notify(t("runtime.startStopFailed"), "AlertTriangle");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const installRuntime = async (mode: Exclude<RuntimeMode, "auto">) => {
+    if (!releaseVersion) return;
+    setBusy(`runtime-${mode}`);
+    try {
+      setProgress({ kind: "runtime", stage: "preparing", label: t("runtime.preparing"), downloadedBytes: 0, totalBytes: 0, bytesPerSecond: 0, percentage: 0 });
+      const next = await desktop.installLlamaRuntime({ version: releaseVersion, mode });
+      setCatalog(next);
+      await refresh();
+      notify(t("runtime.installed"), "Check");
+    } catch {
+      notify(t("runtime.installFailed"), "AlertTriangle");
+    } finally {
+      setBusy(null);
+      setProgress(null);
+    }
+  };
+
+  const rt: LlamaRuntimeSettings = draft.llamaRuntime;
+
+  const versionOptions = useMemo(() => {
+    const installedMap = new Map((catalog?.installed ?? []).map((i) => [i.version, i]));
+    return releases.map((r) => {
+      const inst = installedMap.get(r.version);
+      const modes = [
+        inst?.cpuInstalled && r.cpu.url ? "CPU" : null,
+        inst?.cudaInstalled && r.cuda.url ? "CUDA" : null,
+        inst?.vulkanInstalled && r.vulkan.url ? "VULKAN" : null,
+        inst?.hipInstalled && r.hip.url ? "HIP" : null,
+      ].filter(Boolean);
+      return {
+        value: `${r.version}:auto`,
+        label: modes.length > 0 ? `${r.version} · ${modes.join("/")}` : r.version,
+        icon: modes.length > 0 ? "Check" : undefined,
+      };
+    });
+  }, [catalog, releases]);
+
+  const currentVersion = `${rt.runtimeVersion ?? releaseVersion}:${rt.mode}`;
+
+  return (
+    <div className="mx-auto max-w-[720px] space-y-3">
+      <SectionCard title={t("runtime.managedTitle")}>
+        <div className="space-y-3">
+          <Field label={t("runtime.contentDirectory")}>
+            <TextInput mono value={draft.contentDirectory} onChange={(v) => patch({ contentDirectory: v })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("runtime.installedRuntime")} hint={status?.running ? status.endpoint : undefined}>
+              <Dropdown
+                value={versionOptions.some((o) => o.value === currentVersion) ? currentVersion : (versionOptions[0]?.value ?? "")}
+                onChange={(v) => {
+                  const [version, mode] = v.split(":");
+                  patch({
+                    llamaRuntime: {
+                      ...rt,
+                      runtimeVersion: version,
+                      mode: (["auto", "cpu", "cuda", "vulkan", "hip"].includes(mode) ? mode : "auto") as RuntimeMode,
+                    },
+                  });
+                }}
+                options={versionOptions}
+              />
+            </Field>
+            <Field label={t("runtime.contextSize")}>
+              <NumberInput
+                value={rt.contextSize}
+                min={1024}
+                onChange={(v) => patch({ llamaRuntime: { ...rt, contextSize: v } })}
+              />
+            </Field>
+          </div>
+          <Field label={t("runtime.model")}>
+            <Dropdown
+              value={rt.modelPath}
+              onChange={(v) => patch({ llamaRuntime: { ...rt, modelPath: v } })}
+              placeholder={t("runtime.selectModel")}
+              options={[
+                ...(rt.modelPath && !models.some((m) => m.path === rt.modelPath)
+                  ? [{ value: rt.modelPath, label: rt.modelPath.split(/[\\/]/).pop() ?? rt.modelPath }]
+                  : []),
+                ...models.map((m) => ({ value: m.path, label: m.name, icon: "HardDrive" })),
+              ]}
+            />
+          </Field>
+          <ToggleRow
+            title={t("runtime.autoStartTitle")}
+            description={t("runtime.autoStartDescription")}
+            on={rt.autoStart}
+            onChange={(v) => patch({ llamaRuntime: { ...rt, autoStart: v } })}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              icon={busy === "start" ? "Loader2" : status?.running ? "Square" : "Play"}
+              spin={busy === "start"}
+              variant={status?.running ? "solid" : "primary"}
+              onClick={() => void startStop()}
+            >
+              {status?.running ? t("runtime.stop") : t("runtime.start")}
+            </Button>
+            <Button icon="RefreshCw" variant="solid" onClick={() => void refresh()}>
+              {t("common.refresh")}
+            </Button>
+            <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-ink-400">
+              <span className={cn("h-1.5 w-1.5 rounded-full", status?.running ? "bg-emerald-400 pulse-ring" : "bg-ink-500")} />
+              {status?.running ? status.endpoint || t("runtime.running") : t("runtime.stopped")}
+            </span>
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title={t("runtime.installerTitle")}>
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <Dropdown
+              value={releaseVersion}
+              onChange={setReleaseVersion}
+              className="flex-1"
+              options={releases.map((r) => ({ value: r.version, label: r.version, icon: "Download" }))}
+            />
+            <Button icon="RefreshCw" variant="solid" onClick={() => void refresh()}>
+              {t("runtime.browseReleases")}
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["cpu", "cuda", "vulkan", "hip"] as const).map((mode) => {
+              const release = releases.find((r) => r.version === releaseVersion);
+              const available =
+                (mode === "cpu" && release?.cpu.url) ||
+                (mode === "cuda" && release?.cuda.url) ||
+                (mode === "vulkan" && release?.vulkan.url) ||
+                (mode === "hip" && release?.hip.url);
+              return (
+                <Button
+                  key={mode}
+                  icon={busy === `runtime-${mode}` ? "Loader2" : "Download"}
+                  spin={busy === `runtime-${mode}`}
+                  variant="solid"
+                  disabled={!available || Boolean(busy)}
+                  onClick={() => void installRuntime(mode)}
+                >
+                  {t("runtime.installFor", { mode: mode.toUpperCase() })}
+                </Button>
+              );
+            })}
+          </div>
+          {progress && busy?.startsWith("runtime-") && <ProgressBar progress={progress} />}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* api                                                                 */
+/* ------------------------------------------------------------------ */
+
+function ApiPanel({
+  draft,
+  patch,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<APIStatus | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [originsText, setOriginsText] = useState(draft.api.allowedOrigins.join(", "));
+
+  useEffect(() => {
+    void desktop.getAPIStatus().then(setStatus).catch(() => undefined);
+  }, []);
+
+  const api = draft.api;
+  const isLoopback = api.bindAddress === "127.0.0.1" || api.bindAddress === "::1";
+  const exposureWarning = api.enabled && (!isLoopback || api.authMode === "none");
+
+  const rotateToken = async () => {
+    try {
+      const next = await desktop.rotateAPIToken();
+      setToken(next);
+      void desktop.getAPIStatus().then(setStatus).catch(() => undefined);
+    } catch {
+      /* surfaced by status message */
+    }
+  };
+
+  const commitOrigins = (raw: string) => {
+    setOriginsText(raw);
+    const origins = raw
+      .split(/[\n,]/)
+      .map((o) => o.trim())
+      .filter(Boolean);
+    patch({ api: { ...api, allowedOrigins: origins } });
+  };
+
+  return (
+    <div className="mx-auto max-w-[720px]">
+      <SectionCard title={t("api.title")}>
+        <div className="space-y-3">
+          <ToggleRow
+            title={t("api.enableTitle")}
+            description={t("api.enableDescription")}
+            on={api.enabled}
+            onChange={(v) => patch({ api: { ...api, enabled: v } })}
+          />
+          <div className={cn("grid grid-cols-[1.4fr_0.6fr] gap-3", !api.enabled && "pointer-events-none opacity-40")}>
+            <Field label={t("api.bindAddress")}>
+              <TextInput mono value={api.bindAddress} onChange={(v) => patch({ api: { ...api, bindAddress: v } })} placeholder="127.0.0.1" />
+            </Field>
+            <Field label={t("api.port")}>
+              <NumberInput value={api.port} min={1024} max={65535} onChange={(v) => patch({ api: { ...api, port: v } })} />
+            </Field>
+          </div>
+          <div className={cn("flex items-end gap-2", !api.enabled && "pointer-events-none opacity-40")}>
+            <Field label={t("api.authMode")} className="min-w-0 flex-1">
+              <Dropdown
+                value={api.authMode}
+                onChange={(v) =>
+                  patch({
+                    api: {
+                      ...api,
+                      authMode: v as typeof api.authMode,
+                      adminEnabled: v === "token" ? api.adminEnabled : false,
+                    },
+                  })
+                }
+                options={[
+                  { value: "token", label: t("api.authToken"), icon: "KeyRound" },
+                  { value: "none", label: t("api.authNone") },
+                ]}
+              />
+            </Field>
+            <Button icon="KeyRound" variant="solid" onClick={() => void rotateToken()} disabled={!api.enabled}>
+              {status?.tokenConfigured ? t("api.rotateToken") : t("api.createToken")}
+            </Button>
+          </div>
+          <Field label={t("api.allowedOrigins")}>
+            <TextArea rows={2} value={originsText} onChange={commitOrigins} placeholder="https://dashboard.example.com" />
+          </Field>
+          {api.authMode === "token" && (
+            <ToggleRow
+              title={t("api.adminTitle")}
+              description={t("api.adminDescription")}
+              on={api.adminEnabled}
+              onChange={(v) => patch({ api: { ...api, adminEnabled: v } })}
+            />
+          )}
+          {exposureWarning && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[11.5px] text-amber-200">
+              <Icon name="AlertTriangle" className="h-3.5 w-3.5 shrink-0" />
+              {t("api.tlsWarning")}
+            </div>
+          )}
+          <div className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-[12px] text-ink-400">
+            <span className={cn("h-2 w-2 rounded-full", status?.running ? "bg-emerald-400" : "bg-ink-500")} />
+            {status?.running ? status.endpoint : (status?.message ?? t("api.disabled"))}
+          </div>
+        </div>
+      </SectionCard>
+
+      {token && (
+        <Modal title={t("api.tokenTitle")} icon="KeyRound" onClose={() => setToken(null)} size="sm"
+          footer={<ModalActions onCancel={() => setToken(null)} onConfirm={() => setToken(null)} confirmLabel={t("common.close")} />}>
+          <p className="mb-2 text-[12px] text-ink-300">{t("api.tokenOnce")}</p>
+          <div className="flex gap-2">
+            <code className="min-w-0 flex-1 overflow-x-auto rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-[11px] break-all whitespace-pre-wrap text-ink-100">
+              {token}
+            </code>
+            <Button icon="Copy" variant="solid" onClick={() => navigator.clipboard?.writeText(token)}>
+              {t("common.copy")}
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* twitch                                                              */
+/* ------------------------------------------------------------------ */
+
+function TwitchPanel({
+  draft,
+  patch,
+  triggers,
+  refreshTriggers,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+  triggers: TriggerBinding[];
+  refreshTriggers: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<TwitchStatus | null>(null);
+  const [catalog, setCatalog] = useState<TwitchEventDescriptor[]>([]);
+  const [auth, setAuth] = useState<TwitchDeviceAuthorization | null>(null);
+  const [authLabel, setAuthLabel] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualLabel, setManualLabel] = useState("");
+  const [manualToken, setManualToken] = useState("");
+
+  const twitchTriggers = triggers.filter((tr) => tr.kind === "twitch");
+
+  const refresh = useCallback(async () => {
+    const [st, cat] = await Promise.all([
+      desktop.getTwitchStatus().catch(() => null),
+      desktop.listTwitchEventCatalog().catch(() => []),
+    ]);
+    setStatus(st);
+    setCatalog(cat);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const connectScopes = useMemo(
+    () => [...new Set(["user:read:chat", "user:write:chat", ...catalog.flatMap((e) => e.requiredScopes)])],
+    [catalog],
+  );
+
+  const startAuth = async (identity?: TwitchIdentity) => {
+    try {
+      await workspace_save(draft);
+      const authorization = await desktop.startTwitchDeviceAuthorization({
+        identityId: identity?.id,
+        label: authLabel || identity?.label || t("twitch.identityLabelPlaceholder"),
+        scopes: connectScopes,
+      });
+      setAuth(authorization);
+    } catch {
+      /* error surfaces via status */
+    }
+  };
+
+  const cancelAuth = async () => {
+    if (!auth) return;
+    await desktop.cancelTwitchDeviceAuthorization(auth.id).catch(() => undefined);
+    setAuth(null);
+  };
+
+  const addManual = async () => {
+    if (!manualLabel.trim() || !manualToken.trim()) return;
+    const request: TwitchManualIdentityRequest = { label: manualLabel.trim(), accessToken: manualToken.trim() };
+    setManualOpen(false);
+    setManualLabel("");
+    setManualToken("");
+    try {
+      await desktop.addTwitchManualIdentity(request);
+      await refresh();
+    } catch {
+      /* keep dialog state cleared; status shows failure */
+    }
+  };
+
+  const removeIdentity = async (identity: TwitchIdentity) => {
+    const ok = await ask({
+      title: t("twitch.removeTitle"),
+      description: t("twitch.removeDescription", { name: identity.label }),
+      confirmLabel: t("twitch.remove"),
+      danger: true,
+    });
+    if (!ok) return;
+    await desktop.removeTwitchIdentity(identity.id).catch(() => undefined);
+    await refresh();
+  };
+
+  const trustTrigger = async (binding: TriggerBinding) => {
+    await desktop.trustTwitchTrigger(binding.id).catch(() => undefined);
+    await refreshTriggers();
+  };
+
+  const toggleTrigger = async (binding: TriggerBinding, enabled: boolean) => {
+    await desktop.setTwitchTriggerEnabled(binding.id, enabled).catch(() => undefined);
+    await refreshTriggers();
+  };
+
+  const openVerification = async () => {
+    if (!auth) return;
+    try {
+      await Browser.OpenURL(auth.verificationUri);
+    } catch {
+      /* outside Wails */
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-[720px] space-y-3">
+      <SectionCard title={t("twitch.connection")}>
+        <div className="space-y-3">
+          <Field label={t("twitch.clientId")}>
+            <TextInput mono value={draft.twitch.clientId} onChange={(v) => patch({ twitch: { ...draft.twitch, clientId: v } })} placeholder={t("twitch.clientIdPlaceholder")} />
+          </Field>
+          <div className="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-medium text-ink-100">
+                {status?.connected ? t("twitch.connected") : t("twitch.disconnected")}
+              </p>
+              <p className="truncate text-[11px] text-ink-500">
+                {status?.lastError || t("twitch.eventSubDescription", { count: status?.activeSubscriptions ?? 0 })}
+              </p>
+            </div>
+            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />}
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title={t("twitch.identities")}>
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              icon="Cable"
+              variant="primary"
+              disabled={!draft.twitch.clientId.trim()}
+              onClick={() => {
+                setAuthLabel("");
+                void startAuth();
+              }}
+            >
+              {t("twitch.connect")}
+            </Button>
+            <Button icon="KeyRound" variant="solid" onClick={() => setManualOpen(true)}>
+              {t("twitch.manualToken")}
+            </Button>
+          </div>
+
+          <Field label={t("twitch.defaultBotIdentity")}>
+            <Dropdown
+              value={draft.twitch.defaultBotIdentityId ?? ""}
+              onChange={(v) => patch({ twitch: { ...draft.twitch, defaultBotIdentityId: v || undefined } })}
+              placeholder={t("twitch.defaultBotIdentityPlaceholder")}
+              options={[
+                { value: "", label: t("twitch.defaultBotIdentityPlaceholder") },
+                ...draft.twitch.identities
+                  .filter((identity) => identity.status === "connected")
+                  .map((identity) => ({ value: identity.id, label: identity.label, icon: "Bot" })),
+              ]}
+            />
+          </Field>
+
+          {draft.twitch.identities.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+              {t("twitch.noIdentities")}
+            </p>
+          ) : (
+            draft.twitch.identities.map((identity) => (
+              <div key={identity.id} className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12.5px] font-medium text-ink-100">{identity.label}</p>
+                  <p className="truncate text-[11px] text-ink-500">
+                    {identity.login} · {identity.scopes.length > 0 ? identity.scopes.join(", ") : t("twitch.noScopes")}
+                  </p>
+                </div>
+                {identity.status !== "connected" && (
+                  <span className="shrink-0 rounded bg-amber-400/15 px-2 py-1 text-[10.5px] text-amber-300">
+                    {t("twitch.reconnectRequired")}
+                  </span>
+                )}
+                {identity.status !== "connected" && (
+                  <Button variant="solid" onClick={() => void startAuth(identity)}>
+                    {t("twitch.reconnect")}
+                  </Button>
+                )}
+                <Button icon="Trash2" variant="solid" onClick={() => void removeIdentity(identity)}>
+                  {t("common.delete")}
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title={t("twitch.triggers")}>
+        <p className="mb-3 text-[11.5px] leading-relaxed text-ink-500">{t("twitch.triggersHelp")}</p>
+        {twitchTriggers.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+            {t("twitch.noTriggers")}
+          </p>
+        ) : (
+          twitchTriggers.map((binding) => (
+            <div key={binding.id} className="flex items-center gap-3 border-b border-seam/70 py-2 last:border-b-0">
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-100">{binding.label}</span>
+              {!binding.trusted ? (
+                <Button icon="ShieldCheck" variant="solid" onClick={() => void trustTrigger(binding)}>
+                  {t("schedules.trust")}
+                </Button>
+              ) : (
+                <Toggle on={binding.enabled} onChange={(v) => void toggleTrigger(binding, v)} />
+              )}
+            </div>
+          ))
+        )}
+      </SectionCard>
+
+      {/* device-code flow */}
+      {auth && (
+        <Modal
+          title={t("twitch.connectTitle")}
+          icon="ShieldCheck"
+          onClose={() => void cancelAuth()}
+          footer={
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="ghost" onClick={() => void cancelAuth()}>
+                {t("common.cancel")}
+              </Button>
+              <Button icon="ExternalLink" variant="primary" onClick={() => void openVerification()}>
+                {t("twitch.openTwitch")}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-center">
+            <p className="text-[12.5px] text-ink-300">{t("twitch.openVerification", { url: auth.verificationUri })}</p>
+            <code className="block rounded-xl border border-ink-650 bg-ink-950/70 px-4 py-4 font-mono text-[26px] tracking-[0.35em] text-ink-50 select-all">
+              {auth.userCode}
+            </code>
+            <p className="text-[11px] text-ink-500">{t("twitch.expiresAt", { time: formatDateTime(auth.expiresAt) })}</p>
+          </div>
+        </Modal>
+      )}
+
+      {/* manual token */}
+      {manualOpen && (
+        <Modal
+          title={t("twitch.manualTitle")}
+          icon="KeyRound"
+          onClose={() => setManualOpen(false)}
+          footer={
+            <ModalActions
+              onCancel={() => setManualOpen(false)}
+              onConfirm={() => void addManual()}
+              confirmLabel={t("common.save")}
+              disabled={!manualLabel.trim() || !manualToken.trim()}
+            />
+          }
+        >
+          <div className="space-y-3">
+            <p className="text-[12px] leading-relaxed text-ink-400">{t("twitch.manualDescription")}</p>
+            <Field label={t("twitch.identityLabel")}>
+              <TextInput autoFocus value={manualLabel} onChange={setManualLabel} placeholder={t("twitch.identityLabelPlaceholder")} />
+            </Field>
+            <Field label={t("twitch.accessToken")}>
+              <input
+                type="password"
+                autoComplete="off"
+                value={manualToken}
+                onChange={(e) => setManualToken(e.target.value)}
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+              />
+            </Field>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+async function workspace_save(settings: Settings): Promise<void> {
+  await desktop.saveSettings(settings);
+}
+
+/* ------------------------------------------------------------------ */
+/* execution                                                           */
+/* ------------------------------------------------------------------ */
+
+function ExecutionPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="mx-auto max-w-[640px] space-y-3">
+      <SectionCard title={t("settings.execution")}>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t("execution.retentionDays")} hint={t("execution.retentionDaysHelp")}>
+            <NumberInput value={draft.retentionDays} min={1} onChange={(v) => patch({ retentionDays: v })} />
+          </Field>
+          <Field label={t("execution.webhookPort")}>
+            <NumberInput value={draft.webhookPort} min={1024} max={65535} onChange={(v) => patch({ webhookPort: v })} />
+          </Field>
+          <Field label={t("execution.maxConcurrentRuns")} hint={t("execution.maxRunsHelp")}>
+            <NumberInput value={draft.maxConcurrentRuns} min={1} max={16} onChange={(v) => patch({ maxConcurrentRuns: v })} />
+          </Field>
+          <Field label={t("execution.maxConcurrentLLM")} hint={t("execution.maxLLMHelp")}>
+            <NumberInput value={draft.maxConcurrentLLMRuns} min={1} max={8} onChange={(v) => patch({ maxConcurrentLLMRuns: v })} />
+          </Field>
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* metrics settings                                                    */
+/* ------------------------------------------------------------------ */
+
+function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }) {
+  const { t } = useTranslation();
+
+  const clearMetrics = async () => {
+    const ok = await ask({
+      title: t("metrics.clearTitle"),
+      description: t("metrics.clearDescription"),
+      confirmLabel: t("metrics.clearConfirm"),
+      danger: true,
+    });
+    if (!ok) return;
+    await desktop.clearMetrics().catch(() => undefined);
+  };
+
+  const updateRate = (index: number, key: "model" | "inputUsdPerMillion" | "outputUsdPerMillion", value: string | number) => {
+    patch({
+      metrics: {
+        ...draft.metrics,
+        priceRates: draft.metrics.priceRates.map((rate, i) => (i === index ? { ...rate, [key]: value } : rate)),
+      },
+    });
+  };
+
+  return (
+    <div className="mx-auto max-w-[640px] space-y-3">
+      <SectionCard title={t("settings.metrics")}>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t("metrics.detailRetention")} hint={t("metrics.detailRetentionHelp")}>
+            <NumberInput
+              value={draft.metrics.detailRetentionDays}
+              min={1}
+              max={365}
+              onChange={(v) => patch({ metrics: { ...draft.metrics, detailRetentionDays: v } })}
+            />
+          </Field>
+          <Field label={t("metrics.rollupRetention")} hint={t("metrics.rollupRetentionHelp")}>
+            <NumberInput
+              value={draft.metrics.rollupRetentionDays}
+              min={30}
+              max={3650}
+              onChange={(v) => patch({ metrics: { ...draft.metrics, rollupRetentionDays: v } })}
+            />
+          </Field>
+          <Field label={t("metrics.sampleInterval")} hint={t("metrics.sampleIntervalHelp")}>
+            <NumberInput
+              value={draft.metrics.sampleIntervalSeconds}
+              min={10}
+              max={300}
+              onChange={(v) => patch({ metrics: { ...draft.metrics, sampleIntervalSeconds: v } })}
+            />
+          </Field>
+        </div>
+        <div className="mt-3">
+          <Button icon="Trash2" variant="solid" onClick={() => void clearMetrics()}>
+            {t("metrics.clearMetrics")}
+          </Button>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title={t("metrics.priceRates")}
+        action={
+          <Button
+            icon="Plus"
+            onClick={() =>
+              patch({
+                metrics: {
+                  ...draft.metrics,
+                  priceRates: [
+                    ...draft.metrics.priceRates,
+                    {
+                      providerId: draft.providers[0]?.id ?? "",
+                      model: draft.providers[0]?.model ?? "",
+                      inputUsdPerMillion: 0,
+                      outputUsdPerMillion: 0,
+                    },
+                  ],
+                },
+              })
+            }
+          >
+            {t("common.add")}
+          </Button>
+        }
+      >
+        {draft.metrics.priceRates.length === 0 ? (
+          <p className="text-[12px] text-ink-500">{t("metrics.noPriceRates")}</p>
+        ) : (
+          <div className="space-y-2">
+            {draft.metrics.priceRates.map((rate, index) => (
+              <div key={index} className="grid grid-cols-[minmax(0,1fr)_92px_92px_28px] items-center gap-2">
+                <TextInput
+                  mono
+                  size="sm"
+                  value={rate.model}
+                  onChange={(v) => updateRate(index, "model", v)}
+                  placeholder={t("metrics.rateModel")}
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={rate.inputUsdPerMillion}
+                  onChange={(e) => updateRate(index, "inputUsdPerMillion", Number(e.target.value))}
+                  aria-label={t("metrics.rateInput")}
+                  className="h-7 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-ink-100 focus:border-ink-500 focus:outline-none"
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={rate.outputUsdPerMillion}
+                  onChange={(e) => updateRate(index, "outputUsdPerMillion", Number(e.target.value))}
+                  aria-label={t("metrics.rateOutput")}
+                  className="h-7 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-ink-100 focus:border-ink-500 focus:outline-none"
+                />
+                <button
+                  onClick={() =>
+                    patch({
+                      metrics: {
+                        ...draft.metrics,
+                        priceRates: draft.metrics.priceRates.filter((_, i) => i !== index),
+                      },
+                    })
+                  }
+                  aria-label={t("common.delete")}
+                  className="grid h-7 place-items-center rounded-md text-ink-500 hover:bg-rose-500/15 hover:text-rose-300"
+                >
+                  <Icon name="Trash2" className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* extensions                                                          */
+/* ------------------------------------------------------------------ */
+
+function ExtensionsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }) {
+  const { t } = useTranslation();
+  const [plugins, setPlugins] = useState<PluginStatus[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    setPlugins(await desktop.listPlugins().catch(() => []));
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const rediscover = async () => {
+    setBusy(true);
+    setPlugins(await desktop.rediscoverPlugins().catch(() => plugins ?? []));
+    setBusy(false);
+  };
+
+  return (
+    <div className="mx-auto max-w-[720px]">
+      <SectionCard
+        title={t("settings.extensions")}
+        action={
+          <Button icon={busy ? "Loader2" : "RefreshCw"} spin={busy} variant="solid" onClick={() => void rediscover()}>
+            {t("extensions.rediscover")}
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          <Field label={t("extensions.pluginDirectory")}>
+            <TextInput mono value={draft.pluginDirectory} onChange={(v) => patch({ pluginDirectory: v })} />
+          </Field>
+          {!plugins || plugins.length === 0 ? (
+            <p className="rounded-lg border border-ink-700 bg-ink-900/50 px-3 py-3 text-[12px] text-ink-500">
+              {t("extensions.noneFound")}
+            </p>
+          ) : (
+            plugins.map((plugin) => (
+              <div key={plugin.id} className="flex items-center gap-3 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", plugin.healthy ? "bg-emerald-400" : "bg-rose-400")} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12.5px] font-medium text-ink-100">
+                    {plugin.name} <span className="font-mono text-[10.5px] text-ink-500">v{plugin.version}</span>
+                  </p>
+                  <p className="truncate text-[11px] text-ink-500">
+                    {plugin.healthy
+                      ? t("extensions.nodes", { count: plugin.nodeCount })
+                      : (plugin.error ?? t("extensions.unavailable"))}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* secrets                                                             */
+/* ------------------------------------------------------------------ */
+
+function SecretsPanel() {
+  const { t } = useTranslation();
+  const [secrets, setSecrets] = useState<SecretMetadata[]>([]);
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("");
+  const [busyName, setBusyName] = useState<string | null>(null);
+
+  const load = async () => {
+    setSecrets(await desktop.listSecrets().catch(() => []));
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const save = async () => {
+    if (!name.trim() || !value.trim()) return;
+    setBusyName(name.trim());
+    await desktop.saveSecret(name.trim(), value).catch(() => undefined);
+    setValue("");
+    setName("");
+    await load();
+    setBusyName(null);
+  };
+
+  const remove = async (secretName: string) => {
+    const ok = await ask({
+      title: t("secrets.deleteTitle"),
+      description: t("secrets.deleteDescription", { name: secretName }),
+      confirmLabel: t("common.delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    setBusyName(secretName);
+    await desktop.deleteSecret(secretName).catch(() => undefined);
+    await load();
+    setBusyName(null);
+  };
+
+  return (
+    <div className="mx-auto max-w-[720px]">
+      <SectionCard title={t("settings.secrets")}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] items-end gap-2">
+            <Field label={t("secrets.name")}>
+              <TextInput mono value={name} onChange={setName} placeholder={t("secrets.namePlaceholder")} />
+            </Field>
+            <Field label={t("secrets.value")}>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void save()}
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+              />
+            </Field>
+            <Button
+              icon={busyName ? "Loader2" : "Save"}
+              spin={Boolean(busyName)}
+              variant="primary"
+              onClick={() => void save()}
+              disabled={!name.trim() || !value.trim()}
+            >
+              {t("secrets.addSecret")}
+            </Button>
+          </div>
+
+          <p className="text-[11px] leading-relaxed text-ink-500">{t("secrets.vaultNote")}</p>
+
+          {secrets.length > 0 && (
+            <div className="overflow-hidden rounded-xl border border-ink-700/80">
+              {secrets.map((s, i) => (
+                <div key={s.name} className={cn("flex items-center gap-3 px-3 py-2.5", i > 0 && "border-t border-seam")}>
+                  <Icon name="KeyRound" className="h-3.5 w-3.5 shrink-0 text-amber-300/80" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink-100">{s.name}</span>
+                  <span className="text-[11px] text-ink-500">{formatDateTime(s.updatedAt)}</span>
+                  <button
+                    onClick={() => void remove(s.name)}
+                    aria-label={`${t("common.delete")} ${s.name}`}
+                    className="grid h-6 w-6 place-items-center rounded text-ink-600 transition hover:bg-rose-500/15 hover:text-rose-300"
+                  >
+                    <Icon name="Trash2" className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+

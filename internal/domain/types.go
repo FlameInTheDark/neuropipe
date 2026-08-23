@@ -189,6 +189,35 @@ type FlowDefinition struct {
 	Nodes         []FlowNode `json:"nodes"`
 	Edges         []FlowEdge `json:"edges"`
 	Viewport      Viewport   `json:"viewport"`
+	// Groups is renderer-owned presentation metadata (visual frames). The
+	// engine never reads it; it only round-trips through save/load so the
+	// editor can restore the user's layout aids.
+	Groups []NodeGroup `json:"groups,omitempty"`
+	// Comments is renderer-owned sticky notes. Purely cosmetic.
+	Comments []NodeComment `json:"comments,omitempty"`
+}
+
+// NodeGroup is one visual frame grouping a set of nodes on the canvas.
+// Purely cosmetic — membership is not enforced by the engine.
+type NodeGroup struct {
+	ID    string  `json:"id"`
+	Title string  `json:"title"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	W     float64 `json:"w"`
+	H     float64 `json:"h"`
+	Color string  `json:"color"`
+}
+
+// NodeComment is a sticky note on the canvas. Purely cosmetic.
+type NodeComment struct {
+	ID    string  `json:"id"`
+	Text  string  `json:"text"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	W     float64 `json:"w"`
+	H     float64 `json:"h"`
+	Color string  `json:"color"`
 }
 
 type Viewport struct {

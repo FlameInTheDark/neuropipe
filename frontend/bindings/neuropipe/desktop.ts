@@ -40,7 +40,6 @@ import type {
   CreateFunctionRequest,
   CustomFunction,
   Database,
-  DatabaseDriver,
   DatabaseSchema,
   DatabaseStatus,
   DocumentationDocument,
@@ -189,3 +188,4 @@ export const desktop = {
   resolveInputDialog: (id: string, response: InputDialogResponse) => call<boolean>("ResolveInputDialog", id, response),
   resolveFormDialog: (id: string, response: FormDialogResponse) => call<boolean>("ResolveFormDialog", id, response),
 };
+

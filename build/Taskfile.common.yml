@@ -16,19 +16,18 @@ tasks:
     dir: frontend
     sources:
       - package.json
-      - bun.lock
+      - package-lock.json
     generates:
       - node_modules/*
     preconditions:
-      - sh: bun --version
-        msg: "Looks like bun isn't installed. Install it from https://bun.sh"
+      - sh: npm --version
+        msg: "Looks like npm isn't installed. Install Node.js from https://nodejs.org"
     cmds:
-      # Use --frozen-lockfile in CI/production; fall back to a plain install
-      # when the lockfile is missing or out of sync so `wails3 dev` works on
-      # a fresh checkout.
-      - cmd: bun install --frozen-lockfile
+      # Use `npm ci` when the lockfile is in sync; fall back to a plain
+      # install so `wails3 dev` works on a fresh checkout.
+      - cmd: npm ci
         ignore_error: true
-      - cmd: bun install
+      - cmd: npm install
 
   build:frontend:
     summary: Build the frontend project
@@ -42,7 +41,7 @@ tasks:
       - task: install:frontend:deps
       - task: generate:bindings
     cmds:
-      - bun run build
+      - npm run build
 
   generate:bindings:
     summary: Generates bindings for the frontend
@@ -72,10 +71,13 @@ tasks:
     deps:
       - task: install:frontend:deps
     cmds:
-      - bun run dev
+      - npm run dev
 
   update:build-assets:
     summary: Updates the build assets
     dir: build
     cmds:
       - wails3 update build-assets -name "Neuropipe" -binaryname "neuropipe" -config config.yml -dir .
+
+
+
