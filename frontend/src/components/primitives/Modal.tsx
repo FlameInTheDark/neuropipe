@@ -6,13 +6,15 @@ import { cn } from "../../utils/cn";
 import { surface } from "./styles";
 import { useDismissKeys } from "../../hooks/useDismissKeys";
 
-export type ModalSize = "sm" | "md" | "lg" | "full";
+export type ModalSize = "sm" | "md" | "lg" | "full" | "wide";
 
 const SIZES: Record<ModalSize, string> = {
   sm: "w-full max-w-[440px]",
   md: "w-full max-w-[720px]",
   lg: "w-full max-w-[min(96vw,1200px)] h-[min(92vh,900px)]",
   full: "w-full max-w-[min(98vw,1500px)] h-[min(96vh,960px)]",
+  /** full width, but the height hugs the content (capped to the viewport) */
+  wide: "w-full max-w-[min(96vw,1200px)] h-auto max-h-[min(92vh,960px)]",
 };
 
 /**

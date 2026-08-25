@@ -53,6 +53,10 @@ import {
   setNodeValue,
 } from "./graph-ops";
 
+/** Multi-node copy buffer for Ctrl+C/Ctrl+V — survives editor switches. */
+let nodeClipboard: { nodes: GraphNode[]; edges: Edge[] } | null = null;
+let pasteTick = 0;
+
 export interface GraphSnapshot {
   nodes: GraphNode[];
   edges: Edge[];
@@ -241,8 +245,6 @@ export function useGraphEditor(options: {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState(false);
-
-  const clipboard = useRef<GraphNode | null>(null);
   const viewRef = useRef<Viewport>({ x: 40, y: 40, z: 1 });
   const seq = useRef(0);
 
@@ -737,15 +739,62 @@ export function useGraphEditor(options: {
     [touch],
   );
 
+  const copyNodes = useCallback(
+    (list: GraphNode[]) => {
+      const usable = list.filter((n) => !n.locked);
+      if (!usable.length) {
+        notify(i18n.t("editor.boundaryLocked"), "Lock");
+        return;
+      }
+      const idSet = new Set(usable.map((n) => n.id));
+      nodeClipboard = {
+        nodes: structuredClone(usable),
+        edges: structuredClone(edges.filter((e) => idSet.has(e.from.node) && idSet.has(e.to.node))),
+      };
+      pasteTick = 0;
+      notify(i18n.t("editor.nodesCopied", { count: usable.length }), "Copy");
+    },
+    [edges, notify],
+  );
   const copyNode = useCallback(
     (id: string) => {
       const node = nodes.find((n) => n.id === id);
       if (!node) return;
-      clipboard.current = node;
-      notify(i18n.t("editor.nodeCopied"), "Copy");
+      copyNodes([node]);
     },
-    [nodes, notify],
+    [nodes, copyNodes],
   );
+
+  /** Serializes the given nodes plus their internal wiring into the
+   *  module-level clipboard (survives editor switches within a session). */
+
+  const copySelected = useCallback(() => {
+    const ids = selectedIds.size ? Array.from(selectedIds) : selectedId ? [selectedId] : [];
+    copyNodes(nodes.filter((n) => ids.includes(n.id)));
+  }, [nodes, selectedId, selectedIds, copyNodes]);
+
+  /** Pastes the clipboard contents with fresh IDs, staggered so repeated
+   *  pastes fan out diagonally instead of stacking. */
+  const pasteClipboard = useCallback(() => {
+    if (!nodeClipboard?.nodes.length) return;
+    pasteTick += 1;
+    const offset = 32 * pasteTick;
+    const idMap = new Map(nodeClipboard.nodes.map((n) => [n.id, makeNodeId(n.type)]));
+    const copies = nodeClipboard.nodes.map((n) => duplicateNode(n, idMap.get(n.id)!, offset));
+    const copiedEdges = nodeClipboard.edges
+      .filter((e) => idMap.has(e.from.node) && idMap.has(e.to.node))
+      .map((e) => ({
+        ...e,
+        id: `e-${crypto.randomUUID().slice(0, 8)}`,
+        from: { ...e.from, node: idMap.get(e.from.node)! },
+        to: { ...e.to, node: idMap.get(e.to.node)! },
+      }));
+    setNodes((ns) => [...ns, ...copies]);
+    setEdges((es) => [...es, ...copiedEdges]);
+    setSelectedIds(new Set(copies.map((n) => n.id)));
+    setSelectedId(copies[0]?.id ?? null);
+    touch();
+  }, [touch]);
 
   const deleteSelected = useCallback(() => {
     const requested = selectedIds.size ? Array.from(selectedIds) : selectedId ? [selectedId] : [];
@@ -825,16 +874,26 @@ export function useGraphEditor(options: {
         return;
       }
       if (edgeExists(edges, from, to)) return;
+      // mirrors the backend contract: pins default to a single wire except
+      // tool pins, which accept unlimited connections
+      const max =
+        target.maxConnections !== undefined && target.maxConnections > 0
+          ? target.maxConnections
+          : target.kind === "tool"
+            ? Number.POSITIVE_INFINITY
+            : 1;
       const incoming = edges.filter((e) => e.to.node === to.node && e.to.port === to.port).length;
-      if (target.maxConnections !== undefined && incoming >= target.maxConnections) {
+      if (incoming >= max) {
         notify(i18n.t("editor.maxConnectionsReached"), "X");
         return;
       }
       const kind: PortKind = source.kind === "exec" ? "exec" : "data";
       const dataType = source.kind === "exec" ? "exec" : source.dataType ?? "any";
 
-      // an input pin holds a single wire — replace whatever was there
-      let nextEdges: Edge[] = [...detachInput(edges, to), { id: `e-${crypto.randomUUID().slice(0, 8)}`, from, to, kind, dataType }];
+      const wire = { id: `e-${crypto.randomUUID().slice(0, 8)}`, from, to, kind, dataType };
+      // single-connection pins hold one wire — replace whatever was there;
+      // multi-wire pins (agent Tools, …) accumulate
+      let nextEdges: Edge[] = max === 1 ? [...detachInput(edges, to), wire] : [...edges, wire];
       let nextNodes = nodes;
 
       // a reroute adopts the incoming type and pushes it downstream
@@ -1030,7 +1089,7 @@ export function useGraphEditor(options: {
     moveNodes, alignSelection, distributeSelection,
     // node ops
     moveNode, updateField, renameNode, toggleNodeStatus, updateNodePorts,
-    copyNode, deleteSelected, duplicateSelected, addNode,
+    copyNode, copySelected, pasteClipboard, deleteSelected, duplicateSelected, addNode,
     // edge ops
     connect, removeEdge, removeEdgesFor, insertReroute,
     // function-specific

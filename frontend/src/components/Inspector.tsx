@@ -9,6 +9,8 @@ import { Dropdown, type DropdownOption } from "./Dropdown";
 import { Tooltip } from "./Tooltip";
 import { TextEditorModal } from "./TextEditorModal";
 import { CodeEditorModal } from "./CodeEditorModal";
+import { FormBuilderEditor } from "./FormBuilderEditor";
+import { RouteOptionsEditor, SchemaEditor, SwitchCasesEditor } from "./StructuredFieldEditors";
 import { TypeSpecField, specTopToken, tokenToPinDataType } from "./TypeSpecField";
 import { typeSpecFromDataType } from "../lib/type-spec";
 import { unmapDataType } from "../lib/adapters";
@@ -625,6 +627,32 @@ function InspectorField({
         secondLabel={isPath ? t("editor.fieldPath") : t("editor.objectKey")}
         onChange={(next) => onChange(fieldKey, next)}
       />
+    );
+  }
+
+  /* structured editors restored from the previous UI */
+  if (field.kind === "json-schema") {
+    return <SchemaEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />;
+  }
+  if (field.kind === "route-options") {
+    return <RouteOptionsEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />;
+  }
+  if (field.kind === "switch-cases") {
+    return (
+      <SwitchCasesEditor
+        value={raw}
+        legacyOptions={node.values.options}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+  /* visual grid editor for the Form node's layout */
+  if (field.kind === "form-builder") {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-md border border-ink-700/70 bg-ink-850 px-2.5 py-[7px]">
+        <Label text={field.label} required={field.required} />
+        <FormBuilderEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />
+      </div>
     );
   }
 

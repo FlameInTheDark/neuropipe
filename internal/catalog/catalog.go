@@ -216,8 +216,6 @@ func builtins() []domain.NodeDefinition {
 			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Complete the task using the connected tools.", true), chatModeField(), field("maxTurns", "Maximum turns", "number", "8", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"maxTurns": 8.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:coding_agent", "AI", "Coding Agent", "An agent preset for scoped file, Git, and terminal workspaces.", "code-2", "#f472b6", append(append([]domain.NodePort{}, flowInput...), llmToolInput), flowOutput,
 			[]domain.ConfigField{field("task", "Task", "textarea", "", true), field("workspace", "Workspace", "string", "C:\\Work\\repo", true), chatModeField(), field("maxTurns", "Maximum turns", "number", "12", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"maxTurns": 12.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}, domain.CapabilityFileRead, domain.CapabilityFileWrite, domain.CapabilityTerminal, domain.CapabilityGit),
-		node("visual:comment", "Canvas", "Comment", "A canvas-only note for documenting a Blueprint-style graph.", "message-square-text", "#71717a", nil, nil,
-			[]domain.ConfigField{field("title", "Title", "string", "New comment", true), field("body", "Body", "textarea", "Describe this section of the pipeline.", false)}, map[string]any{"title": "New comment", "body": ""}),
 	}
 	return append(definitions, blueprintBuiltins()...)
 }
@@ -312,9 +310,6 @@ func inferMode(definition domain.NodeDefinition) domain.NodeExecutionMode {
 	}
 	if strings.HasPrefix(definition.Type, "trigger:") {
 		return domain.NodeEvent
-	}
-	if definition.Type == "visual:comment" {
-		return domain.NodeVisual
 	}
 	return domain.NodeImpure
 }

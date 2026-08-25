@@ -3,6 +3,7 @@ import { Icon } from "./icons";
 import { Button } from "./ui";
 import { Modal } from "./primitives/Modal";
 import { Field } from "./primitives/Field";
+import { Dropdown } from "./Dropdown";
 import { useConfirmation } from "@/stores/confirmation";
 import { useInputDialog, useFormDialog } from "@/stores/dialogs";
 import type { FormDialogField } from "@/lib/types";
@@ -174,8 +175,11 @@ function FormHost() {
   };
 
   const renderItem = (item: FormDialogField) => {
+    // col/row are 0-indexed in the layout; grid lines are 1-indexed.
+    const col = Math.min(3, Math.max(0, item.col));
+    const span = Math.min(4 - col, Math.max(1, item.span || 1));
     const style: React.CSSProperties = {
-      gridColumn: `${Math.min(4, Math.max(1, item.col)) + 1} / span ${Math.min(4, Math.max(1, item.span))}`,
+      gridColumn: `${col + 1} / span ${span}`,
       gridRow: `${item.row + 1} / span ${Math.max(1, item.rowSpan || 1)}`,
     };
     if (item.kind === "text") {
@@ -189,18 +193,12 @@ function FormHost() {
       return (
         <label key={item.id} style={style} className="block">
           <span className="mb-1 block text-[11px] text-ink-400">{item.label}</span>
-          <select
+          <Dropdown
             value={values[item.id] ?? ""}
-            onChange={(e) => setValues((v) => ({ ...v, [item.id]: e.target.value }))}
-            className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2 text-[12.5px] text-ink-100 focus:border-ink-400 focus:outline-none"
-          >
-            <option value="">…</option>
-            {(item.options ?? []).map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label || o.value}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setValues((prev) => ({ ...prev, [item.id]: v }))}
+            placeholder="…"
+            options={(item.options ?? []).map((o) => ({ value: o.value, label: o.label || o.value }))}
+          />
         </label>
       );
     }
@@ -225,6 +223,7 @@ function FormHost() {
     <Modal
       title={request.title}
       icon="LayoutList"
+      size="wide"
       onClose={() => respond({ canceled: true, values: {} })}
       footer={
         <div className="ml-auto flex items-center gap-2">
@@ -247,7 +246,13 @@ function FormHost() {
         {request.message && (
           <p className="text-[12.5px] leading-relaxed text-ink-300">{request.message}</p>
         )}
-        <div style={{ gridTemplateColumns: GRID_COLUMNS }} className="grid gap-2.5">
+        <div
+          style={{
+            gridTemplateColumns: GRID_COLUMNS,
+            gridAutoRows: "minmax(56px, auto)",
+          }}
+          className="grid items-start gap-2.5"
+        >
           {request.items.map(renderItem)}
         </div>
       </div>

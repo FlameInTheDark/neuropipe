@@ -74,8 +74,6 @@ func (e *Engine) executeNode(ctx context.Context, node domain.FlowNode, input Pa
 	switch node.Type {
 	case "trigger:button", "trigger:cron", "trigger:file_watch", "trigger:hotkey", "trigger:webhook", "trigger:chat":
 		return Result{"out": {clonePacket(input)}}, nil
-	case "visual:comment":
-		return Result{}, nil
 	case "action:http":
 		return e.executeHTTP(ctx, config, input)
 	case "action:terminal":

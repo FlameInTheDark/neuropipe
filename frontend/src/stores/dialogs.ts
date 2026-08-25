@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { FormDialogRequest, InputDialogRequest } from "@/lib/types";
+import { desktop } from "@/lib/bridge";
 
 /**
  * Single-channel stores for backend-initiated dialogs (Display Input Dialog
@@ -65,7 +66,11 @@ export const useFormDialog = create<FormDialogState>((set) => ({
 }));
 
 export function dispatchInputDialogRequest(request: InputDialogRequest) {
-  if (request?.id) void useInputDialog.getState().show(request);
+  if (!request?.id) return;
+  void useInputDialog
+    .getState()
+    .show(request)
+    .then((response) => void desktop.resolveInputDialog(request.id, response));
 }
 
 export function cancelInputDialog(id: string) {
@@ -74,7 +79,11 @@ export function cancelInputDialog(id: string) {
 }
 
 export function dispatchFormDialogRequest(request: FormDialogRequest) {
-  if (request?.id) void useFormDialog.getState().show(request);
+  if (!request?.id) return;
+  void useFormDialog
+    .getState()
+    .show(request)
+    .then((response) => void desktop.resolveFormDialog(request.id, response));
 }
 
 export function cancelFormDialog(id: string) {

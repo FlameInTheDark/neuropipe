@@ -397,10 +397,12 @@ export default function App() {
         { key: "b", mod: true, when: nav.inEditor, run: () => setLeftOpen((v) => !v) },
         { key: "Enter", mod: true, when: nav.inEditor, run: () => void graph.run() },
         { key: "d", mod: true, when: nav.inEditor, run: graph.duplicateSelected },
+        { key: "c", mod: true, skipWhenTyping: true, when: nav.inEditor, run: graph.copySelected },
+        { key: "v", mod: true, skipWhenTyping: true, when: nav.inEditor, run: graph.pasteClipboard },
         { key: "Backspace", skipWhenTyping: true, when: nav.inEditor, run: graph.deleteSelected },
         { key: "Delete", skipWhenTyping: true, when: nav.inEditor, run: graph.deleteSelected },
       ],
-      [nav.inEditor, save, graph.run, graph.duplicateSelected, graph.deleteSelected],
+      [nav.inEditor, save, graph.run, graph.duplicateSelected, graph.copySelected, graph.pasteClipboard, graph.deleteSelected],
     ),
   );
 
