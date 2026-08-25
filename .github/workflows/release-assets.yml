@@ -101,7 +101,8 @@ jobs:
         env:
           CGO_ENABLED: "1"
         run: >-
-          go build -tags production -trimpath
+          $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH";
+          go build -tags "production duckdb" -trimpath
           -ldflags "-s -w -H windowsgui -X main.appVersion=${{ steps.release.outputs.tag }}"
           -o build/bin/neuropipe.exe
 
