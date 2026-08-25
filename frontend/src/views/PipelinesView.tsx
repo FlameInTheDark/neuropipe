@@ -16,7 +16,7 @@ import { Modal } from "../components/primitives/Modal";
 import { Field, TextInput } from "../components/primitives/Field";
 import { Dropdown } from "../components/Dropdown";
 
-type Filter = "all" | "published" | "draft" | "legacy" | "remote";
+type Filter = "all" | "published" | "draft" | "remote";
 
 export default function PipelinesView({ workspace, nav }: { workspace: Workspace; nav: NavApi }) {
   const { t } = useTranslation();
@@ -44,19 +44,15 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
         icon: "ArrowUpRight",
         onSelect: () => void nav.openPipeline(p),
       },
-      ...(p.status !== "legacy"
-        ? [
-            {
-              label: t("pipelines.duplicate"),
-              icon: "Copy",
-              onSelect: () => {
-                void workspace.duplicatePipeline(p.id).then((copy) => {
-                  if (copy) void nav.openPipeline({ ...pipelineFrom(copy) });
-                });
-              },
-            },
-          ]
-        : []),
+      {
+        label: t("pipelines.duplicate"),
+        icon: "Copy",
+        onSelect: () => {
+          void workspace.duplicatePipeline(p.id).then((copy) => {
+            if (copy) void nav.openPipeline({ ...pipelineFrom(copy) });
+          });
+        },
+      },
       ...(p.executorId
         ? [
             {
@@ -113,7 +109,6 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
               { value: "all", label: t("common.all") },
               { value: "published", label: t("pipelines.publishedTab") },
               { value: "draft", label: t("functions.draft") },
-              { value: "legacy", label: t("pipelines.legacy") },
               { value: "remote", label: t("executors.category") },
             ]}
           />
@@ -234,7 +229,7 @@ function pipelineFrom(created: Pipeline): UiPipeline {
     name: created.name,
     desc: created.description,
     icon: created.icon || "Cable",
-    status: created.status === "active" ? "published" : created.status === "legacy" ? "legacy" : "draft",
+    status: created.status === "active" ? "published" : "draft",
     version: created.publishedRevision > 0 ? `v${created.publishedRevision}` : "",
     triggers: 0,
     updated: formatDateTime(created.updatedAt),

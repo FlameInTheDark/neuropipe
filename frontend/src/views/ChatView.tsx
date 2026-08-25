@@ -21,7 +21,13 @@ import { Modal } from "../components/primitives/Modal";
 import { Field } from "../components/primitives/Field";
 import { Icon } from "../components/icons";
 import { useCtxMenu } from "../components/ContextMenu";
+import { Button } from "../components/ui";
 import { cn } from "../utils/cn";
+import { useToast } from "../hooks/useToast";
+import { Toaster } from "../components/layout/Toaster";
+
+/** rows fetched per transcript page; older history loads on demand */
+const TRANSCRIPT_PAGE = 100;
 
 const SUGGESTION_KEYS = [
   "chat.suggestion1",
@@ -29,6 +35,12 @@ const SUGGESTION_KEYS = [
   "chat.suggestion3",
   "chat.suggestion4",
 ];
+
+/* Survives ChatView unmounts (navigating away and back) so reopening the
+   chat page restores the exact conversation that was open, including its
+   live running state pulled fresh from the backend. */
+let lastViewedId: string | null = null;
+let lastViewedMode: "model" | "pipeline" | null = null;
 
 /** Ordered transcript entry: a plain bubble or an inline tool-call group. */
 type TranscriptItem =
@@ -49,7 +61,8 @@ function ThreadRow({
   pipeline?: boolean;
   active: boolean;
   onClick: () => void;
-  onCtx: (e: React.MouseEvent) => void;
+  /** right-click menu; omitted for action rows (binding quick-starts) */
+  onCtx?: (e: React.MouseEvent) => void;
 }) {
   return (
     <button
@@ -122,13 +135,76 @@ function ActivityDisclosure({ run, events }: { run: ChatRun; events: ChatRunEven
   );
 }
 
+/* ── failed run card ── */
+
+/** Inline error for a finished-but-unsuccessful run: collapsed shows a
+ *  one-line reason, expanding reveals the full error text; retry re-runs
+ *  the last user prompt as a fresh turn. */
+function FailedRunCard({
+  error,
+  onRetry,
+}: {
+  error?: string;
+  onRetry?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const hasDetails = Boolean(error);
+
+  return (
+    <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5">
+      <div className="flex items-center gap-2.5">
+        <Icon name="AlertTriangle" className="h-3.5 w-3.5 shrink-0 text-rose-300" />
+        <button
+          type="button"
+          onClick={() => hasDetails && setOpen((v) => !v)}
+          disabled={!hasDetails}
+          aria-expanded={open}
+          className={cn("min-w-0 flex-1 text-left", hasDetails ? "cursor-pointer" : "cursor-default")}
+        >
+          <span className="block text-[12px] text-rose-200">{t("chat.runFailedStrip")}</span>
+          {/* collapsed preview only - the expanded body below carries the
+              full text, so it never renders twice */}
+          {hasDetails && !open && (
+            <span className="mt-0.5 block truncate font-mono text-[10.5px] text-rose-300/70">
+              {error}
+            </span>
+          )}
+        </button>
+        {hasDetails && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-label={t("chat.toggleDetails")}
+            title={t("chat.toggleDetails")}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-rose-300/70 transition hover:bg-rose-500/15 hover:text-rose-200"
+          >
+            <Icon name="ChevronDown" className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          </button>
+        )}
+        {onRetry && (
+          <Button variant="ghost" icon="RefreshCw" onClick={onRetry}>
+            {t("chat.retry")}
+          </Button>
+        )}
+      </div>
+      {open && hasDetails && (
+        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-rose-500/20 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-rose-200/90">
+          {error}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 /* ── main view ── */
 export default function ChatView() {
   const { t } = useTranslation();
+  const { toast, notify } = useToast();
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [pipelines, setPipelines] = useState<ChatPipeline[]>([]);
   const [modelLabel, setModelLabel] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(lastViewedId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runs, setRuns] = useState<ChatRun[]>([]);
   const [events, setEvents] = useState<Record<string, ChatRunEvent[]>>({});
@@ -136,8 +212,7 @@ export default function ChatView() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [q, setQ] = useState("");
-  const [newMode, setNewMode] = useState<"model" | "pipeline">("model");
-  const [newBindingId, setNewBindingId] = useState("");
+  const [newMode, setNewMode] = useState<"model" | "pipeline">(lastViewedMode ?? "model");
   const [renameTarget, setRenameTarget] = useState<ChatConversation | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -147,6 +222,19 @@ export default function ChatView() {
   const ctx = useCtxMenu();
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
+
+  /* remember the open thread across page switches */
+  useEffect(() => {
+    lastViewedId = selectedId;
+    lastViewedMode = newMode;
+  }, [selectedId, newMode]);
+
+  /** Pipeline chosen for a brand-new pipeline chat (before it exists). */
+  const [pendingBindingId, setPendingBindingId] = useState("");
+  useEffect(() => {
+    if (!pendingBindingId && pipelines.length > 0) setPendingBindingId(pipelines[0].bindingId);
+  }, [pipelines, pendingBindingId]);
+  const newPipelineBinding = pendingBindingId || pipelines[0]?.bindingId || "";
 
   /* ---------- transcript ---------- */
 
@@ -192,16 +280,40 @@ export default function ChatView() {
    * so rapid conversation switches can never paint stale history. */
   const detailSeq = useRef(0);
   const [loadError, setLoadError] = useState(false);
+  /** older pages exist beyond the loaded window */
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /** how many transcript rows are currently kept in state */
+  const loadedCount = useRef(TRANSCRIPT_PAGE);
+  /** newest-first total from the last paged read; offsets anchor against it */
+  const totalRef = useRef(0);
 
   const loadDetails = useCallback(async (conversationId: string) => {
     const ticket = ++detailSeq.current;
     setLoadError(false);
     try {
-      const [msgs, rs, aps] = await Promise.all([
-        desktop.listChatMessages(conversationId),
-        desktop.listChatRuns(conversationId),
-        desktop.listPendingChatApprovals(conversationId),
-      ]);
+      // keep every row already on screen while live events refresh the tail;
+      // offsets count backwards from the newest row, so the probe anchors the
+      // window at the conversation's end and anything older is prepended.
+      const want = Math.max(TRANSCRIPT_PAGE, loadedCount.current);
+      const probe = await desktop.listChatMessagesPage(conversationId, 0, TRANSCRIPT_PAGE);
+      let msgs = probe.messages;
+      const missing = Math.min(probe.total, want) - msgs.length;
+      if (missing > 0) {
+        const older = await desktop.listChatMessagesPage(conversationId, TRANSCRIPT_PAGE, missing);
+        if (ticket !== detailSeq.current) return;
+        msgs = [...older.messages, ...msgs];
+      }
+      if (ticket !== detailSeq.current) return;
+      totalRef.current = probe.total;
+      setMessages(msgs);
+      setHasMore(probe.total > msgs.length);
+      loadedCount.current = msgs.length;
+      const rs = await desktop.listChatRuns(conversationId);
+      const aps = await desktop.listPendingChatApprovals(conversationId);
+      if (ticket !== detailSeq.current) return;
+      setRuns(rs);
+      setApprovals(aps);
       const eventEntries = await Promise.all(
         rs.map(async (r) => {
           try {
@@ -212,14 +324,50 @@ export default function ChatView() {
         }),
       );
       if (ticket !== detailSeq.current) return;
-      setMessages(msgs);
-      setRuns(rs);
-      setApprovals(aps);
       setEvents(Object.fromEntries(eventEntries));
     } catch {
       if (ticket === detailSeq.current) setLoadError(true);
     }
   }, []);
+
+  /** Fetches the previous page and restores the scroll offset afterwards so
+      the viewport stays anchored to the message the user was reading.
+      Offsets anchor against the remembered conversation total - a message
+      appended by a live run shifts the newest-first window, and using the
+      row count alone would overlap pages and duplicate rows. */
+  const loadOlder = useCallback(async () => {
+    const conversationId = selectedId;
+    if (!conversationId || loadingOlder || !hasMore) return;
+    const container = scrollRef.current;
+    const before = container
+      ? { height: container.scrollHeight, top: container.scrollTop }
+      : null;
+    setLoadingOlder(true);
+    try {
+      const ticket = detailSeq.current;
+      const offset = Math.max(0, totalRef.current - loadedCount.current);
+      const page = await desktop.listChatMessagesPage(conversationId, offset, TRANSCRIPT_PAGE);
+      if (ticket !== detailSeq.current) return;
+      totalRef.current = Math.max(totalRef.current, offset + page.messages.length);
+      setHasMore(page.hasMore);
+      loadedCount.current += page.messages.length;
+      if (page.messages.length > 0) {
+        const known = new Set(messages.map((m) => m.id));
+        const fresh = page.messages.filter((m) => !known.has(m.id));
+        if (fresh.length > 0) {
+          setMessages((cur) => [...fresh, ...cur]);
+        }
+      }
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el && before) el.scrollTop = el.scrollHeight - before.height + before.top;
+      });
+    } catch {
+      /* transient; the button stays for a retry */
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [selectedId, loadingOlder, hasMore, messages]);
 
   const refreshList = useCallback(async () => {
     const [convs, pipes, settings] = await Promise.all([
@@ -239,7 +387,15 @@ export default function ChatView() {
   useEffect(() => {
     void (async () => {
       const convs = await refreshList().catch(() => [] as ChatConversation[]);
-      if (convs.length > 0) setSelectedId(convs[0].id);
+      if (convs.length === 0) return;
+      /* restore the exact thread that was open before leaving the page;
+         fall back to the newest within the remembered mode, then overall */
+      const restored =
+        (lastViewedId ? convs.find((c) => c.id === lastViewedId) : undefined) ??
+        (lastViewedMode ? convs.find((c) => c.mode === lastViewedMode) : undefined) ??
+        convs[0];
+      setSelectedId(restored.id);
+      setNewMode(restored.mode);
     })();
   }, [refreshList]);
 
@@ -250,6 +406,8 @@ export default function ChatView() {
     setRuns([]);
     setApprovals([]);
     setEvents({});
+    setHasMore(false);
+    loadedCount.current = TRANSCRIPT_PAGE;
     pinnedRef.current = true;
     if (selectedId) void loadDetails(selectedId);
   }, [selectedId, loadDetails]);
@@ -284,7 +442,7 @@ export default function ChatView() {
 
   const grouped = useMemo(() => {
     const groups: Record<string, ChatConversation[]> = { today: [], yesterday: [], week: [], older: [] };
-    for (const c of conversations.filter((x) => x.mode === (selected?.mode ?? newMode))) {
+    for (const c of conversations.filter((x) => x.mode === newMode)) {
       groups[conversationGroup(c.updatedAt)].push(c);
     }
     // newest first inside every group
@@ -292,7 +450,7 @@ export default function ChatView() {
       list.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     }
     return groups;
-  }, [conversations, selected?.mode, newMode]);
+  }, [conversations, newMode]);
 
   const filterFn = (c: ChatConversation) => c.title.toLowerCase().includes(q.toLowerCase());
   const visibleGroups = useMemo(
@@ -305,6 +463,18 @@ export default function ChatView() {
   );
 
   const activeRun = runs.find((r) => r.status === "pending" || r.status === "running");
+  /** newest run overall — a failure card only makes sense while this is the
+   *  latest outcome; a successful retry supersedes older failures */
+  const latestRun = useMemo(
+    () =>
+      [...runs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null,
+    [runs],
+  );
+  const latestRunFailed =
+    !activeRun &&
+    latestRun !== null &&
+    (latestRun.status === "failed" || latestRun.status === "cancelled") &&
+    messages.some((m) => m.chatRunId === latestRun.id);
   const approval = approvals[0];
 
   /* ---------- actions ---------- */
@@ -328,7 +498,7 @@ export default function ChatView() {
         // first message in a fresh chat creates the conversation implicitly
         const conv = await desktop.createChatConversation(
           newMode,
-          newMode === "pipeline" ? newBindingId : "",
+          newMode === "pipeline" ? newPipelineBinding : "",
         );
         target = conv;
         setSelectedId(conv.id);
@@ -351,6 +521,21 @@ export default function ChatView() {
     if (selectedId) await loadDetails(selectedId);
   };
 
+  /** Re-runs the last user prompt as a fresh turn after a failed run. */
+  const retryLastUserMessage = useCallback(async () => {
+    if (!selectedId || sending) return;
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    setSending(true);
+    try {
+      await desktop.sendChatMessage(selectedId, lastUser.content);
+      await loadDetails(selectedId);
+      await refreshList();
+    } finally {
+      setSending(false);
+    }
+  }, [selectedId, sending, messages, loadDetails, refreshList]);
+
   const removeConversation = async (conv: ChatConversation) => {
     const ok = await ask({
       title: t("chat.deleteTitle"),
@@ -359,9 +544,13 @@ export default function ChatView() {
       danger: true,
     });
     if (!ok) return;
-    await desktop.deleteChatConversation(conv.id);
-    setSelectedId(null);
-    await refreshList();
+    try {
+      await desktop.deleteChatConversation(conv.id);
+      setSelectedId((cur) => (cur === conv.id ? null : cur));
+      await refreshList();
+    } catch {
+      notify(t("chat.deleteFailed"), "AlertTriangle");
+    }
   };
 
   const commitRename = async () => {
@@ -427,6 +616,27 @@ export default function ChatView() {
             <Icon name="Plus" className="h-3.5 w-3.5" />
             {t("chat.new")}
           </button>
+          {/* model / pipeline switch — always reachable so either history is
+              one click away without creating anything */}
+          <div className="flex items-center gap-0.5 rounded-md border border-ink-700 bg-ink-850 p-0.5">
+            {(["model", "pipeline"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  setNewMode(m);
+                  if (selected && selected.mode !== m) setSelectedId(null);
+                }}
+                aria-pressed={newMode === m}
+                className={cn(
+                  "flex h-[26px] flex-1 items-center justify-center gap-1.5 rounded px-2 text-[11.5px] transition",
+                  newMode === m ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                )}
+              >
+                <Icon name={m === "model" ? "Bot" : "Cable"} className="h-3 w-3" />
+                {m === "model" ? t("chat.model") : t("chat.pipelines")}
+              </button>
+            ))}
+          </div>
           <SearchInput value={q} onChange={setQ} placeholder={t("chat.searchChats")} />
         </div>
 
@@ -449,26 +659,6 @@ export default function ChatView() {
                 ))}
             </div>
           ))}
-
-          {/* pipeline bindings for quick-start */}
-          {mode === "pipeline" && pipelines.length > 0 && !selected && (
-            <div className="mt-3">
-              <p className="mb-1 px-2 py-1.5 text-[10px] font-medium tracking-[0.09em] text-ink-500 uppercase">
-                {t("chat.chatPipelines")}
-              </p>
-              {pipelines.map((p) => (
-                <ThreadRow
-                  key={p.bindingId}
-                  title={p.label}
-                  subtitle={t("chat.publishedPipeline")}
-                  pipeline
-                  active={false}
-                  onClick={() => void createConversation("pipeline", p.bindingId)}
-                  onCtx={() => undefined}
-                />
-              ))}
-            </div>
-          )}
 
           {loadError && conversations.length === 0 && (
             <p className="flex items-center justify-center gap-1.5 px-2 py-4 text-center text-[12px] text-rose-300">
@@ -523,38 +713,9 @@ export default function ChatView() {
               </div>
             </>
           ) : (
-            <>
-              <h2 className="text-[13.5px] font-semibold text-ink-50">{t("chat.new")}</h2>
-              <div className="ml-auto flex items-center gap-2">
-                <div className="flex items-center gap-0.5 rounded-md border border-ink-700 bg-ink-850 p-0.5">
-                  {(["model", "pipeline"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setNewMode(m)}
-                      className={cn(
-                        "flex h-[22px] items-center gap-1.5 rounded px-2 text-[11px] transition",
-                        newMode === m ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
-                      )}
-                    >
-                      <Icon name={m === "model" ? "Bot" : "Cable"} className="h-3 w-3" />
-                      {m === "model" ? t("chat.model") : t("chat.pipelines")}
-                    </button>
-                  ))}
-                </div>
-                {newMode === "pipeline" && (
-                  <Dropdown
-                    value={newBindingId}
-                    onChange={setNewBindingId}
-                    className="w-[180px]"
-                    placeholder={t("chat.choosePipeline")}
-                    options={[
-                      { value: "", label: t("chat.choosePipeline") },
-                      ...pipelines.map((p) => ({ value: p.bindingId, label: p.pipelineName, icon: "Cable" })),
-                    ]}
-                  />
-                )}
-              </div>
-            </>
+            <h2 className="text-[13.5px] font-semibold text-ink-50">
+              {newMode === "pipeline" ? t("chat.chatWithPipeline") : t("chat.new")}
+            </h2>
           )}
         </div>
 
@@ -570,6 +731,18 @@ export default function ChatView() {
         >
           {selected ? (
             <div className="mx-auto max-w-[640px] space-y-5 px-4 py-6">
+              {hasMore && messages.length > 0 && (
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => void loadOlder()}
+                    disabled={loadingOlder}
+                    className="rounded-full border border-ink-700 bg-ink-850 px-3.5 py-1.5 text-[11.5px] text-ink-300 transition hover:border-ink-500 hover:text-ink-100 disabled:opacity-50"
+                  >
+                    {loadingOlder ? t("common.loading") : t("chat.loadEarlier")}
+                  </button>
+                </div>
+              )}
+
               {/* live status + activity feed for the run in flight; finished
                   runs keep their story in the inline tool cards below */}
               {activeRun && (
@@ -583,13 +756,29 @@ export default function ChatView() {
               {transcript.map((item) =>
                 item.kind === "tools" ? (
                   <div key={item.key} className="space-y-1.5">
-                    {item.calls.map((entry) => (
-                      <ToolCallCard key={entry.call.id || entry.result?.id || item.key} entry={entry} />
+                    {item.calls.map((entry, callIndex) => (
+                      <ToolCallCard key={`${item.key}:${callIndex}:${entry.call.id || entry.result?.id || "call"}`} entry={entry} />
                     ))}
                   </div>
                 ) : (
                   <TranscriptMessage key={item.msg.id} msg={item.msg} pipelineMode={selected.mode === "pipeline"} onCtx={onBubbleCtx} />
                 ),
+              )}
+
+              {/* a failed run must never look like the assistant simply
+                  stopped talking: surface its error inline with retry, but
+                  only while it is still the newest outcome - a successful
+                  retry supersedes older failures */}
+              {latestRunFailed && latestRun && (
+                <FailedRunCard
+                  key={`err-${latestRun.id}`}
+                  error={latestRun.error}
+                  onRetry={
+                    selected && messages.some((m) => m.role === "user")
+                      ? () => void retryLastUserMessage()
+                      : undefined
+                  }
+                />
               )}
 
               {(activeRun || sending) && (
@@ -657,8 +846,17 @@ export default function ChatView() {
                 </div>
               )}
 
+              {newMode === "pipeline" && pipelines.length > 0 && (
+                <Dropdown
+                  className="mt-6 w-full max-w-[300px]"
+                  value={newPipelineBinding}
+                  onChange={setPendingBindingId}
+                  options={pipelines.map((p) => ({ value: p.bindingId, label: p.pipelineName || p.label }))}
+                />
+              )}
+
               {newMode === "pipeline" && (
-                <CtaButton onClick={() => void createConversation("pipeline", newBindingId)} disabled={!newBindingId}>
+                <CtaButton onClick={() => void createConversation("pipeline", newPipelineBinding)} disabled={pipelines.length === 0}>
                   {t("chat.startPipelineChat")}
                 </CtaButton>
               )}
@@ -690,19 +888,28 @@ export default function ChatView() {
                 className="w-full resize-none bg-transparent px-4 py-3 text-[13px] text-ink-50 placeholder:text-ink-500"
               />
               <div className="flex items-center gap-2 px-3 pb-2.5">
-                <span
-                  className={cn(
-                    "flex items-center gap-1.5 text-[11px]",
-                    mode === "pipeline" ? "text-violet-400/70" : "text-ink-500",
-                  )}
-                >
-                  <Icon name={mode === "pipeline" ? "Cable" : "Sparkles"} className="h-3 w-3" />
-                  {mode === "pipeline"
-                    ? selected?.mode === "pipeline"
-                      ? headerPipeline
-                      : pipelines.find((p) => p.bindingId === newBindingId)?.pipelineName
-                    : modelLabel ?? t("chat.configureModel")}
-                </span>
+                {mode === "pipeline" ? (
+                  selected?.mode === "pipeline" || pipelines.length === 0 ? (
+                    <span className="flex items-center gap-1.5 text-[11px] text-violet-400/70">
+                      <Icon name="Cable" className="h-3 w-3" />
+                      {selected?.mode === "pipeline"
+                        ? headerPipeline
+                        : t("chat.noPipelinesHint")}
+                    </span>
+                  ) : (
+                    <Dropdown
+                      compact
+                      value={newPipelineBinding}
+                      onChange={setPendingBindingId}
+                      options={pipelines.map((p) => ({ value: p.bindingId, label: p.pipelineName || p.label }))}
+                    />
+                  )
+                ) : (
+                  <span className="flex items-center gap-1.5 text-[11px] text-ink-500">
+                    <Icon name="Sparkles" className="h-3 w-3" />
+                    {modelLabel ?? t("chat.configureModel")}
+                  </span>
+                )}
 
                 <span className="ml-auto text-[10.5px] text-ink-600">{t("chat.enterToSend")}</span>
                 <button
@@ -796,7 +1003,8 @@ export default function ChatView() {
           </Field>
         </Modal>
       )}
-    </div>
+        {toast && <Toaster toast={toast} />}
+      </div>
   );
 }
 

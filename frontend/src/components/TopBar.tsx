@@ -8,18 +8,26 @@ import { Tooltip } from "./Tooltip";
 function EditableName({
   name,
   label,
+  description,
+  descriptionLabel,
   onRename,
 }: {
   name: string;
   label: string;
-  onRename?: (v: string) => void;
+  description?: string;
+  descriptionLabel?: string;
+  /** Receives the committed name plus trimmed description (may be ""). */
+  onRename?: (name: string, description?: string) => void;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
+  const [draftDescription, setDraftDescription] = useState(description ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setDraft(name), [name]);
+  useEffect(() => setDraftDescription(description ?? ""), [description]);
 
   useEffect(() => {
     if (editing) {
@@ -28,32 +36,114 @@ function EditableName({
     }
   }, [editing]);
 
-  const commit = () => {
+  /* close the details popover when clicking anywhere else */
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) commitRef.current();
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [editing]);
+
+  const commitRef = useRef(() => {});
+  commitRef.current = () => {
     setEditing(false);
     const next = draft.trim();
-    if (next && next !== name) onRename?.(next);
-    else setDraft(name);
+    const nextDescription = draftDescription.trim();
+    if ((!next || next === name) && nextDescription === (description ?? "")) {
+      setDraft(name);
+      setDraftDescription(description ?? "");
+      return;
+    }
+    onRename?.(next || name, nextDescription);
   };
+
+  const commit = () => commitRef.current();
 
   if (editing) {
     return (
-      <input
-        ref={inputRef}
-        value={draft}
-        aria-label={label}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") {
-            setDraft(name);
-            setEditing(false);
-          }
-        }}
-        style={{ width: `${Math.max(90, Math.min(320, draft.length * 7.4 + 22))}px` }}
-        className="h-[26px] rounded-md border border-ink-500 bg-ink-850 px-1.5 text-[13px] font-medium text-ink-50 outline-none"
-      />
+      <div ref={wrapRef} className="relative">
+        <input
+          ref={inputRef}
+          value={draft}
+          aria-label={label}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") {
+              setDraft(name);
+              setDraftDescription(description ?? "");
+              setEditing(false);
+            }
+          }}
+          style={{ width: `${Math.max(90, Math.min(320, draft.length * 7.4 + 22))}px` }}
+          className="h-[26px] rounded-md border border-ink-500 bg-ink-850 px-1.5 text-[13px] font-medium text-ink-50 outline-none"
+        />
+        <div className="absolute top-[calc(100%+6px)] left-0 z-50 w-[340px] rounded-lg border border-ink-650 bg-ink-900 p-3 shadow-[0_24px_60px_-16px_rgba(0,0,0,0.9)]">
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-ink-300">{label}</span>
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commit();
+                if (e.key === "Escape") {
+                  setDraft(name);
+                  setDraftDescription(description ?? "");
+                  setEditing(false);
+                }
+              }}
+              className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2 text-[12.5px] text-ink-50 outline-none focus:border-ink-500"
+            />
+          </label>
+          <label className="mt-2.5 block">
+            <span className="mb-1 block text-[11px] font-medium text-ink-300">
+              {descriptionLabel ?? t("editor.rename")}
+            </span>
+            <textarea
+              rows={3}
+              value={draftDescription}
+              onChange={(e) => setDraftDescription(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  commit();
+                }
+                if (e.key === "Escape") {
+                  setDraft(name);
+                  setDraftDescription(description ?? "");
+                  setEditing(false);
+                }
+              }}
+              className="w-full resize-none rounded-md border border-ink-700 bg-ink-850 px-2 py-1.5 text-[12.5px] text-ink-50 outline-none focus:border-ink-500"
+            />
+          </label>
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(name);
+                setDraftDescription(description ?? "");
+                setEditing(false);
+              }}
+              className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              onClick={commit}
+              className="h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-ink-950 transition hover:bg-white"
+            >
+              {t("common.save")}
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -80,6 +170,8 @@ export function TopBar({
   pipelineName,
   version,
   executorName,
+  description,
+  descriptionLabel,
   busy,
   onRename,
   dirty,
@@ -102,8 +194,11 @@ export function TopBar({
   version?: string;
   /** Set when the edited pipeline targets a remote executor. */
   executorName?: string;
+  /** Current description shown/edited alongside the name. */
+  description?: string;
+  descriptionLabel?: string;
   busy?: string | null;
-  onRename?: (name: string) => void;
+  onRename?: (name: string, description?: string) => void;
   dirty: boolean;
   running: boolean;
   onBack: () => void;
@@ -182,7 +277,13 @@ export function TopBar({
               {parentTitle}
             </button>
             <Icon name="ChevronRight" className="h-3 w-3 shrink-0 text-ink-600" />
-            <EditableName name={pipelineName ?? ""} label={t("editor.rename")} onRename={onRename} />
+            <EditableName
+              name={pipelineName ?? ""}
+              label={t("editor.rename")}
+              description={description}
+              descriptionLabel={descriptionLabel}
+              onRename={(n, d) => onRename?.(n, d)}
+            />
             {executorName && (
               <Badge tone="muted" className="ml-0.5 inline-flex items-center gap-1 border-violet-500/30 bg-violet-500/10 text-violet-300">
                 {executorName}

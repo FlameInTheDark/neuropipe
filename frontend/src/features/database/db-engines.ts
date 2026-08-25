@@ -22,7 +22,7 @@ export interface EngineField {
 }
 
 export interface DbEngine {
-  id: "sqlite" | "postgres" | "mysql";
+  id: "sqlite" | "postgres" | "mysql" | "duckdb";
   name: string;
   icon: string;
   /** i18n key of the short blurb shown in the picker */
@@ -39,6 +39,12 @@ export const DB_ENGINES: DbEngine[] = [
     name: "SQLite",
     icon: "HardDrive",
     blurbKey: "dbnew.blurbSqlite",
+    modes: ["file"],
+  },  {
+    id: "duckdb",
+    name: "DuckDB",
+    icon: "Database",
+    blurbKey: "dbnew.blurbDuckdb",
     modes: ["file"],
   },
   {

@@ -514,7 +514,7 @@ export interface UiPipeline {
   name: string;
   desc: string;
   icon: string;
-  status: "published" | "draft" | "legacy";
+  status: "published" | "draft";
   version: string;
   triggers: number;
   updated: string;
@@ -531,7 +531,7 @@ export function pipelineFromBackend(p: Omit<import("./types").PipelineSummary, "
     name: p.name,
     desc: p.description,
     icon: p.icon || "Cable",
-    status: p.status === "active" ? "published" : p.status === "legacy" ? "legacy" : "draft",
+    status: p.status === "active" ? "published" : "draft",
     version: p.publishedRevision > 0 ? `v${p.publishedRevision}` : i18n.t("pipelines.draft"),
     triggers: p.triggerCount ?? 0,
     updated: formatDateTime(p.updatedAt),

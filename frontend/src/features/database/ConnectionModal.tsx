@@ -53,7 +53,7 @@ export function ConnectionModal({
   const [saving, setSaving] = useState(false);
 
   const engine = engineById(driver);
-  const mode: ConnMode = driver === "sqlite" ? "file" : "server";
+  const mode: ConnMode = driver === "sqlite" || driver === "duckdb" ? "file" : "server";
 
   const set = (k: string, v: string) => {
     setValues((prev) => ({ ...prev, [k]: v }));
@@ -81,7 +81,7 @@ export function ConnectionModal({
       name: name.trim(),
       driver,
     };
-    if (driver === "sqlite") {
+    if (driver === "sqlite" || driver === "duckdb") {
       req.path = values.path ?? "";
     } else {
       req.host = values.host ?? "";
@@ -127,7 +127,7 @@ export function ConnectionModal({
     try {
       const req = buildRequest();
       if (existing) await desktop.updateDatabase(req);
-      else if (driver === "sqlite" && createNewFile) await desktop.createDatabase(req);
+      else if ((driver === "sqlite" || driver === "duckdb") && createNewFile) await desktop.createDatabase(req);
       else await desktop.registerDatabase(req);
       onSaved();
     } catch {
@@ -136,7 +136,7 @@ export function ConnectionModal({
   };
 
   const preview = useMemo(() => {
-    if (driver === "sqlite") return `sqlite://${values.path || ":"}`;
+    if (driver === "sqlite" || driver === "duckdb") return `${driver}://${values.path || ":"}`;
     const auth = values.username || "user";
     const host = values.host || "localhost";
     const port = values.port || engine.defaultPort || "";

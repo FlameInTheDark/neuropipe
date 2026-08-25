@@ -783,12 +783,8 @@ function ModelsPanel({
               )}
             </div>
 
-            <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-4 text-[11px] text-ink-500">
-              <span className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                {t("models.localOnly")}
-              </span>
-              <span className="ml-auto">{draft.contentDirectory}</span>
+            <div className="flex h-9 shrink-0 items-center border-t border-seam px-4 text-[11px] text-ink-500">
+              <span className="ml-auto truncate">{draft.contentDirectory}</span>
             </div>
           </>
         )}
@@ -941,10 +937,12 @@ function InstalledModelInfo({
       </div>
 
       <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-4 text-[11px] text-ink-500">
-        <span className="flex items-center gap-1.5">
-          <span className={cn("h-1.5 w-1.5 rounded-full", active ? "bg-emerald-400" : "bg-ink-600")} />
-          {active ? t("models.inUse") : t("models.localOnly")}
-        </span>
+        {active && (
+          <span className="flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            {t("models.inUse")}
+          </span>
+        )}
         <span className="ml-auto truncate">{model.size > 0 ? formatBytes(model.size) : ""}</span>
       </div>
     </>

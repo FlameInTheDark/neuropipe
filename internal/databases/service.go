@@ -69,7 +69,7 @@ func (s *Service) Create(ctx context.Context, request domain.SaveDatabaseRequest
 	if err != nil {
 		return domain.Database{}, err
 	}
-	if item.Driver == domain.DatabaseDriverSQLite {
+	if item.Driver == domain.DatabaseDriverSQLite || item.Driver == domain.DatabaseDriverDuckDB {
 		return s.createSQLite(ctx, item)
 	}
 	return s.createNetwork(ctx, item, request.Password)
@@ -129,7 +129,7 @@ func (s *Service) Register(ctx context.Context, request domain.SaveDatabaseReque
 	if err != nil {
 		return domain.Database{}, err
 	}
-	if item.Driver == domain.DatabaseDriverSQLite {
+	if item.Driver == domain.DatabaseDriverSQLite || item.Driver == domain.DatabaseDriverDuckDB {
 		return s.registerSQLite(ctx, item)
 	}
 	return s.createNetwork(ctx, item, request.Password)
@@ -170,7 +170,7 @@ func (s *Service) Update(ctx context.Context, request domain.SaveDatabaseRequest
 	if err != nil {
 		return domain.Database{}, err
 	}
-	if item.Driver == domain.DatabaseDriverSQLite {
+	if item.Driver == domain.DatabaseDriverSQLite || item.Driver == domain.DatabaseDriverDuckDB {
 		if _, err := os.Stat(item.Path); err != nil {
 			return domain.Database{}, fmt.Errorf("open database file: %w", err)
 		}
@@ -567,7 +567,7 @@ func validateMetadata(request domain.SaveDatabaseRequest) (domain.Database, erro
 		Options:     strings.TrimSpace(request.Options),
 	}
 	switch driver {
-	case domain.DatabaseDriverSQLite:
+	case domain.DatabaseDriverSQLite, domain.DatabaseDriverDuckDB:
 		path := strings.TrimSpace(request.Path)
 		if path == "" {
 			return domain.Database{}, fmt.Errorf("database path is required")

@@ -25,6 +25,7 @@ export function CommandPalette({
   const [q, setQ] = useState(``);
   const [i, setI] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     if (open) {
@@ -33,6 +34,13 @@ export function CommandPalette({
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
+
+  /* keep the keyboard-highlighted command inside the scrolled list */
+  useEffect(() => {
+    const el = listRef.current?.children[i] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i, open]);
 
   const results = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -78,7 +86,7 @@ export function CommandPalette({
             esc
           </kbd>
         </div>
-        <ul className="max-h-[320px] overflow-y-auto p-1.5">
+        <ul ref={listRef} className="max-h-[320px] overflow-y-auto p-1.5">
           {results.length === 0 && (
             <li className="px-3 py-6 text-center text-[12.5px] text-ink-500">{t("palette.noMatches")}</li>
           )}

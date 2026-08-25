@@ -50,7 +50,6 @@ export default function App() {
     notify,
     definitionIndex: workspace.definitionIndex,
     runningMap: workspace.running,
-    onViewport: setView,
   });
 
   /* ---------- shell state ---------- */
@@ -131,6 +130,16 @@ export default function App() {
     nav.goto(id);
   }, [nav, graph.dirty, confirmLeave]);
 
+  /* freshly opened graphs fit themselves into the visible canvas area,
+     like pressing "Fit graph to view" */
+  const editorTargetId = nav.editingPipeline?.id ?? nav.editingFunction?.id ?? null;
+  useEffect(() => {
+    if (!nav.inEditor || !editorTargetId) return;
+    const frame = requestAnimationFrame(() => fitRef.current?.());
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorTargetId, nav.inEditor]);
+
   useEffect(() => {
     if (!nav.inEditor) setSavedAt(null);
   }, [nav.inEditor]);
@@ -165,6 +174,36 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.refreshReports]);
 
+  /* ---------- per-page data refresh ---------- */
+
+  /* Anything outside the app (assistant authoring tools, executor runs,
+     API clients) can mutate workspace data while the user is elsewhere.
+     Re-reading on section entry keeps lists honest without polling. */
+  useEffect(() => {
+    if (nav.inEditor) return;
+    switch (nav.rail) {
+      case "pipelines":
+        void workspace.refresh();
+        break;
+      case "functions":
+        void workspace.refreshFunctions();
+        break;
+      case "variables":
+        void workspace.refreshVariables();
+        break;
+      case "reports":
+        void workspace.refreshReports();
+        break;
+      case "board":
+      case "triggers":
+      case "schedules":
+      case "runs":
+        void workspace.refreshTriggers();
+        break;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nav.rail, nav.inEditor]);
+
   /* ---------- tray menu labels follow the locale ---------- */
 
   useEffect(() => {
@@ -189,6 +228,7 @@ export default function App() {
         const saved: Pipeline = await desktop.savePipeline({
           ...graph.pipeline,
           name: nav.editingPipeline.name,
+          description: nav.editingPipeline.desc ?? graph.pipeline.description,
           draftDefinition,
         });
         graph.setDirty(false);
@@ -208,6 +248,7 @@ export default function App() {
         const item = graph.serializeFunction(view);
         if (!item) return;
         item.name = nav.editingFunction.name;
+        item.description = nav.editingFunction.desc;
         const saved = await desktop.saveFunction(item);
         graph.setDirty(false);
         nav.updateEditingFunction({ name: saved.name });
@@ -256,17 +297,23 @@ export default function App() {
   }, [nav, graph, view, busyAction, notify, t]);
 
   const rename = useCallback(
-    (name: string) => {
+    (name: string, description?: string) => {
       const next = name.trim();
       if (!next) return;
+      const nextDescription = (description ?? "").trim();
       if (nav.editingFunction) {
-        if (next === nav.editingFunction.name) return;
-        nav.updateEditingFunction({ name: next });
+        const nameChanged = next !== nav.editingFunction.name;
+        const descChanged = nextDescription !== nav.editingFunction.desc;
+        if (!nameChanged && !descChanged) return;
+        nav.updateEditingFunction({ name: next, desc: nextDescription });
         graph.setDirty(true);
         return;
       }
-      if (!nav.editingPipeline || next === nav.editingPipeline.name) return;
-      nav.updateEditingPipeline({ name: next });
+      if (!nav.editingPipeline) return;
+      const nameChanged = next !== nav.editingPipeline.name;
+      const descChanged = nextDescription !== (nav.editingPipeline.desc ?? "");
+      if (!nameChanged && !descChanged) return;
+      nav.updateEditingPipeline({ name: next, desc: nextDescription });
       graph.setDirty(true);
     },
     [nav, graph],
@@ -495,6 +542,8 @@ export default function App() {
           parentTitle={nav.editorKind === "function" ? t("nav.functions") : t("nav.pipelines")}
           pipelineName={nav.editingFunction?.name ?? nav.editingPipeline?.name}
           executorName={nav.editingPipeline?.executorName}
+          description={nav.editingFunction?.desc ?? nav.editingPipeline?.desc}
+          descriptionLabel={t("editor.descriptionLabel")}
           version={
             nav.editorKind === "function"
               ? nav.editingFunction?.publishedRevision

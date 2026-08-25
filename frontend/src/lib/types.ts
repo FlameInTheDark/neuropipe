@@ -302,7 +302,7 @@ export interface SaveGlobalVariableRequest {
   defaultValue: unknown;
 }
 
-export type DatabaseDriver = "sqlite" | "postgres" | "mysql";
+export type DatabaseDriver = "sqlite" | "postgres" | "mysql" | "duckdb";
 export type DatabaseStatus = "unknown" | "connected" | "error" | "unverified";
 
 export interface Database {

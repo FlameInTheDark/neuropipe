@@ -168,6 +168,8 @@ export const desktop = {
   saveChatConversation: (conversation: ChatConversation) => call<ChatConversation>("SaveChatConversation", conversation),
   deleteChatConversation: (id: string) => call<void>("DeleteChatConversation", id),
   listChatMessages: (conversationId: string) => call<ChatMessage[]>("ListChatMessages", conversationId),
+  listChatMessagesPage: (conversationId: string, offset: number, limit: number) =>
+    call<{ messages: ChatMessage[]; hasMore: boolean; total: number }>("ListChatMessagesPage", conversationId, offset, limit),
   listChatRuns: (conversationId: string) => call<ChatRun[]>("ListChatRuns", conversationId),
   listChatRunEvents: (chatRunId: string) => call<ChatRunEvent[]>("ListChatRunEvents", chatRunId),
   sendChatMessage: (conversationId: string, text: string) => call<ChatRun>("SendChatMessage", conversationId, text),

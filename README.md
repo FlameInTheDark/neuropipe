@@ -68,6 +68,12 @@ The remote-executor gRPC contract is generated with `protoc`; regenerate it afte
 task gen:proto
 ```
 
+DuckDB database support is opt-in on Windows (its static libs need an MSVC-compatible link step). Build with `-tags duckdb` to include it:
+
+```bash
+go build -tags duckdb -o build/bin/neuropipe.exe
+```
+
 The standalone pipeline executor (Windows/Linux/macOS, no cgo) is built with:
 
 ```bash

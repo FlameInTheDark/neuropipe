@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Database, DataType, GlobalVariableSummary, SaveGlobalVariableRequest } from "@/lib/types";
+import Editor from "@monaco-editor/react";
+import type { Database, DataType, DatabaseTable, GlobalVariableSummary, SaveGlobalVariableRequest, SQLResult } from "@/lib/types";
 import { desktop } from "@/lib/bridge";
 import { formatDateTime, valuePreview } from "@/lib/format";
 import type { Workspace } from "@/features/workspace/useWorkspace";
@@ -249,13 +250,40 @@ function parseDefault(raw: string, dataType: DataType): unknown {
 
 /* ---------------- Datastores ---------------- */
 
+
+/** Quotes an identifier for the target dialect. */
+function quoteIdent(driver: string, name: string): string {
+  return driver === "mysql" ? "`" + name + "`" : '"' + name + '"';
+}
+
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 export function DatastoresView() {
   const { t } = useTranslation();
   const [databases, setDatabases] = useState<Database[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [schema, setSchema] = useState<{ name: string; columns: number }[] | null>(null);
+  const [schemaTables, setSchemaTables] = useState<DatabaseTable[] | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Database | null>(null);
+
+  /* detail tabs: schema / data browser / SQL query */
+  const [tab, setTab] = useState<"schema" | "data" | "query">("schema");
+  const [expandedTable, setExpandedTable] = useState<string | null>(null);
+  const [dataTable, setDataTable] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+const [pageSize, setPageSize] = useState(50);
+  const [rowsPage, setRowsPage] = useState<SQLResult | null>(null);
+  const [totalRows, setTotalRows] = useState<number | null>(null);
+  const [loadingRows, setLoadingRows] = useState(false);
+  const [rowsError, setRowsError] = useState<string | null>(null);
+  const [queryText, setQueryText] = useState("");
+  const [queryResult, setQueryResult] = useState<SQLResult | null>(null);
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [queryRunning, setQueryRunning] = useState(false);
 
   const load = async () => {
     const list = await desktop.listDatabases();
@@ -270,13 +298,23 @@ export function DatastoresView() {
   const selected = databases.find((d) => d.id === selectedId) ?? databases[0];
 
   useEffect(() => {
-    setSchema(null);
+    setSchemaTables(null);
+    setExpandedTable(null);
+    setDataTable(null);
+    setPage(0);
+    setRowsPage(null);
+    setTotalRows(null);
+    setRowsError(null);
+    setQueryText("");
+    setQueryResult(null);
+    setQueryError(null);
+    setTab("schema");
     if (!selected) return;
     let cancelled = false;
     desktop
       .inspectDatabase(selected.id)
-      .then((s) => !cancelled && setSchema(s.tables.map((tb) => ({ name: tb.name, columns: tb.columns.length }))))
-      .catch(() => !cancelled && setSchema([]));
+      .then((s) => !cancelled && setSchemaTables(s.tables))
+      .catch(() => !cancelled && setSchemaTables([]));
     return () => {
       cancelled = true;
     };
@@ -291,6 +329,72 @@ export function DatastoresView() {
       /* status pill reflects the failure */
     }
   };
+
+  /** Loads one page of table rows plus a total count. */
+  const loadRows = useCallback(
+    async (page: number, pageSize: number) => {
+      if (!selected || !dataTable) return;
+      const quoted = quoteIdent(selected.driver, dataTable);
+      setLoadingRows(true);
+      setRowsError(null);
+      try {
+        const rows = await desktop.debugDatabase({
+          databaseId: selected.id,
+          sql: "SELECT * FROM " + quoted + " LIMIT " + pageSize + " OFFSET " + page * pageSize,
+          parameters: [],
+        });
+        const count = await desktop.debugDatabase({
+          databaseId: selected.id,
+          sql: "SELECT COUNT(*) AS n FROM " + quoted,
+          parameters: [],
+        });
+        const n = Number(count.rows[0]?.n);
+        setRowsPage(rows);
+        setTotalRows(Number.isFinite(n) ? n : null);
+      } catch (e) {
+        setRowsPage(null);
+        setTotalRows(null);
+        setRowsError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoadingRows(false);
+      }
+    },
+    [selected, dataTable],
+  );
+
+  const runQuery = async () => {
+    if (!selected || !queryText.trim() || queryRunning) return;
+    setQueryRunning(true);
+    setQueryError(null);
+    try {
+      setQueryResult(await desktop.debugDatabase({ databaseId: selected.id, sql: queryText, parameters: [] }));
+    } catch (e) {
+      setQueryResult(null);
+      setQueryError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQueryRunning(false);
+    }
+  };
+
+  /** Opens a table in the Data tab (used by schema rows). */
+  const openTableData = (name: string) => {
+    if (!selected) return;
+    setDataTable(name);
+    setPage(0);
+    setTab("data");
+    void loadRowsRef.current(0, pageSize);
+  };
+
+  const loadRowsRef = useRef(loadRows);
+  useEffect(() => {
+    loadRowsRef.current = loadRows;
+  }, [loadRows]);
+
+  /* fetch rows whenever the Data tab's page, page size or table changes */
+  useEffect(() => {
+    if (tab !== "data" || !dataTable) return;
+    void loadRowsRef.current(page, pageSize);
+  }, [tab, dataTable, page, pageSize]);
 
   const removeDb = async (db: Database) => {
     const ok = await ask({
@@ -370,7 +474,7 @@ export function DatastoresView() {
             <EmptyState icon="Database" title={t("dbnew.noSelectionTitle")} hint={t("dbnew.noSelectionHint")} />
           </div>
         ) : (
-        <div className="fade-in min-w-0 flex-1 overflow-y-auto p-4">
+        <div className="fade-in flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
           <>
             <div className="flex items-start gap-3">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-ink-700 bg-ink-850 text-ink-100">
@@ -411,7 +515,7 @@ export function DatastoresView() {
               <div className="mt-4 grid grid-cols-4 gap-2.5">
                 {[
                   [t("datastores.driver"), selected.driver.toUpperCase()],
-                  [t("datastores.tables"), String(schema?.length ?? "…")],
+                  [t("datastores.tables"), String(schemaTables?.length ?? "…")],
                   [
                     t("datastores.updated"),
                     formatDateTime(selected.updatedAt),
@@ -425,29 +529,264 @@ export function DatastoresView() {
                 ))}
               </div>
 
-              <h3 className="mt-5 mb-2 text-[10.5px] font-medium tracking-[0.09em] text-ink-400 uppercase">
-                {t("sql.schema")}
-              </h3>
-              <div className="overflow-hidden rounded-xl border border-ink-700/80">
-                {(schema ?? []).map((tb, i) => (
-                  <div
-                    key={tb.name}
-                    className={cn(
-                      "flex items-center gap-2.5 bg-ink-850/50 px-3 py-2 transition hover:bg-ink-850",
-                      i > 0 && "border-t border-seam",
-                    )}
+              {/* tabs: schema / data / query */}
+              <div className="mt-5 flex items-center gap-2">
+                <div className="flex items-center gap-0.5 rounded-lg border border-ink-700 bg-ink-900 p-0.5">
+                  {([
+                    { id: "schema", label: t("sql.schema"), icon: "List" },
+                    { id: "data", label: t("datastores.tabData"), icon: "Table2" },
+                    { id: "query", label: t("datastores.tabQuery"), icon: "Terminal" },
+                  ] as const).map((tb) => (
+                    <button
+                      key={tb.id}
+                      onClick={() => setTab(tb.id)}
+                      aria-pressed={tab === tb.id}
+                      className={cn(
+                        "flex h-7 items-center gap-1.5 rounded-md px-3 text-[11.5px] transition",
+                        tab === tb.id ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                      )}
+                    >
+                      <Icon name={tb.icon} className="h-3 w-3" />
+                      {tb.label}
+                    </button>
+                  ))}
+                </div>
+                {tab === "data" && schemaTables !== null && schemaTables.length > 0 && (
+                  <Dropdown
+                    value={dataTable ?? ""}
+                    onChange={(name) => {
+                      setDataTable(name || null);
+                      setPage(0);
+                    }}
+                    className="w-[220px]"
+                    placeholder={t("datastores.pickTable")}
+                    options={schemaTables.map((tb) => ({ value: tb.name, label: tb.name, icon: "Table2" }))}
+                  />
+                )}
+                {tab === "data" && (
+                  <Button
+                    variant="ghost"
+                    icon="RefreshCw"
+                    disabled={loadingRows}
+                    onClick={() => {
+                      if (!selected) return;
+                      void desktop
+                        .inspectDatabase(selected.id)
+                        .then((s) => setSchemaTables(s.tables))
+                        .catch(() => undefined);
+                      if (dataTable) void loadRowsRef.current(page, pageSize);
+                    }}
                   >
-                    <Icon name="Table2" className="h-3.5 w-3.5 text-ink-500" />
-                    <span className="font-mono text-[11.5px] text-ink-100">{tb.name}</span>
-                    <span className="ml-auto font-mono text-[10.5px] text-ink-500">
-                      {t("datastores.columns", { count: tb.columns })}
-                    </span>
-                  </div>
-                ))}
-                {schema !== null && schema.length === 0 && (
-                  <p className="bg-ink-850/40 px-3 py-3 text-[12px] text-ink-500">{t("sql.noTables")}</p>
+                    {t("common.refresh")}
+                  </Button>
                 )}
               </div>
+
+              {tab === "schema" && (
+                <div className="overflow-hidden rounded-xl border border-ink-700/80">
+                  {(schemaTables ?? []).map((tb, i) => {
+                    const expanded = expandedTable === tb.name;
+                    return (
+                      <div key={tb.name} className={cn("bg-ink-850/50", i > 0 && "border-t border-seam")}>
+                        <button
+                          onClick={() => setExpandedTable(expanded ? null : tb.name)}
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-ink-850"
+                        >
+                          <Icon name="ChevronRight" className={cn("h-3 w-3 shrink-0 text-ink-500 transition-transform", expanded && "rotate-90")} />
+                          <Icon name="Table2" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
+                          <span className="font-mono text-[11.5px] text-ink-100">{tb.name}</span>
+                          <span className="ml-auto font-mono text-[10.5px] text-ink-500">
+                            {t("datastores.columns", { count: tb.columns.length })}
+                          </span>
+                        </button>
+                        {expanded && (
+                          <div className="border-t border-seam/70 bg-ink-950/40 px-6 py-2">
+                            <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("datastores.columnsTitle")}</p>
+                            {tb.columns.map((col) => (
+                              <div key={col.name} className="flex items-baseline gap-2 py-0.5">
+                                <span className="font-mono text-[11px] text-ink-100">{col.name}</span>
+                                <span className="font-mono text-[10.5px] text-sky-300/70">{col.dataType}</span>
+                                {col.primaryKey && (
+                                  <span className="rounded bg-amber-400/15 px-1 font-mono text-[9.5px] text-amber-300">PK</span>
+                                )}
+                                {!col.nullable && <span className="text-[9.5px] text-ink-500">NOT NULL</span>}
+                                {col.default && <span className="truncate font-mono text-[10px] text-ink-600">= {col.default}</span>}
+                              </div>
+                            ))}
+                            {tb.indexes.length > 0 && (
+                              <>
+                                <p className="mb-1 mt-2 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("datastores.indexes")}</p>
+                                {tb.indexes.map((ix) => (
+                                  <div key={ix.name} className="flex items-baseline gap-2 py-0.5">
+                                    <span className="font-mono text-[11px] text-ink-200">{ix.name}</span>
+                                    {ix.unique && <span className="text-[9.5px] text-violet-300/80">UNIQUE</span>}
+                                    <span className="truncate font-mono text-[10px] text-ink-500">({ix.columns.join(", ")})</span>
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                            <Button variant="ghost" icon="Table2" className="mt-2" onClick={() => { openTableData(tb.name); }}>
+                              {t("datastores.viewData")}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {schemaTables !== null && schemaTables.length === 0 && (
+                    <p className="bg-ink-850/40 px-3 py-3 text-[12px] text-ink-500">{t("sql.noTables")}</p>
+                  )}
+                </div>
+              )}
+
+              {tab === "data" && (
+                dataTable ? (
+                  <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/60 flex flex-col">
+                    <div className="flex items-center gap-2 border-b border-seam px-3 py-1.5 text-[11px] text-ink-400">
+                      <Icon name="Table2" className="h-3.5 w-3.5 text-ink-500" />
+                      <span className="font-mono text-[11.5px] text-ink-200">{dataTable}</span>
+                      <span className="ml-auto font-mono text-[10.5px]">
+                        {loadingRows ? t("common.loading") : totalRows !== null ? t("datastores.rowsTotal", { count: totalRows }) : ""}
+                      </span>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-auto">
+                      {rowsError ? (
+                        <p className="flex items-start gap-2 bg-rose-500/10 px-4 py-3 text-[11.5px] text-rose-300">
+                          <Icon name="AlertTriangle" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          {rowsError}
+                        </p>
+                      ) : rowsPage && rowsPage.columns.length > 0 ? (
+                        <table className="w-full border-collapse text-left">
+                          <thead className="sticky top-0 bg-ink-900">
+                            <tr className="border-b border-seam">
+                              {rowsPage.columns.map((c) => (
+                                <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-ink-300">{c}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rowsPage.rows.map((row, i) => (
+                              <tr key={i} className="border-b border-seam/60 last:border-b-0 hover:bg-ink-850/60">
+                                {rowsPage.columns.map((c) => (
+                                  <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-ink-200">
+                                    {cellText(row[c])}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                            {rowsPage.rows.length === 0 && (
+                              <tr><td colSpan={Math.max(rowsPage.columns.length, 1)} className="px-3 py-2 text-[11.5px] text-ink-500">{t("sql.noResult")}</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      ) : null}
+                    </div>
+                    <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-3 text-[11px] text-ink-500">
+                      <select
+                        value={pageSize}
+                        onChange={(e) => {
+                          setPage(0);
+                          setPageSize(Number(e.target.value));
+                        }}
+                        aria-label={t("datastores.perPage", { count: pageSize })}
+                        className="h-6 rounded-md border border-ink-700 bg-ink-850 px-1 font-mono text-[10.5px] text-ink-200 [color-scheme:dark] focus:border-ink-500 focus:outline-none"
+                      >
+                        {[25, 50, 100, 200].map((n) => (
+                          <option key={n} value={n}>{n}</option>
+                        ))}
+                      </select>
+                      <Button variant="ghost" icon="ChevronLeft" disabled={page === 0 || loadingRows}
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                        {t("datastores.prevPage")}
+                      </Button>
+                      <span className="shrink-0">{t("datastores.page")}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={page + 1}
+                        onChange={(e) => {
+                          const next = Number(e.target.value);
+                          if (Number.isFinite(next) && next >= 1) setPage(next - 1);
+                        }}
+                        aria-label={t("datastores.page")}
+                        className="h-6 w-[52px] rounded-md border border-ink-700 bg-ink-850 px-1.5 text-center font-mono text-[10.5px] tabular-nums text-ink-200 [color-scheme:dark] focus:border-ink-500 focus:outline-none"
+                      />
+                      <Button variant="ghost" icon="ChevronRight"
+                        disabled={loadingRows || (totalRows !== null && (page + 1) * pageSize >= totalRows)}
+                        onClick={() => setPage((p) => p + 1)}>
+                        {t("datastores.nextPage")}
+                      </Button>
+                      {totalRows !== null && (
+                        <span className="ml-auto shrink-0 font-mono text-[10.5px]">
+                          {t("datastores.rowsTotal", { count: totalRows })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid flex-1 place-items-center overflow-hidden rounded-xl border border-ink-700/80">
+                    <EmptyState icon="Table2" title={t("datastores.pickTable")} hint={t("sql.noTables")} />
+                  </div>
+                )
+              )}
+
+              {tab === "query" && (
+                <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/60 p-2">
+                  <div className="relative min-h-[160px] flex-1 overflow-hidden rounded-lg border border-ink-700 bg-ink-950">
+                    <Editor
+                      language="sql"
+                      value={queryText}
+                      onChange={(v) => setQueryText(v ?? "")}
+                      theme="vs-dark"
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 12.5,
+                        lineNumbers: "on",
+                        scrollBeyondLastLine: false,
+                        wordWrap: "on",
+                        automaticLayout: true,
+                        tabSize: 2,
+                      }}
+                      loading={<span className="absolute inset-0 grid place-items-center text-[12px] text-ink-500">{t("common.loading")}</span>}
+                    />
+                  </div>
+                  {queryError && (
+                    <p className="flex items-start gap-2 rounded-lg bg-rose-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-rose-300">
+                      <Icon name="AlertTriangle" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {queryError}
+                    </p>
+                  )}
+                  {queryResult && queryResult.columns.length > 0 && (
+                    <div className="max-h-[240px] overflow-auto rounded-lg border border-ink-700">
+                      <table className="w-full border-collapse text-left">
+                        <thead>
+                          <tr className="border-b border-seam bg-ink-850/60">
+                            {queryResult.columns.map((c) => (
+                              <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-ink-300">{c}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {queryResult.rows.map((row, i) => (
+                            <tr key={i} className="border-b border-seam/60 hover:bg-ink-850/60">
+                              {queryResult.columns.map((c) => (
+                                <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-ink-200">
+                                  {cellText(row[c])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="primary" icon={queryRunning ? "Loader2" : "Play"} spin={queryRunning} disabled={queryRunning || !queryText.trim()} onClick={() => void runQuery()}>
+                      {queryRunning ? t("common.loading") : t("sql.run")}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
         </div>
         )}

@@ -14,6 +14,8 @@ import { SegmentedControl } from "../components/primitives/SegmentedControl";
 import { Modal, ModalActions } from "../components/primitives/Modal";
 import { Field, TextInput, TextArea } from "../components/primitives/Field";
 import { cn } from "../utils/cn";
+import { useCtxMenu } from "../components/ContextMenu";
+import { ask } from "@/stores/confirmation";
 
 /* ---------------- Triggers ---------------- */
 
@@ -288,6 +290,7 @@ export function FunctionsView({ workspace, nav }: { workspace: Workspace; nav: N
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<"all" | UiFunctionSummary["kind"]>("all");
   const [createOpen, setCreateOpen] = useState(false);
+  const ctx = useCtxMenu();
 
   const list = useMemo(
     () =>
@@ -298,6 +301,58 @@ export function FunctionsView({ workspace, nav }: { workspace: Workspace; nav: N
       ),
     [workspace.functions, q, kind],
   );
+
+  const deleteFn = async (f: UiFunctionSummary) => {
+    const ok = await ask({
+      title: t("functions.deleteTitle"),
+      description: t("functions.deleteDescription", { name: f.name }),
+      confirmLabel: t("functions.deleteConfirm"),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await workspace.deleteFunction(f.id);
+      await workspace.refreshFunctions();
+    } catch {
+      workspace.notify(t("functionEditor.saveFailed"), "AlertTriangle");
+    }
+  };
+
+  const fnMenu = (e: React.MouseEvent, f: UiFunctionSummary) =>
+    ctx(e, [
+      {
+        label: t("functions.open"),
+        icon: "ArrowUpRight",
+        onSelect: () => void nav.openFunction(f),
+      },
+      ...(f.publishedRevision === 0
+        ? [
+            {
+              label: t("functions.publish"),
+              icon: "UploadCloud",
+              onSelect: () => {
+                void (async () => {
+                  try {
+                    const full = await workspace.getFunction(f.id);
+                    await workspace.publishFunction(full);
+                    await workspace.refreshFunctions();
+                    workspace.notify(t("editor.published"), "UploadCloud");
+                  } catch {
+                    workspace.notify(t("functions.publishFailed"), "AlertTriangle");
+                  }
+                })();
+              },
+            },
+          ]
+        : []),
+      { type: "sep" as const },
+      {
+        label: t("common.delete"),
+        icon: "Trash2",
+        danger: true,
+        onSelect: () => void deleteFn(f),
+      },
+    ]);
 
   const create = async (req: { name: string; description: string; kind: "function" | "tool"; mode: "pure" | "impure" }) => {
     try {
@@ -348,7 +403,12 @@ export function FunctionsView({ workspace, nav }: { workspace: Workspace; nav: N
           {list.map((f) => {
             const meta = FN_KIND_META[f.kind];
             return (
-              <Card key={f.id} onClick={() => void nav.openFunction(f)} className="group flex flex-col p-3.5">
+              <Card
+                key={f.id}
+                onClick={() => void nav.openFunction(f)}
+                onContextMenu={(e) => fnMenu(e, f)}
+                className="group flex flex-col p-3.5"
+              >
                 <div className="flex items-start gap-2.5">
                   <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850", meta.tone)}>
                     <Icon name={meta.icon} className="h-4 w-4" />

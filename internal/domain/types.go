@@ -641,6 +641,7 @@ const (
 	DatabaseDriverSQLite   DatabaseDriver = "sqlite"
 	DatabaseDriverPostgres DatabaseDriver = "postgres"
 	DatabaseDriverMySQL    DatabaseDriver = "mysql"
+	DatabaseDriverDuckDB   DatabaseDriver = "duckdb"
 )
 
 // DatabaseStatus reports the last-known connection state of a database.

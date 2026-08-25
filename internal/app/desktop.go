@@ -192,7 +192,10 @@ func New(version string) (*Desktop, error) {
 	)
 	bridge.twitch = desktop.twitch
 	desktop.runs.SetRemoteDispatcher(executorDispatch{manager: desktop.remote})
-	desktop.chat = chatservice.NewService(store, desktop.runs, desktop.providers, desktop.emit)
+	desktop.chat = chatservice.NewService(store, desktop.runs, desktop.providers, desktop.emit,
+		chatservice.WithAuthoring(chatAuthoring{desktop: desktop}),
+		chatservice.WithNodeCatalog(registry),
+	)
 	desktop.scheduler = scheduler.New(store, desktop.runs)
 	desktop.hotkeys = hotkey.New(store, desktop.runs)
 	desktop.configureContentDirectory(contentDirectory)
@@ -744,6 +747,12 @@ func (d *Desktop) DeleteChatConversation(id string) error {
 // ListChatMessages returns a chronological, local-only conversation transcript.
 func (d *Desktop) ListChatMessages(conversationID string) ([]domain.ChatMessage, error) {
 	return d.store.ListChatMessages(d.context(), conversationID, 200)
+}
+
+// ListChatMessagesPage returns one backward page of the transcript so long
+// conversations load progressively instead of silently truncating.
+func (d *Desktop) ListChatMessagesPage(conversationID string, offset, limit int) (persistence.ChatMessagePage, error) {
+	return d.store.ListChatMessagesPaged(d.context(), conversationID, offset, limit)
 }
 
 // ListChatRuns returns visible work items for a conversation.

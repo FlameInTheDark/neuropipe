@@ -34,6 +34,8 @@ func dialectFor(driver domain.DatabaseDriver) dialect {
 		return &postgresDialect{}
 	case domain.DatabaseDriverMySQL:
 		return &mysqlDialect{}
+	case domain.DatabaseDriverDuckDB:
+		return &duckdbDialect{}
 	default:
 		return &sqliteDialect{}
 	}

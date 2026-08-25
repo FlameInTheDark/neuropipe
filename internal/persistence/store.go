@@ -1725,6 +1725,75 @@ func (s *Store) ListChatMessages(ctx context.Context, conversationID string, lim
 	return items, rows.Err()
 }
 
+// ChatMessagePage is one backward page of a conversation transcript.
+type ChatMessagePage struct {
+	Messages []domain.ChatMessage `json:"messages"`
+	HasMore  bool                 `json:"hasMore"`
+	// Total conversation rows; offsets count backwards from this.
+	Total int `json:"total"`
+}
+
+// ListChatMessagesPaged returns up to limit messages ending at offset rows
+// before the newest one, oldest-first. HasMore reports whether even older
+// rows exist, so long conversations page backwards instead of truncating.
+func (s *Store) ListChatMessagesPaged(ctx context.Context, conversationID string, offset, limit int) (ChatMessagePage, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	columns := []string{"id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at"}
+	recent := sqliteStatements.Select("rowid AS ordinal").
+		Columns(append([]string(nil), columns...)...).
+		From("chat_messages").
+		Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID)}).
+		OrderBy("created_at DESC", "rowid DESC").
+		Limit(uint64(offset + limit + 1))
+	rows, err := statements(s.db).Select(columns...).FromSelect(recent, "recent_messages").OrderBy("created_at ASC", "ordinal ASC").QueryContext(ctx)
+	if err != nil {
+		return ChatMessagePage{}, fmt.Errorf("list chat messages page: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	raw := make([]domain.ChatMessage, 0, limit)
+	for rows.Next() {
+		var item domain.ChatMessage
+		var toolCalls, created string
+		if err := rows.Scan(&item.ID, &item.ConversationID, &item.ChatRunID, &item.Role, &item.Content, &item.ToolCallID, &item.ToolName, &toolCalls, &created); err != nil {
+			return ChatMessagePage{}, fmt.Errorf("scan chat message: %w", err)
+		}
+		if err := decode(toolCalls, &item.ToolCalls); err != nil {
+			return ChatMessagePage{}, fmt.Errorf("decode chat tool calls: %w", err)
+		}
+		item.CreatedAt = parseTime(created)
+		raw = append(raw, item)
+	}
+	if err := rows.Err(); err != nil {
+		return ChatMessagePage{}, err
+	}
+	/* raw is ascending while `offset` counts backwards from the newest row,
+	   so the requested window sits at the tail of the slice; the +1 lookahead
+	   in the inner limit marks whether even older pages remain. */
+	end := len(raw) - offset
+	if end < 0 {
+		end = 0
+	}
+	start := end - limit
+	if start < 0 {
+		start = 0
+	}
+	page := ChatMessagePage{Messages: []domain.ChatMessage{}, HasMore: start > 0}
+	if end > start {
+		page.Messages = raw[start:end]
+	}
+	var total int
+	if err := statements(s.db).Select("COUNT(*)").From("chat_messages").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID)}).QueryRowContext(ctx).Scan(&total); err != nil {
+		return ChatMessagePage{}, fmt.Errorf("count chat messages: %w", err)
+	}
+	page.Total = total
+	return page, nil
+}
+
 // CreateChatRun creates a visible unit of work with the default status text.
 func (s *Store) CreateChatRun(ctx context.Context, conversationID string) (domain.ChatRun, error) {
 	run := domain.ChatRun{ID: uuid.NewString(), ConversationID: strings.TrimSpace(conversationID), Status: domain.RunPending, StatusText: "Working", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
