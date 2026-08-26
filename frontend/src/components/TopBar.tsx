@@ -255,7 +255,7 @@ export function TopBar({
         // only bare titlebar area toggles maximize — not buttons/inputs within
         if (e.target === e.currentTarget) void toggleMaximise();
       }}
-      className="flex h-11 shrink-0 items-center gap-2 border-b border-seam bg-ink-950 pr-2 pl-3 select-none"
+      className="relative flex h-11 shrink-0 items-center gap-2 border-b border-seam bg-ink-950 pr-2 pl-3 select-none"
     >
       {/* breadcrumb */}
       <nav style={noDragStyle} className="flex min-w-0 items-center gap-1.5 text-[13px]">
@@ -306,11 +306,12 @@ export function TopBar({
         )}
       </nav>
 
-      {/* command bar */}
+      {/* command bar — always centered relative to the title bar, regardless of
+          the widths of the breadcrumb (left) and actions (right). */}
       <button
         onClick={onCommand}
         style={noDragStyle}
-        className="mx-auto hidden h-7 w-[300px] items-center gap-2 rounded-md border border-ink-700/70 bg-ink-900/80 px-2.5 text-[12px] text-ink-400 transition hover:border-ink-600 hover:text-ink-200 lg:flex"
+        className="pointer-events-auto absolute left-1/2 top-1/2 hidden h-7 w-[300px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-md border border-ink-700/70 bg-ink-900/80 px-2.5 text-[12px] text-ink-400 transition hover:border-ink-600 hover:text-ink-200 lg:flex"
       >
         <Icon name="Search" className="h-3.5 w-3.5" />
         <span>{t("palette.search")}</span>
