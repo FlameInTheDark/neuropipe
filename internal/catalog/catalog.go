@@ -166,6 +166,9 @@ func builtins() []domain.NodeDefinition {
 	flowInput := []domain.NodePort{port("in", "Input", "flow", "#a1a1aa")}
 	flowOutput := []domain.NodePort{port("out", "Output", "flow", "#fafafa")}
 	llmToolInput := domain.NodePort{ID: "tools", Label: "Tools", Kind: domain.PinTool, Direction: domain.PinInput, Color: "#a78bfa"}
+	httpInputs := append(append([]domain.NodePort{}, flowInput...), domain.NodePort{ID: "headers", Label: "Headers", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataObject,
+		Type: &domain.TypeSpec{Kind: domain.TypeMap, Key: &domain.TypeSpec{Kind: domain.TypeString}, Value: &domain.TypeSpec{Kind: domain.TypeString}}, Color: "#e879f9", MaxConnections: 1,
+		IgnoreConfigFallback: true})
 	definitions := []domain.NodeDefinition{
 		node("trigger:button", "Triggers", "Button Trigger", "Launch this published pipeline from the Trigger board.", "play", "#fafafa", nil, buttonTriggerOutput,
 			[]domain.ConfigField{field("label", "Button label", "string", "Daily briefing", true), field("hotkey", "Global hotkey", "string", "Ctrl+Alt+B", false)}, map[string]any{"label": "Run pipeline", "icon": "play", "color": "#fafafa", "gridPosition": 0}),
@@ -181,9 +184,7 @@ func builtins() []domain.NodeDefinition {
 			[]domain.ConfigField{field("label", "Chat label", "string", "Assistant", true)}, map[string]any{"label": "Chat"}),
 
 		node("action:http", "Actions", "HTTP Request", "Call an HTTP endpoint and pass its JSON or text response downstream.", "globe", "#60a5fa",
-			append(append(append([]domain.NodePort{}, flowInput...), domain.NodePort{ID: "headers", Label: "Headers", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataObject,
-				Type: &domain.TypeSpec{Kind: domain.TypeMap, Key: &domain.TypeSpec{Kind: domain.TypeString}, Value: &domain.TypeSpec{Kind: domain.TypeString}}, Color: "#e879f9", MaxConnections: 1,
-				IgnoreConfigFallback: true})),
+			httpInputs,
 			append(flowOutput, httpResultOutput()),
 			[]domain.ConfigField{
 				field("url", "URL", "string", "https://api.example.com", true),
