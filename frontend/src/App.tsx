@@ -603,6 +603,7 @@ export default function App() {
                   onLibraryAdd={addNodeCentered}
                   library={workspace.library}
                   editorApi={{
+                    pipelines: workspace.pipelines,
                     secrets,
                     databases,
                     identities,

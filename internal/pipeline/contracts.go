@@ -101,6 +101,12 @@ func WithFunctionResolver(resolver FunctionResolver) EngineOption {
 	return func(engine *Engine) { engine.functions = resolver }
 }
 
+// WithPipelineLister enables nodes that read the workspace pipeline catalogue
+// (List Pipelines).
+func WithPipelineLister(lister PipelineLister) EngineOption {
+	return func(engine *Engine) { engine.pipelines = lister }
+}
+
 // WithNotificationSender enables the Desktop Notification action for an
 // engine. A nil sender keeps the engine usable in headless tests and tools.
 func WithNotificationSender(sender NotificationSender) EngineOption {

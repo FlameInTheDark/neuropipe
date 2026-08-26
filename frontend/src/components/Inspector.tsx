@@ -11,6 +11,8 @@ import { TextEditorModal } from "./TextEditorModal";
 import { CodeEditorModal } from "./CodeEditorModal";
 import { FormBuilderEditor } from "./FormBuilderEditor";
 import { RouteOptionsEditor, SchemaEditor, SwitchCasesEditor } from "./StructuredFieldEditors";
+import { HtmlExtractionsEditor } from "./HtmlExtractionsEditor";
+import { HeadersEditor } from "./HeadersEditor";
 import { TypeSpecField, specTopToken, tokenToPinDataType } from "./TypeSpecField";
 import { typeSpecFromDataType } from "../lib/type-spec";
 import { unmapDataType } from "../lib/adapters";
@@ -396,6 +398,15 @@ function InspectBody({
     ],
     [api.identities, t],
   );
+  const pipelineOptions = useMemo(
+    () =>
+      api.pipelines.map((p) => ({
+        value: p.id,
+        label: p.status === "published" ? p.name : `${p.name} · ${t("editor.draft")}`,
+        icon: "Workflow",
+      })),
+    [api.pipelines, t],
+  );
 
   return (
     <div key={node.id} className="fade-in min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -407,7 +418,13 @@ function InspectBody({
           code={String(node.values[codeKey] ?? "")}
           database={String(node.values[dbKey] ?? "") || api.databases[0]?.id || ""}
           databases={dbOptions}
-          inputs={node.inputs}
+          inputs={
+            codeKind === "js"
+              ? // The reserved "Code" input pin replaces this editor's code at
+                // runtime when wired — it must not be editable from within.
+                node.inputs.filter((p) => p.id !== "code")
+              : node.inputs
+          }
           outputs={node.outputs}
           api={api}
           onSave={(v, db) => {
@@ -500,6 +517,7 @@ function InspectBody({
                 dbOptions={dbOptions}
                 secretOptions={secretOptions}
                 identityOptions={identityOptions}
+                pipelineOptions={pipelineOptions}
                 onChange={onChange}
                 onExpand={(key, label) =>
                   f.type === "code-js" || f.type === "code-sql"
@@ -594,6 +612,7 @@ function InspectorField({
   dbOptions,
   secretOptions,
   identityOptions,
+  pipelineOptions,
   onChange,
   onExpand,
   onCode,
@@ -604,6 +623,7 @@ function InspectorField({
   dbOptions: DropdownOption[];
   secretOptions: DropdownOption[];
   identityOptions: { value: string; label: string }[];
+  pipelineOptions: DropdownOption[];
   onChange: (key: string, value: unknown) => void;
   onExpand: (key: string, label: string) => void;
   onCode: () => void;
@@ -630,7 +650,39 @@ function InspectorField({
     );
   }
 
-  /* structured editors restored from the previous UI */
+  /* structured editors restored from the previous UI */  if (field.kind === "http-headers") {
+    return <HeadersEditor label={field.label} value={raw} onChange={(next) => onChange(fieldKey, next)} />;
+  }
+
+  if (field.kind === "html-extractions") {
+    return <HtmlExtractionsEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />;
+  }
+
+  /* wire-type picker (Type Assert, JS output contracts) */
+  if (field.kind === "type-spec") {
+    let spec: TypeSpec | undefined;
+    if (typeof raw === "string") {
+      try {
+        spec = JSON.parse(raw) as TypeSpec;
+      } catch {
+        spec = undefined;
+      }
+    } else if (raw && typeof raw === "object") {
+      spec = raw as TypeSpec;
+    }
+    return (
+      <label className="block">
+        <span className="mb-1 block">
+          <Label text={field.label} required={field.required} />
+        </span>
+        <TypeSpecField
+          value={spec}
+          onChange={(next) => onChange(fieldKey, next)}
+        />
+      </label>
+    );
+  }
+
   if (field.kind === "json-schema") {
     return <SchemaEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />;
   }
@@ -678,7 +730,9 @@ function InspectorField({
           ? secretOptions
           : field.dynamic === "twitch-identity"
             ? identityOptions
-            : (field.options ?? []).map((o) => ({ value: o.value, label: o.label }));
+            : field.dynamic === "pipelines"
+              ? pipelineOptions
+              : (field.options ?? []).map((o) => ({ value: o.value, label: o.label }));
     return (
       <label className="block">
         <span className="mb-1 block">
@@ -687,8 +741,12 @@ function InspectorField({
         <Dropdown
           value={String(raw ?? "")}
           options={options}
+          placeholder={field.dynamic === "pipelines" ? t("editor.selectPipeline") : undefined}
           onChange={(nv) => onChange(fieldKey, nv)}
         />
+        {field.key === "pipelineId" && (
+          <span className="mt-1 block text-[10.5px] text-ink-500">{t("editor.pipelinePinOverride")}</span>
+        )}
       </label>
     );
   }

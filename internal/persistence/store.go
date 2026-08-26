@@ -722,6 +722,22 @@ func (s *Store) ListPipelines(ctx context.Context) ([]domain.PipelineSummary, er
 	return result, rows.Err()
 }
 
+// ListPublishedPipelines returns summaries for pipelines with an active
+// publication. Backs the List Pipelines node and the Run Pipeline selector.
+func (s *Store) ListPublishedPipelines(ctx context.Context) ([]domain.PipelineSummary, error) {
+	all, err := s.ListPipelines(ctx)
+	if err != nil {
+		return nil, err
+	}
+	published := make([]domain.PipelineSummary, 0, len(all))
+	for _, item := range all {
+		if item.Status == domain.PipelineActive && item.PublishedRevision > 0 {
+			published = append(published, item)
+		}
+	}
+	return published, nil
+}
+
 // GetPipeline loads an editor-ready pipeline.
 func (s *Store) GetPipeline(ctx context.Context, id string) (domain.Pipeline, error) {
 	var pipeline domain.Pipeline

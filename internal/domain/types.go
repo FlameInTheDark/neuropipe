@@ -801,6 +801,9 @@ type ConfigField struct {
 	Required    bool     `json:"required,omitempty"`
 	Secret      bool     `json:"secret,omitempty"`
 	VisibleWhen string   `json:"visibleWhen,omitempty"`
+	// Dynamic names an asynchronous option source rendered by the inspector
+	// ("pipelines"); it overrides static Options when set.
+	Dynamic string `json:"dynamic,omitempty"`
 }
 
 type Option struct {

@@ -639,6 +639,7 @@ function SqlParamPinRow({
         </Tooltip>
 
         <TypeSpecField
+          compact
           value={row.spec}
           onChange={(spec) => onPatch({ spec })}
         />

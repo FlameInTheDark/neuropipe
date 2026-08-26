@@ -34,6 +34,12 @@ type GlobalVariablesStore interface {
 	Append(name string, item any) ([]any, error)
 }
 
+// PipelineLister supplies published pipeline summaries to graph nodes such as
+// List Pipelines. Composition roots back it with the persistence store.
+type PipelineLister interface {
+	ListPublishedPipelines(ctx context.Context) ([]domain.PipelineSummary, error)
+}
+
 // Engine executes a validated graph without knowing where definitions are stored.
 type Engine struct {
 	registry      *catalog.Registry
@@ -43,6 +49,7 @@ type Engine struct {
 	reports       ReportWriter
 	reportContext ReportContext
 	functions     FunctionResolver
+	pipelines     PipelineLister
 	notifications NotificationSender
 	chat          ChatWriter
 	javascript    nodes.JavaScriptHost
@@ -89,7 +96,36 @@ func (e *Engine) executeNode(ctx context.Context, node domain.FlowNode, input Pa
 	case "action:git":
 		return executeGit(ctx, config, input)
 	case "action:subpipeline":
-		return nil, fmt.Errorf("sub-pipeline execution is not available in this release")
+		target := ""
+		if value, ok := config["pipelineId"].(string); ok {
+			target = strings.TrimSpace(value)
+		}
+		if override, ok := input["pipelineId"].(string); ok && strings.TrimSpace(override) != "" {
+			target = strings.TrimSpace(override)
+		}
+		return nil, fmt.Errorf("running pipeline %q is not available in this release", target)
+	case "action:list_pipelines":
+		if e.pipelines == nil {
+			return nil, fmt.Errorf("the pipeline catalogue is unavailable for this execution")
+		}
+		summaries, err := e.pipelines.ListPublishedPipelines(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list pipelines: %w", err)
+		}
+		items := make([]Packet, 0, len(summaries))
+		for _, summary := range summaries {
+			items = append(items, Packet{
+				"id":                summary.ID,
+				"name":              summary.Name,
+				"description":       summary.Description,
+				"status":            summary.Status,
+				"publishedRevision": float64(summary.PublishedRevision),
+			})
+		}
+		return Result{
+			"out":       {clonePacket(input)},
+			"pipelines": {{"pipelines": items, "count": float64(len(items))}},
+		}, nil
 	case "llm:prompt", "llm:extract", "llm:summarize", "llm:agent", "llm:coding_agent":
 		return e.executeLLM(ctx, node, config, input)
 	case "llm:boolean":
@@ -183,7 +219,13 @@ func (e *Engine) executeHTTP(ctx context.Context, config map[string]any, input P
 	if err != nil {
 		return nil, fmt.Errorf("build HTTP request: %w", err)
 	}
-	for _, header := range configuredHTTPHeaders(config["headers"]) {
+	// Headers come either from the visual list or from the connected
+	// Headers pin when "Take headers from Headers pin" is enabled.
+	headerSource := any(config["headers"])
+	if boolValue(config["headersFromPin"]) {
+		headerSource = input["headers"]
+	}
+	for _, header := range configuredHTTPHeaders(headerSource) {
 		request.Header.Add(header.Name, header.Value)
 	}
 	if body != "" && request.Header.Get("Content-Type") == "" {

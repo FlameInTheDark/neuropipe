@@ -1,6 +1,10 @@
 package catalog
 
-import "github.com/FlameInTheDark/neuropipe/internal/domain"
+import (
+	"strings"
+
+	"github.com/FlameInTheDark/neuropipe/internal/domain"
+)
 
 // knownResultFields documents fields that a first-party action adds to its
 // result packet. The input packet is deliberately not repeated: it continues
@@ -58,10 +62,83 @@ func addKnownOutputShape(definition domain.NodeDefinition) domain.NodeDefinition
 		return definition
 	}
 	for index := range definition.Outputs {
-		if definition.Outputs[index].ID == "result" && definition.Outputs[index].Kind == domain.PinData {
-			definition.Outputs[index].Fields = append([]domain.DataField(nil), fields...)
-			break
+		pin := &definition.Outputs[index]
+		if pin.ID != "result" || pin.Kind != domain.PinData {
+			continue
+		}
+		if len(pin.Fields) == 0 {
+			pin.Fields = append([]domain.DataField(nil), fields...)
+		}
+		// Give the pin a record spec derived from the documented fields so
+		// tooltips and dot-completion expose the structure even when the
+		// node relies on the generic result contract.
+		if pin.Type == nil || pin.Type.Kind != domain.TypeRecord || len(pin.Type.Fields) == 0 {
+			spec := recordFromDataFields(fields)
+			pin.Type = &spec
+			pin.DataType = domain.DataObject
+			pin.Color = "#60a5fa"
 		}
 	}
 	return definition
+}
+
+// recordFromDataFields builds a nested record TypeSpec from dotted field
+// paths ("llm.content" → record llm { content }).
+func recordFromDataFields(fields []domain.DataField) domain.TypeSpec {
+	root := domain.TypeSpec{Kind: domain.TypeRecord}
+	for _, field := range fields {
+		segments := strings.Split(field.Path, ".")
+		current := &root
+		for _, segment := range segments[:len(segments)-1] {
+			var nested *domain.TypeSpec
+			for index := range current.Fields {
+				if current.Fields[index].ID == segment {
+					nested = &current.Fields[index].Type
+					break
+				}
+			}
+			if nested == nil || nested.Kind != domain.TypeRecord {
+				record := domain.TypeSpec{Kind: domain.TypeRecord}
+				current.Fields = append(current.Fields, domain.TypeFieldSpec{ID: segment, Name: segment, Type: record})
+				nested = &current.Fields[len(current.Fields)-1].Type
+			}
+			current = nested
+		}
+		leaf := segments[len(segments)-1]
+		if hasTypeField(current, leaf) {
+			continue
+		}
+		current.Fields = append(current.Fields, domain.TypeFieldSpec{
+			ID:   leaf,
+			Name: leaf,
+			Type: dataTypeToSpec(field.DataType),
+		})
+	}
+	return root
+}
+
+func hasTypeField(spec *domain.TypeSpec, id string) bool {
+	for _, existing := range spec.Fields {
+		if existing.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func dataTypeToSpec(dataType domain.DataType) domain.TypeSpec {
+	switch dataType {
+	case domain.DataNumber:
+		return domain.TypeSpec{Kind: domain.TypeFloat}
+	case domain.DataBoolean:
+		return domain.TypeSpec{Kind: domain.TypeBool}
+	case domain.DataText:
+		return domain.TypeSpec{Kind: domain.TypeString}
+	case domain.DataList:
+		return domain.TypeSpec{Kind: domain.TypeList, Value: &domain.TypeSpec{Kind: domain.TypeAny}}
+	case domain.DataObject:
+		return domain.TypeSpec{Kind: domain.TypeMap, Key: &domain.TypeSpec{Kind: domain.TypeString}, Value: &domain.TypeSpec{Kind: domain.TypeAny}}
+	default:
+		return domain.TypeSpec{Kind: domain.TypeAny}
+	}
 }

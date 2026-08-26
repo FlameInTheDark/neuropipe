@@ -89,6 +89,7 @@ export function TypeSpecField({
   depth = 0,
   className,
   allowAny = true,
+  compact = false,
 }: {
   value?: TypeSpec;
   onChange: (next: TypeSpec) => void;
@@ -96,54 +97,61 @@ export function TypeSpecField({
   className?: string;
   /** tool contracts forbid `any` (backend validateToolType) */
   allowAny?: boolean;
+  /** inline chip sizing used inside code-editor rows; inspectors use full size */
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const spec = value ?? { kind: "any" as const };
-  const token = specKindToken(spec.kind);
   const nested = depth < MAX_SPEC_DEPTH;
 
   const options = allowAny
     ? BASE_OPTIONS
-    : token === "any"
+    : spec.kind === "any"
       ? [{ value: "any", label: "any (!)" }, ...BASE_OPTIONS.filter((o) => o.value !== "any")]
       : BASE_OPTIONS.filter((o) => o.value !== "any");
 
-  const setKind = (token: string) => {
+  const setKind = (kind: string) => {
     // keep the previous inner spec when staying within the same container kind
-    if (token === "list" && spec.kind === "list") return onChange(spec);
-    if (token === "map" && spec.kind === "map") return onChange({ ...spec, key: spec.key ?? { kind: "string" } });
-    onChange(kindFromToken(token));
+    if (kind === "list" && spec.kind === "list") return onChange(spec);
+    if (kind === "map" && spec.kind === "map") return onChange({ ...spec, key: spec.key ?? { kind: "string" } });
+    onChange(kindFromToken(kind));
   };
 
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-0.5", className)}>
       <Dropdown
-        compact
-        value={token}
+        compact={compact}
+        value={spec.kind}
         onChange={setKind}
-        className="h-4 shrink-0 px-1 font-mono text-[9px] [&>svg]:h-2 [&>svg]:w-2"
+        className={
+          compact
+            ? "h-4 shrink-0 px-1 font-mono text-[9px] [&>svg]:h-2 [&>svg]:w-2"
+            : "h-8 min-w-[150px] shrink-0 px-2.5 text-[12px]"
+        }
         options={options}
       />
       {nested && spec.kind === "list" && (
         <>
-          <span aria-hidden className="font-mono text-[9px] leading-none text-ink-600">&lt;</span>
+          <span aria-hidden className={cn("leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&lt;</span>
           <TypeSpecField
             value={spec.element ?? { kind: "any" }}
             onChange={(element) => onChange({ ...spec, element })}
             depth={depth + 1}
+            compact={compact}
           />
-          <span aria-hidden className="self-end font-mono text-[9px] leading-none text-ink-600">&gt;</span>
+          <span aria-hidden className={cn("self-end leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&gt;</span>
         </>
       )}
       {nested && spec.kind === "map" && (
         <>
-          <span aria-hidden className="font-mono text-[9px] leading-none text-ink-600">&lt;{t("typeField.textKey")},</span>
+          <span aria-hidden className={cn("leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&lt;{t("typeField.textKey")},</span>
           <TypeSpecField
             value={spec.value ?? { kind: "any" }}
             onChange={(value) => onChange({ ...spec, value })}
             depth={depth + 1}
+            compact={compact}
           />
-          <span aria-hidden className="self-end font-mono text-[9px] leading-none text-ink-600">&gt;</span>
+          <span aria-hidden className={cn("self-end leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&gt;</span>
         </>
       )}
       {(!nested || spec.kind === "record") && spec.kind === "record" && (

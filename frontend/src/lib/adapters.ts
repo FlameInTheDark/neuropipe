@@ -93,7 +93,32 @@ export function portFromNodePort(pin: NodePort): Port {
       type: mapSpecToPin(f.type),
     }));
   }
+  // Documented result fields (dotted paths) double as the tooltip structure
+  // when the backend ships no explicit record spec.
+  if (!port.objectFields && Array.isArray(pin.fields) && pin.fields.length > 0) {
+    port.objectFields = (pin.fields as { path?: string; dataType?: string }[]).map((f) => ({
+      key: String(f.path ?? ""),
+      type: mapDataToPinType(String(f.dataType ?? "any")),
+    }));
+  }
   return port;
+}
+
+function mapDataToPinType(dataType: string): string {
+  switch (dataType) {
+    case "number":
+      return "number";
+    case "boolean":
+      return "boolean";
+    case "text":
+      return "text";
+    case "list":
+      return "array";
+    case "object":
+      return "object";
+    default:
+      return "any";
+  }
 }
 
 /** Boundary pins of a function become editable data ports. */
@@ -175,6 +200,8 @@ export function fieldDefFromConfig(field: ConfigField): FieldDef {
       return { ...base, type: "select", dynamic: "databases" } as FieldDef;
     case "twitch-identity":
       return { ...base, type: "select", dynamic: "twitch-identity" } as FieldDef;
+    case "pipeline-select":
+      return { ...base, type: "select", dynamic: "pipelines" } as FieldDef;
     case "textarea":
     case "tags":
       return { ...base, type: "textarea" } as FieldDef;
@@ -192,8 +219,12 @@ export function fieldDefFromConfig(field: ConfigField): FieldDef {
 export function visibleFields(fields: ConfigField[], values: Record<string, unknown>): ConfigField[] {
   return fields.filter((f) => {
     if (!f.visibleWhen) return true;
-    if (f.visibleWhen === "chatMode") return values.chatMode === "history";
-    return Boolean(values[f.visibleWhen] ?? false);
+    // "!" prefix inverts the predicate (e.g. headers editor hidden while
+    // the take-from-pin toggle is on)
+    const negated = f.visibleWhen.startsWith("!");
+    const name = negated ? f.visibleWhen.slice(1) : f.visibleWhen;
+    const value = name === "chatMode" ? values.chatMode === "history" : Boolean(values[name] ?? false);
+    return negated ? !value : value;
   });
 }
 

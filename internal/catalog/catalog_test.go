@@ -103,8 +103,16 @@ func TestHTTPRequestHeaderConfigurationDoesNotCreateDataPins(t *testing.T) {
 			t.Fatalf("HTTP Request is missing %q configuration", name)
 		}
 	}
+	// The explicit Headers pin (map<string,string>) backs the
+	// take-headers-from-pin toggle; the remaining config fields must stay
+	// configuration-only.
 	for _, pin := range definition.Inputs {
-		if pin.ID == "headers" || pin.ID == "useCustomUserAgent" || pin.ID == "userAgent" {
+		switch pin.ID {
+		case "headers":
+			if pin.Kind != domain.PinData || pin.DataType != domain.DataObject || pin.MaxConnections != 1 {
+				t.Fatalf("Headers pin = %#v, want a single-wire object pin", pin)
+			}
+		case "useCustomUserAgent", "userAgent":
 			t.Fatalf("HTTP Request exposes configuration-only %q as a data pin", pin.ID)
 		}
 	}

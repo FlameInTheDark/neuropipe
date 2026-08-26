@@ -180,17 +180,22 @@ func builtins() []domain.NodeDefinition {
 		node("trigger:chat", "Triggers", "Chat Trigger", "Start this published pipeline from a local chat conversation.", "message-circle", "#a78bfa", nil, chatTriggerOutput,
 			[]domain.ConfigField{field("label", "Chat label", "string", "Assistant", true)}, map[string]any{"label": "Chat"}),
 
-		node("action:http", "Actions", "HTTP Request", "Call an HTTP endpoint and pass its JSON or text response downstream.", "globe", "#60a5fa", flowInput, flowOutput,
+		node("action:http", "Actions", "HTTP Request", "Call an HTTP endpoint and pass its JSON or text response downstream.", "globe", "#60a5fa",
+			append(append(append([]domain.NodePort{}, flowInput...), domain.NodePort{ID: "headers", Label: "Headers", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataObject,
+				Type: &domain.TypeSpec{Kind: domain.TypeMap, Key: &domain.TypeSpec{Kind: domain.TypeString}, Value: &domain.TypeSpec{Kind: domain.TypeString}}, Color: "#e879f9", MaxConnections: 1,
+				IgnoreConfigFallback: true})),
+			append(flowOutput, httpResultOutput()),
 			[]domain.ConfigField{
 				field("url", "URL", "string", "https://api.example.com", true),
 				selectField("method", "Method", []string{"GET", "POST", "PUT", "PATCH", "DELETE"}),
 				field("body", "Body", "textarea", "", false),
-				httpHeadersField(),
+				boolField("headersFromPin", "Take headers from Headers pin", false),
+				visibleWhen(httpHeadersField(), "!headersFromPin"),
 				customUserAgentToggleField(),
 				visibleWhen(field("userAgent", "User-Agent", "http-user-agent", "Neuropipe/0.1", true), "useCustomUserAgent"),
 				field("stripScripts", "Remove scripts", "boolean", "", false),
 				field("stripStyles", "Remove styles", "boolean", "", false),
-			}, map[string]any{"method": "GET", "headers": []any{}, "useCustomUserAgent": false, "userAgent": "", "stripScripts": false, "stripStyles": false}, domain.CapabilityNetwork),
+			}, map[string]any{"method": "GET", "headers": []any{}, "headersFromPin": false, "useCustomUserAgent": false, "userAgent": "", "stripScripts": false, "stripStyles": false}, domain.CapabilityNetwork),
 		node("action:terminal", "Local", "Run Terminal Command", "Run PowerShell, Windows PowerShell, or cmd in an approved workspace.", "terminal", "#c4b5fd", flowInput, flowOutput,
 			[]domain.ConfigField{selectField("shell", "Shell", []string{"PowerShell", "Windows PowerShell", "cmd"}), field("command", "Command", "textarea", "Get-Date", true), field("workingDirectory", "Working directory", "string", "C:\\Work", false)}, map[string]any{"shell": "PowerShell"}, domain.CapabilityTerminal),
 		node("action:notification", "Local", "Desktop Notification", "Show a Windows toast-style desktop notification.", "bell", "#c4b5fd", flowInput, flowOutput,
@@ -199,8 +204,11 @@ func builtins() []domain.NodeDefinition {
 			[]domain.ConfigField{field("title", "Report title", "string", "Pipeline report", true), field("tags", "Tags", "tags", "Daily, Operations", false), field("markdown", "Markdown", "textarea", "# Report", true)}, map[string]any{}),
 		node("action:git", "Local", "Git", "Run a focused local Git operation in an approved repository.", "git-branch", "#c4b5fd", flowInput, flowOutput,
 			[]domain.ConfigField{selectField("operation", "Operation", []string{"status", "diff", "log", "fetch", "pull"}), field("repository", "Repository", "string", "C:\\Work\\repo", true)}, map[string]any{"operation": "status"}, domain.CapabilityGit),
-		node("action:subpipeline", "Actions", "Run Pipeline", "Run another published pipeline with the current packet.", "workflow", "#60a5fa", flowInput, flowOutput,
-			[]domain.ConfigField{field("pipelineId", "Pipeline", "string", "", true)}, map[string]any{}),
+		node("action:subpipeline", "Actions", "Run Pipeline", "Run another published pipeline with the current packet.", "workflow", "#60a5fa",
+			append(append([]domain.NodePort{}, flowInput...), domain.NodePort{ID: "pipelineId", Label: "Pipeline ID", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataText, Color: "#e879f9", MaxConnections: 1}),
+			flowOutput,
+			[]domain.ConfigField{{Name: "pipelineId", Label: "Pipeline", Kind: "pipeline-select", Required: true, Dynamic: "pipelines"}}, map[string]any{}),
+		pipelinesListNode(),
 
 		node("llm:prompt", "AI", "LLM Prompt", "Generate text with the selected provider and model.", "sparkles", "#f472b6", flowInput, flowOutput,
 			[]domain.ConfigField{field("prompt", "Prompt", "textarea", "Summarise the connected input.", true), field("model", "Model override", "string", "", false), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"updateChatStatus": false, "chatRunId": ""}),
@@ -410,6 +418,10 @@ func httpHeadersField() domain.ConfigField {
 	return domain.ConfigField{Name: "headers", Label: "Request headers", Kind: "http-headers"}
 }
 
+func boolField(name, label string, defaultValue bool) domain.ConfigField {
+	return domain.ConfigField{Name: name, Label: label, Kind: "boolean"} // default wired via DefaultConfig
+}
+
 func customUserAgentToggleField() domain.ConfigField {
 	return domain.ConfigField{Name: "useCustomUserAgent", Label: "Use custom User-Agent", Kind: "http-user-agent-toggle"}
 }
@@ -450,4 +462,67 @@ func routeOptions(values ...string) []any {
 
 func objectSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+
+// httpResultOutput describes the merged response packet the HTTP Request
+// node places on its Result pin, so tooltips and downstream pickers show the
+// real structure instead of a bare object.
+func httpResultOutput() domain.NodePort {
+	statusSpec := domain.TypeSpec{Kind: domain.TypeFloat}
+	bodySpec := domain.TypeSpec{Kind: domain.TypeString}
+	jsonSpec := domain.TypeSpec{Kind: domain.TypeAny}
+	headerSpec := domain.TypeSpec{Kind: domain.TypeMap, Key: &domain.TypeSpec{Kind: domain.TypeString}, Value: &domain.TypeSpec{Kind: domain.TypeString}}
+	record := domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{
+		{ID: "status", Name: "status", Type: statusSpec},
+		{ID: "body", Name: "body", Type: bodySpec},
+		{ID: "headers", Name: "headers", Type: headerSpec},
+		{ID: "json", Name: "json", Type: jsonSpec},
+	}}
+	return domain.NodePort{
+		ID: "result", Label: "Result", Kind: domain.PinData, Direction: domain.PinOutput,
+		DataType: domain.DataObject, Type: &record, Color: "#60a5fa", MaxConnections: 1,
+		Fields: []domain.DataField{
+			{Path: "status", Label: "Status", DataType: domain.DataNumber},
+			{Path: "body", Label: "Body", DataType: domain.DataText},
+			{Path: "headers", Label: "Headers", DataType: domain.DataObject},
+			{Path: "json", Label: "JSON", DataType: domain.DataAny},
+		},
+	}
+}
+
+// pipelinesListNode builds the List Pipelines node. Its executor needs a
+// PipelineLister, so it lives beside the other catalog helpers that depend on
+// runtime wiring.
+func pipelinesListNode() domain.NodeDefinition {
+	textSpec := domain.TypeSpec{Kind: domain.TypeString}
+	floatSpec := domain.TypeSpec{Kind: domain.TypeFloat}
+	pipelineItem := domain.TypeSpec{Kind: domain.TypeRecord, Fields: []domain.TypeFieldSpec{
+		{ID: "id", Name: "id", Type: textSpec},
+		{ID: "name", Name: "name", Type: textSpec},
+		{ID: "description", Name: "description", Type: textSpec},
+		{ID: "status", Name: "status", Type: textSpec},
+		{ID: "publishedRevision", Name: "publishedRevision", Type: floatSpec},
+	}}
+	listSpec := domain.TypeSpec{Kind: domain.TypeList, Value: &pipelineItem}
+	flowIn := []domain.NodePort{{ID: "in", Label: "Input", Kind: domain.PinExec, Direction: domain.PinInput, Color: "#fafafa"}}
+	flowOut := []domain.NodePort{{ID: "out", Label: "Then", Kind: domain.PinExec, Direction: domain.PinOutput, Color: "#fafafa"}}
+	dataOut := []domain.NodePort{
+		{ID: "pipelines", Label: "Pipelines", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataList, Type: &listSpec, Color: "#60a5fa", MaxConnections: 1},
+		{ID: "count", Label: "Count", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataNumber, Type: &floatSpec, Color: "#86efac", MaxConnections: 1},
+	}
+	return normalizeDefinition(domain.NodeDefinition{
+		Type:              "action:list_pipelines",
+		Category:          "Actions",
+		Label:             "List Pipelines",
+		Description:       "Emit the published pipelines of this workspace as data.",
+		Icon:              "list-video",
+		Color:             "#60a5fa",
+		Mode:              domain.NodeImpure,
+		Inputs:            flowIn,
+		Outputs:           append(flowOut, dataOut...),
+		Fields:            nil,
+		DefaultConfig:     map[string]any{},
+		Source:            "builtin",
+		PortContractOwned: true,
+	})
 }

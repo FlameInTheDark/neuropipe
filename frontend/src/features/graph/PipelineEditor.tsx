@@ -23,6 +23,8 @@ export interface PanelState {
 /** Backend-backed services the inspector panels need. */
 export interface EditorApi {
   secrets: string[];
+  /** published pipeline summaries for Run Pipeline / List Pipelines nodes */
+  pipelines: import("@/lib/adapters").UiPipeline[];
   databases: Database[];
   identities: TwitchIdentity[];
   validateJavaScript: (code: string) => Promise<void>;

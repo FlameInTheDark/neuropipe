@@ -62,7 +62,7 @@ export interface FieldDef {
   placeholder?: string;
   hint?: string;
   /** options are resolved asynchronously (secrets, databases, identities) */
-  dynamic?: "secrets" | "databases" | "twitch-identity";
+  dynamic?: "secrets" | "databases" | "twitch-identity" | "pipelines";
   /** original backend ConfigField.kind, kept for round-tripping complex values */
   kind?: string;
   visibleWhen?: string;
