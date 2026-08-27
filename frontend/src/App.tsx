@@ -131,14 +131,22 @@ export default function App() {
   }, [nav, graph.dirty, confirmLeave]);
 
   /* freshly opened graphs fit themselves into the visible canvas area,
-     like pressing "Fit graph to view" */
+     like pressing "Fit graph to view".
+
+     nav's editing target is set optimistically BEFORE the async backend
+     load finishes, so the fit must wait until the graph currently loaded
+     into the editor (graph.pipeline / graph.fn) is the one nav is showing.
+     Fitting earlier would run against empty or stale nodes — the fit would
+     silently no-op and the freshly loaded graph would sit off-screen at
+     whatever pan/zoom the previous editing session left behind. */
   const editorTargetId = nav.editingPipeline?.id ?? nav.editingFunction?.id ?? null;
+  const loadedGraphId = graph.pipeline?.id ?? graph.fn?.id ?? null;
   useEffect(() => {
-    if (!nav.inEditor || !editorTargetId) return;
+    if (!nav.inEditor || !editorTargetId || editorTargetId !== loadedGraphId) return;
     const frame = requestAnimationFrame(() => fitRef.current?.());
     return () => cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorTargetId, nav.inEditor]);
+  }, [nav.inEditor, editorTargetId, loadedGraphId]);
 
   useEffect(() => {
     if (!nav.inEditor) setSavedAt(null);

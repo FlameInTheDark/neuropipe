@@ -9,6 +9,7 @@ import { Dropdown, type DropdownOption } from "./Dropdown";
 import { Tooltip } from "./Tooltip";
 import { TextEditorModal } from "./TextEditorModal";
 import { CodeEditorModal } from "./CodeEditorModal";
+import { JsonViewerModal } from "./JsonViewerModal";
 import { FormBuilderEditor } from "./FormBuilderEditor";
 import { RouteOptionsEditor, SchemaEditor, SwitchCasesEditor } from "./StructuredFieldEditors";
 import { HtmlExtractionsEditor } from "./HtmlExtractionsEditor";
@@ -1049,6 +1050,8 @@ function LogBody({
   const { t } = useTranslation();
   const [selectedExecution, setSelectedExecution] = useState<string>("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /* the entry whose input/output is open in the full-screen JSON viewer */
+  const [viewerEntry, setViewerEntry] = useState<LogEntry | null>(null);
   /* scoped to the unique entry (node + start time) so repeated runs of the
      same node highlight individually, never as one group */
   const [hoveredEntryId, setHoveredEntryId] = useState<string | null>(null);
@@ -1161,6 +1164,7 @@ function LogBody({
         {log.map((l) => {
           const isHovered = hoveredEntryId === l.id;
           const isExpanded = expandedId === l.id;
+          const hasData = (l.input !== undefined && l.input !== null) || (l.output !== undefined && l.output !== null);
           return (
             <li
               key={l.id}
@@ -1171,49 +1175,70 @@ function LogBody({
               onMouseEnter={() => setHoveredEntryId(l.id)}
               onMouseLeave={() => setHoveredEntryId(null)}
               className={cn(
-                "border-b border-seam/70 px-3 py-2 transition",
+                "group border-b border-seam/70 px-3 py-2 transition",
                 isHovered ? "bg-ink-800" : "hover:bg-ink-850",
               )}
             >
-              <button
-                onClick={() => setExpandedId(isExpanded ? null : l.id)}
-                className="w-full text-left"
-              >
-                <div className="flex items-center gap-2">
-                  <Icon
-                    name="ChevronRight"
-                    className={cn("h-3 w-3 shrink-0 text-ink-600 transition-transform", isExpanded && "rotate-90")}
-                  />
-                  <Dot
-                    tone={
-                      l.status === "completed" ? "done"
-                      : l.status === "running" ? "running"
-                      : l.status === "failed" ? "error"
-                      : "idle"
-                    }
-                  />
-                  <span className="truncate text-[12.5px] font-medium text-ink-100">{l.node}</span>
-                  <span
-                    className={cn(
-                      "ml-auto font-mono text-[10.5px]",
-                      l.status === "completed" && "text-emerald-300/80",
-                      l.status === "running" && "text-ink-100",
-                      l.status === "skipped" && "text-ink-500",
-                      l.status === "failed" && "text-rose-300",
-                    )}
-                  >
-                    {l.ms}ms
-                  </span>
-                </div>
-                {l.error && (
-                  <pre className="mt-1.5 ml-7 max-h-[90px] overflow-auto whitespace-pre-wrap rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1.5 font-mono text-[10px] text-rose-200">
-                    {l.error}
-                  </pre>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : l.id)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Icon
+                      name="ChevronRight"
+                      className={cn("h-3 w-3 shrink-0 text-ink-600 transition-transform", isExpanded && "rotate-90")}
+                    />
+                    <Dot
+                      tone={
+                        l.status === "completed" ? "done"
+                        : l.status === "running" ? "running"
+                        : l.status === "failed" ? "error"
+                        : "idle"
+                      }
+                    />
+                    <span className="truncate text-[12.5px] font-medium text-ink-100">{l.node}</span>
+                    <span
+                      className={cn(
+                        "ml-auto font-mono text-[10.5px]",
+                        l.status === "completed" && "text-emerald-300/80",
+                        l.status === "running" && "text-ink-100",
+                        l.status === "skipped" && "text-ink-500",
+                        l.status === "failed" && "text-rose-300",
+                      )}
+                    >
+                      {l.ms}ms
+                    </span>
+                  </div>
+                </button>
+                {hasData && (
+                  <Tooltip content={t("jsonViewer.inspect")} side="left" delay={200}>
+                    <button
+                      onClick={() => setViewerEntry(l)}
+                      className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-ink-600 opacity-0 transition hover:bg-ink-750 hover:text-ink-50 focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Icon name="Braces" className="h-3.5 w-3.5" />
+                    </button>
+                  </Tooltip>
                 )}
-              </button>
+              </div>
+              {l.error && (
+                <pre className="mt-1.5 max-h-[90px] overflow-auto whitespace-pre-wrap rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1.5 font-mono text-[10px] text-rose-200">
+                  {l.error}
+                </pre>
+              )}
 
               {isExpanded && (
                 <div className="mt-1.5 space-y-1.5 pl-7">
+                  {hasData && (
+                    <button
+                      onClick={() => setViewerEntry(l)}
+                      className="flex h-6 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 text-[10.5px] font-medium text-ink-300 transition hover:border-ink-600 hover:bg-ink-750 hover:text-ink-100"
+                    >
+                      <Icon name="Braces" className="h-3 w-3" />
+                      {t("jsonViewer.inspect")}
+                    </button>
+                  )}
                   {l.input !== undefined && l.input !== null && (
                     <div>
                       <p className="mb-0.5 text-[10px] font-medium uppercase tracking-[0.09em] text-ink-500">{t("editor.entryInput")}</p>
@@ -1230,7 +1255,7 @@ function LogBody({
                       </pre>
                     </div>
                   )}
-                  {l.input === undefined && l.output === undefined && (
+                  {!hasData && (
                     <p className="text-[11px] italic text-ink-600">{t("editor.noEntryData")}</p>
                   )}
                 </div>
@@ -1239,6 +1264,8 @@ function LogBody({
           );
         })}
       </ul>
+
+      {viewerEntry && <JsonViewerModal entry={viewerEntry} onClose={() => setViewerEntry(null)} />}
     </div>
   );
 }
