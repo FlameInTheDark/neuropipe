@@ -19,6 +19,7 @@ import {
   functionPinsFromPorts,
   hydrateGraph,
   isBackendResolvedType,
+  isTriggerDefinition,
   localizeDefinitions,
   mapDataType,
   nodeRunToLog,
@@ -791,10 +792,17 @@ export function useGraphEditor(options: {
    *  pastes fan out diagonally instead of stacking. */
   const pasteClipboard = useCallback(() => {
     if (!nodeClipboard?.nodes.length) return;
+    // functions cannot contain triggers — nodes copied in a pipeline editor
+    // must not be pasted into one; dangling edges drop out with the idMap
+    const source = nodeClipboard.nodes;
+    const allowed =
+      mode === "function" ? source.filter((n) => !isTriggerDefinition(definitionIndex[n.type])) : source;
+    if (allowed.length < source.length) notify(i18n.t("editor.triggerInFunction"), "AlertTriangle");
+    if (!allowed.length) return;
     pasteTick += 1;
     const offset = 32 * pasteTick;
-    const idMap = new Map(nodeClipboard.nodes.map((n) => [n.id, makeNodeId(n.type)]));
-    const copies = nodeClipboard.nodes.map((n) => duplicateNode(n, idMap.get(n.id)!, offset));
+    const idMap = new Map(allowed.map((n) => [n.id, makeNodeId(n.type)]));
+    const copies = allowed.map((n) => duplicateNode(n, idMap.get(n.id)!, offset));
     const copiedEdges = nodeClipboard.edges
       .filter((e) => idMap.has(e.from.node) && idMap.has(e.to.node))
       .map((e) => ({
@@ -808,7 +816,7 @@ export function useGraphEditor(options: {
     setSelectedIds(new Set(copies.map((n) => n.id)));
     setSelectedId(copies[0]?.id ?? null);
     touch();
-  }, [touch]);
+  }, [mode, definitionIndex, notify, touch]);
 
   const deleteSelected = useCallback(() => {
     const requested = selectedIds.size ? Array.from(selectedIds) : selectedId ? [selectedId] : [];
@@ -864,6 +872,13 @@ export function useGraphEditor(options: {
         notify(i18n.t("editor.nodeUnavailable"), "AlertTriangle");
         return;
       }
+      // last line of defense for the function editor: the palette and the
+      // add-node picker already hide triggers there, but drags started in a
+      // pipeline session or stale pickers must not smuggle one in
+      if (mode === "function" && isTriggerDefinition(definition)) {
+        notify(i18n.t("editor.triggerInFunction"), "AlertTriangle");
+        return;
+      }
       const node = refreshNode(buildFromDefinition(definition, at), definitionIndex);
       setNodes((ns) => [...ns, node]);
       setSelectedId(node.id);
@@ -871,7 +886,7 @@ export function useGraphEditor(options: {
       if (isBackendResolvedType(node.type)) void reresolve(node);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [definitionIndex, notify, touch],
+    [definitionIndex, mode, notify, touch],
   );
 
   /* ---------- edge mutations ---------- */

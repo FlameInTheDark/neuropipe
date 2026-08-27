@@ -403,14 +403,26 @@ export function isBackendResolvedType(type: string): boolean {
 /* library                                                             */
 /* ------------------------------------------------------------------ */
 
+/** True for node definitions that start executions (pipeline-only). The
+ *  TriggerKind flag comes from the backend catalog and marks every trigger;
+ *  the type-prefix check additionally catches convention-following plugins
+ *  that ship no flag. Functions only run when called, so a trigger inside a
+ *  function can never fire and breaks publishing. */
+export function isTriggerDefinition(definition: Pick<NodeDefinition, "type" | "triggerKind"> | undefined): boolean {
+  if (!definition) return false;
+  return !!definition.triggerKind || definition.type.startsWith("trigger:");
+}
+
 export function buildLibrary(
   definitions: readonly NodeDefinition[],
   functions: readonly BackendFunctionSummary[],
+  opts?: { excludeTriggers?: boolean },
 ): LibraryCategory[] {
   const categories = new Map<string, LibraryItem[]>();
   for (const def of definitions) {
     if (
       def.type.startsWith("trigger:") ||
+      (opts?.excludeTriggers && isTriggerDefinition(def)) ||
       def.type === "function:entry" ||
       def.type === "function:return" ||
       def.type === "function:input" ||

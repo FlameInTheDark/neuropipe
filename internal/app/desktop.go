@@ -638,6 +638,9 @@ func (d *Desktop) GetFunction(id string) (domain.CustomFunction, error) {
 }
 
 func (d *Desktop) SaveFunction(function domain.CustomFunction) (domain.CustomFunction, error) {
+	if err := validateFunctionTriggers(function, d.registry); err != nil {
+		return domain.CustomFunction{}, err
+	}
 	return d.store.SaveFunctionDraft(d.context(), function)
 }
 
@@ -2064,6 +2067,29 @@ func validateFunction(function domain.CustomFunction, registry *catalog.Registry
 
 func isCurrentBlueprintSchema(version int) bool {
 	return version == domain.GraphSchemaV2 || version == domain.GraphSchemaV3
+}
+
+// validateFunctionTriggers is the draft-save counterpart to the event checks
+// in validateFunction: it flags every node whose catalog definition is marked
+// as a trigger (TriggerKind) or runs in event mode, skipping the function
+// boundary nodes that legitimately use event mode (function:entry).
+func validateFunctionTriggers(function domain.CustomFunction, registry *catalog.Registry) error {
+	for _, node := range function.DraftDefinition.Nodes {
+		if isFunctionBoundary(node.Type) {
+			continue
+		}
+		definition, exists := registry.Get(node.Type)
+		if !exists {
+			continue
+		}
+		if definition.TriggerKind != "" {
+			return fmt.Errorf("functions cannot contain trigger node %s", definition.Label)
+		}
+		if definition.Mode == domain.NodeEvent {
+			return fmt.Errorf("functions cannot contain event node %s", definition.Label)
+		}
+	}
+	return nil
 }
 
 func validateFunctionPins(side string, pins []domain.FunctionPin) error {

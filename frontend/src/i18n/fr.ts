@@ -251,6 +251,7 @@ export const fr: typeof en = {
     nodeCopied: "Nœud copié",
     nodeUnavailable: "Ce type de nœud n'est pas disponible.",
     functionPlacePending: "Placez les nœuds de fonction depuis le catalogue une fois publiés.",
+    triggerInFunction: "Les nœuds déclencheurs ne peuvent pas être placés dans une fonction.",
     boundaryLocked: "Les nœuds de bordure d'une fonction ne peuvent pas être supprimés.",
     runToInspect: "Exécutez ce brouillon pour inspecter chaque résultat de nœud.",
     pickExecution: "Choisir une exécution…",

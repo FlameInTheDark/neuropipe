@@ -251,6 +251,7 @@ export const de: typeof en = {
     nodeCopied: "Knoten kopiert",
     nodeUnavailable: "Dieser Knotentyp ist nicht verfügbar.",
     functionPlacePending: "Platzieren Sie Funktionsknoten aus dem Katalog, sobald sie veröffentlicht sind.",
+    triggerInFunction: "Trigger-Knoten können nicht innerhalb einer Funktion platziert werden.",
     boundaryLocked: "Grenzknoten von Funktionen können nicht gelöscht werden.",
     runToInspect: "Führen Sie diesen Entwurf aus, um jedes Knotenergebnis zu prüfen.",
     pickExecution: "Ausführung wählen…",

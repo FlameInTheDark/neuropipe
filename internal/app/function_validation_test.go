@@ -38,3 +38,55 @@ func TestValidateFunctionRequiresGroundedPublishedToolContract(t *testing.T) {
 		t.Fatalf("validateFunction() error = %v", err)
 	}
 }
+
+func TestValidateFunctionTriggers(t *testing.T) {
+	base := func(nodes ...domain.FlowNode) domain.CustomFunction {
+		return domain.CustomFunction{
+			ID:          "guard",
+			Name:        "Guard",
+			Description: "trigger guard fixture",
+			Mode:        domain.NodeImpure,
+			DraftDefinition: domain.FlowDefinition{
+				SchemaVersion: domain.GraphSchemaV3,
+				Nodes:         nodes,
+			},
+		}
+	}
+
+	triggers := []struct {
+		nodeType string
+		fragment string
+	}{
+		{"trigger:button", "trigger node"},
+		{"twitch:event", "trigger node"},
+		{"discord:event", "trigger node"},
+		{"telegram:event", "trigger node"},
+		{"kv:subscribe", "trigger node"},
+	}
+	for _, trigger := range triggers {
+		fn := base(
+			domain.FlowNode{ID: "entry", Type: "function:entry", Data: map[string]any{"config": map[string]any{}}},
+			domain.FlowNode{ID: "tr", Type: trigger.nodeType, Data: map[string]any{"config": map[string]any{}}},
+		)
+		err := validateFunctionTriggers(fn, catalog.New())
+		if err == nil || !strings.Contains(err.Error(), trigger.fragment) {
+			t.Fatalf("validateFunctionTriggers(%s) error = %v, want %q error", trigger.nodeType, err, trigger.fragment)
+		}
+	}
+
+	// boundary nodes are event-mode but legitimate — must pass untouched
+	fn := base(
+		domain.FlowNode{ID: "entry", Type: "function:entry", Data: map[string]any{"config": map[string]any{}}},
+		domain.FlowNode{ID: "return", Type: "function:return", Data: map[string]any{"config": map[string]any{}}},
+		domain.FlowNode{ID: "act", Type: "action:http-request", Data: map[string]any{"config": map[string]any{}}},
+	)
+	if err := validateFunctionTriggers(fn, catalog.New()); err != nil {
+		t.Fatalf("validateFunctionTriggers() error = %v, want nil for boundary + action nodes", err)
+	}
+
+	// unknown node types stay draft-saveable (publish reports them instead)
+	fn.DraftDefinition.Nodes = []domain.FlowNode{{ID: "x", Type: "plugin:future", Data: map[string]any{"config": map[string]any{}}}}
+	if err := validateFunctionTriggers(fn, catalog.New()); err != nil {
+		t.Fatalf("validateFunctionTriggers() error = %v, want nil for unknown node type", err)
+	}
+}

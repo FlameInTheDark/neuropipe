@@ -626,7 +626,7 @@ export default function App() {
                   registerFit={(fn) => (fitRef.current = fn)}
                   menus={menus}
                   onLibraryAdd={addNodeCentered}
-                  library={workspace.library}
+                  library={nav.editorKind === "function" ? workspace.functionLibrary : workspace.library}
                   editorApi={{
                     pipelines: workspace.pipelines,
                     secrets,

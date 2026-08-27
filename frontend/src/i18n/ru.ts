@@ -251,6 +251,7 @@ export const ru: typeof en = {
     nodeCopied: "Узел скопирован",
     nodeUnavailable: "Этот тип узла недоступен.",
     functionPlacePending: "Размещайте узлы функций из каталога после их публикации.",
+    triggerInFunction: "Триггеры нельзя размещать внутри функции.",
     boundaryLocked: "Граничные узлы функции удалить нельзя.",
     runToInspect: "Запустите черновик, чтобы увидеть результат каждого узла.",
     pickExecution: "Выберите запуск…",

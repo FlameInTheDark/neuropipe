@@ -257,6 +257,7 @@ export const en = {
     nodeCopied: "Node copied",
     nodeUnavailable: "This node type is not available.",
     functionPlacePending: "Place function nodes from the catalog after they finish publishing.",
+    triggerInFunction: "Trigger nodes cannot be placed inside a function.",
     boundaryLocked: "Function boundary nodes cannot be deleted.",
     runToInspect: "Run this draft to inspect each node’s result.",
     pickExecution: "Select execution…",

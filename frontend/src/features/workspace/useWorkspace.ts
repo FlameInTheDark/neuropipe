@@ -195,6 +195,14 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
     [definitions, i18n.resolvedLanguage],
   );
 
+  /** Library for the function editor: triggers only ever start pipelines, so
+   *  they are hidden from the palette and the canvas add-node picker there. */
+  const functionLibrary: LibraryCategory[] = useMemo(
+    () => buildLibrary(definitions, [], { excludeTriggers: true }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [definitions, i18n.resolvedLanguage],
+  );
+
   const buttonBindings = useMemo(() => triggers.filter((t) => t.kind === "button"), [triggers]);
 
   /* ---------- actions ---------- */
@@ -272,6 +280,7 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
     definitions,
     definitionIndex,
     library,
+    functionLibrary,
     settings,
     executors,
     running,
