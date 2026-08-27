@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -29,8 +30,14 @@ type secretRecord struct {
 }
 
 // Vault persists DPAPI-protected secret values in a user-owned private file.
+// The vault is shared by several services whose background goroutines
+// (validation loops, pollers) read tokens concurrently with request
+// goroutines saving or removing secrets, so every method is safe for
+// concurrent use: a mutex serializes each read-modify-write cycle and
+// prevents lost updates between simultaneous Put and Delete calls.
 type Vault struct {
 	path string
+	mu   sync.Mutex
 }
 
 // NewVault creates a Windows DPAPI-backed vault under application data.
@@ -43,6 +50,8 @@ func NewVault(root string) (*Vault, error) {
 
 // List returns metadata without decrypting values.
 func (v *Vault) List() ([]SecretMetadata, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	records, err := v.read()
 	if err != nil {
 		return nil, err
@@ -57,6 +66,8 @@ func (v *Vault) List() ([]SecretMetadata, error) {
 
 // Put encrypts and atomically saves one secret under its stable reference name.
 func (v *Vault) Put(name, value string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	records, err := v.read()
 	if err != nil {
 		return err
@@ -77,6 +88,8 @@ func (v *Vault) Put(name, value string) error {
 
 // Get decrypts a secret for backend-only provider and template use.
 func (v *Vault) Get(name string) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	records, err := v.read()
 	if err != nil {
 		return "", err
@@ -98,6 +111,8 @@ func (v *Vault) Get(name string) (string, error) {
 
 // Delete removes a secret value from the vault.
 func (v *Vault) Delete(name string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	records, err := v.read()
 	if err != nil {
 		return err

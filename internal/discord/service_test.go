@@ -19,17 +19,35 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-type memoryVault struct{ values map[string]string }
+// memoryVault mirrors the production security.Vault concurrency contract:
+// the service reads tokens from its validation loop goroutine while request
+// goroutines Put/Delete, so the fake must be safe for concurrent use.
+type memoryVault struct {
+	mu     sync.Mutex
+	values map[string]string
+}
 
 func (v *memoryVault) Get(key string) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	value, found := v.values[key]
 	if !found {
 		return "", fmt.Errorf("missing %s", key)
 	}
 	return value, nil
 }
-func (v *memoryVault) Put(key, value string) error { v.values[key] = value; return nil }
-func (v *memoryVault) Delete(key string) error     { delete(v.values, key); return nil }
+func (v *memoryVault) Put(key, value string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.values[key] = value
+	return nil
+}
+func (v *memoryVault) Delete(key string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.values, key)
+	return nil
+}
 
 type fakeBindings struct {
 	mu       sync.Mutex
@@ -491,8 +509,13 @@ func TestRemoveIdentityDeletesVaultRecord(t *testing.T) {
 	if _, err := vault.Get(tokenKey("main")); err == nil {
 		t.Fatal("vault record survived removal")
 	}
-	if len(service.settings.Identities) != 0 || service.settings.DefaultBotIdentityID != "" {
-		t.Fatalf("settings = %#v", service.settings)
+	// Read under the service lock, mirroring how callers observe settings
+	// while background goroutines may persist identity state.
+	service.mu.RLock()
+	settings := service.settings
+	service.mu.RUnlock()
+	if len(settings.Identities) != 0 || settings.DefaultBotIdentityID != "" {
+		t.Fatalf("settings = %#v", settings)
 	}
 }
 

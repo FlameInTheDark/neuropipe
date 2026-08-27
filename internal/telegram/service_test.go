@@ -16,19 +16,35 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/telespec"
 )
 
+// memoryVault mirrors the production security.Vault concurrency contract:
+// the service reads tokens from its validation loop goroutine while request
+// goroutines Put/Delete, so the fake must be safe for concurrent use.
 type memoryVault struct {
+	mu     sync.Mutex
 	values map[string]string
 }
 
 func (v *memoryVault) Get(key string) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	value, found := v.values[key]
 	if !found {
 		return "", fmt.Errorf("missing %s", key)
 	}
 	return value, nil
 }
-func (v *memoryVault) Put(key, value string) error { v.values[key] = value; return nil }
-func (v *memoryVault) Delete(key string) error     { delete(v.values, key); return nil }
+func (v *memoryVault) Put(key, value string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.values[key] = value
+	return nil
+}
+func (v *memoryVault) Delete(key string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.values, key)
+	return nil
+}
 
 type fakeBindings struct {
 	mu        sync.Mutex
@@ -531,7 +547,11 @@ func TestRemoveIdentityDeletesVaultAndStopsLoop(t *testing.T) {
 	if _, err := vault.Get(tokenKey("bot")); err == nil {
 		t.Fatal("vault record survived removal")
 	}
+	// Read under the service lock: the validation-loop goroutine started by
+	// Start() may still be persisting identity state concurrently.
+	service.mu.RLock()
 	settings := service.settings
+	service.mu.RUnlock()
 	if len(settings.Identities) != 0 || settings.DefaultBotIdentityID != "" {
 		t.Fatalf("settings = %#v", settings)
 	}
