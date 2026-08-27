@@ -3,6 +3,8 @@ package kv
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -364,9 +366,42 @@ func TestEmbeddedTestConnectionDirectoryProbe(t *testing.T) {
 		t.Fatalf("TestConnection(valid dir) = %v, %v", status, err)
 	}
 
-	item.Path = "/proc/no-write-access-here"
-	if _, err := service.TestConnection(context.Background(), item, ""); err == nil {
-		t.Fatal("expected error for unwritable directory")
+	// A path routed through a regular file can never become a directory on
+	// any platform, so preparing the data directory must fail (the Windows
+	// CI runners turn a hardcoded "/proc/..." path into a perfectly creatable
+	// "C:\proc\..." path, which is why the probe is staged inside TempDir).
+	notADir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(notADir, []byte("file"), 0o644); err != nil {
+		t.Fatalf("stage file: %v", err)
+	}
+	item.Path = filepath.Join(notADir, "sugardb")
+	if _, err := service.TestConnection(context.Background(), item, ""); err == nil || !strings.Contains(err.Error(), "prepare sugardb data directory") {
+		t.Fatalf("TestConnection(path through file) error = %v, want prepare failure", err)
+	}
+
+	// A directory occupying the probe file name makes the write probe itself
+	// fail on every platform (EISDIR on Unix, access denied on Windows).
+	occupied := t.TempDir()
+	if err := os.Mkdir(filepath.Join(occupied, ".neuropipe-probe"), 0o755); err != nil {
+		t.Fatalf("stage probe dir: %v", err)
+	}
+	item.Path = occupied
+	if _, err := service.TestConnection(context.Background(), item, ""); err == nil || !strings.Contains(err.Error(), "not writable") {
+		t.Fatalf("TestConnection(occupied probe) error = %v, want not-writable failure", err)
+	}
+
+	// The plain permission case only binds on Unix and outside root: a
+	// read-only directory must surface as a not-writable rejection.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		locked := t.TempDir()
+		if err := os.Chmod(locked, 0o500); err != nil {
+			t.Fatalf("chmod locked dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+		item.Path = locked
+		if _, err := service.TestConnection(context.Background(), item, ""); err == nil || !strings.Contains(err.Error(), "not writable") {
+			t.Fatalf("TestConnection(0500 dir) error = %v, want not-writable failure", err)
+		}
 	}
 }
 
