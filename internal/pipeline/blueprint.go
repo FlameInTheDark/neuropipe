@@ -329,6 +329,9 @@ var errLoopStopped = fmt.Errorf("loop stopped")
 // SQLExecutor exposes only the database operation required by action:sql.
 func (s *blueprintState) SQLExecutor() nodes.SQLExecutor { return s.engine.databases }
 
+// KVExecutor exposes only the key/value operation required by KV nodes.
+func (s *blueprintState) KVExecutor() nodes.KVExecutor { return s.engine.kv }
+
 func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame, execInput string) (map[string]any, []string, *nodes.LoopPlan, error) {
 	if strings.HasPrefix(node.Type, "function:") && node.Type != "function:return" && node.Type != "function:entry" {
 		outputs, err := s.runFunction(node, inputs, frame)
@@ -693,6 +696,14 @@ func (s *blueprintState) JavaScriptHost() nodes.JavaScriptHost {
 // TwitchChatSender implements the focused runtime port consumed by the Twitch
 // action node without exposing the concrete engine or desktop service.
 func (s *blueprintState) TwitchChatSender() nodes.TwitchChatSender { return s.engine.twitch }
+
+// DiscordSender implements the focused runtime port consumed by the Discord
+// action nodes without exposing the concrete engine or gateway service.
+func (s *blueprintState) DiscordSender() nodes.DiscordSender { return s.engine.discord }
+
+// TelegramSender implements the focused runtime port consumed by the Telegram
+// action nodes without exposing the concrete engine or polling service.
+func (s *blueprintState) TelegramSender() nodes.TelegramSender { return s.engine.telegram }
 
 // DialogOpener implements the focused runtime port consumed by Display Message
 // and Display Question nodes without exposing the concrete engine or dialog

@@ -13,7 +13,9 @@ import {
   engineById,
   fileField,
   postgresExtras,
+  redisExtras,
   serverFields,
+  sugardbFields,
   type ConnMode,
   type EngineField,
 } from "./db-engines";
@@ -47,13 +49,18 @@ export function ConnectionModal({
     password: "",
     schema: existing?.schema ?? "public",
     sslmode: existing?.sslMode ?? "prefer",
+    dbIndex: existing?.dbIndex !== undefined ? String(existing.dbIndex) : "0",
+    address: existing?.address ?? "",
+    clientName: existing?.clientName ?? "",
   }));
+  const [useTLS, setUseTLS] = useState(Boolean(existing?.useTLS));
   const [createNewFile, setCreateNewFile] = useState(false);
   const [test, setTest] = useState<TestState>("idle");
   const [saving, setSaving] = useState(false);
 
   const engine = engineById(driver);
-  const mode: ConnMode = driver === "sqlite" || driver === "duckdb" ? "file" : "server";
+  const mode: ConnMode =
+    driver === "sqlite" || driver === "duckdb" ? "file" : driver === "sugardb" ? "embedded" : "server";
 
   const set = (k: string, v: string) => {
     setValues((prev) => ({ ...prev, [k]: v }));
@@ -67,8 +74,12 @@ export function ConnectionModal({
 
   const fields: EngineField[] = useMemo(() => {
     if (mode === "file") return [fileField()];
-    const shared = [...serverFields(engine), ...(driver === "postgres" ? postgresExtras() : [])];
-    return shared.filter((f) => !f.mode || f.mode === mode);
+    if (mode === "embedded") return sugardbFields();
+    const shared = serverFields(engine)
+      // Redis has no named database; its logical index is dbIndex below.
+      .filter((f) => !(driver === "redis" && f.key === "database"));
+    const extras = driver === "postgres" ? postgresExtras() : driver === "redis" ? redisExtras() : [];
+    return [...shared, ...extras].filter((f) => !f.mode || f.mode === mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, mode, driver]);
 
@@ -81,19 +92,35 @@ export function ConnectionModal({
       name: name.trim(),
       driver,
     };
-    if (driver === "sqlite" || driver === "duckdb") {
+    // blank keeps the previously stored secret; a typed value rotates it
+    const applyPassword = () => {
+      if (values.password) req.password = values.password;
+      else if (existing?.passwordRef) req.passwordRef = existing.passwordRef;
+    };
+    if (driver === "sugardb") {
+      req.path = values.path ?? "";
+      req.dbIndex = values.dbIndex ? Number(values.dbIndex) : 0;
+      applyPassword();
+    } else if (driver === "sqlite" || driver === "duckdb") {
       req.path = values.path ?? "";
     } else {
       req.host = values.host ?? "";
       req.port = values.port ? Number(values.port) : undefined;
-      req.database = values.database ?? "";
       req.username = values.username ?? "";
-      // blank keeps the previously stored secret; a typed value rotates it
-      if (values.password) req.password = values.password;
-      else if (existing?.passwordRef) req.passwordRef = existing.passwordRef;
+      applyPassword();
       if (driver === "postgres") {
+        req.database = values.database ?? "";
         req.schema = values.schema || "public";
         req.sslMode = values.sslmode || "prefer";
+      }
+      if (driver === "mysql") {
+        req.database = values.database ?? "";
+      }
+      if (driver === "redis") {
+        req.dbIndex = values.dbIndex ? Number(values.dbIndex) : 0;
+        req.useTLS = useTLS;
+        req.address = values.address ?? "";
+        req.clientName = values.clientName ?? "";
       }
     }
     return req;
@@ -121,6 +148,15 @@ export function ConnectionModal({
     }
   };
 
+  const pickDirectory = async () => {
+    try {
+      const dir = await desktop.chooseDirectory(t("databases.chooseDirectory"));
+      if (dir) set("path", dir);
+    } catch {
+      /* picker canceled */
+    }
+  };
+
   const submit = async () => {
     if (!canSubmit) return;
     setSaving(true);
@@ -137,6 +173,19 @@ export function ConnectionModal({
 
   const preview = useMemo(() => {
     if (driver === "sqlite" || driver === "duckdb") return `${driver}://${values.path || ":"}`;
+    if (driver === "sugardb") {
+      const db = values.dbIndex || "0";
+      return `sugardb://${values.path || "(app data)"}/${db}`;
+    }
+    if (driver === "redis") {
+      if (values.address) return values.address;
+      const auth = values.username ? `${values.username}@` : "";
+      const host = values.host || "localhost";
+      const port = values.port || engine.defaultPort || "";
+      const db = values.dbIndex || "0";
+      const tls = useTLS ? "?ssl=true" : "";
+      return `redis://${auth}${host}:${port}/${db}${tls}`;
+    }
     const auth = values.username || "user";
     const host = values.host || "localhost";
     const port = values.port || engine.defaultPort || "";
@@ -144,7 +193,7 @@ export function ConnectionModal({
     const extra = driver === "postgres" ? `?sslmode=${values.sslmode || "prefer"}` : "";
     return `${driver}://${auth}@${host}:${port}/${db}${extra}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driver, values]);
+  }, [driver, values, useTLS]);
 
   return (
     <Modal
@@ -221,7 +270,12 @@ export function ConnectionModal({
                   void m;
                   /* driver determines the mode; kept for layout parity */
                 }}
-                segments={[{ value: mode, label: t(mode === "file" ? "dbnew.fileMode" : "dbnew.serverMode") }]}
+                segments={[
+                  {
+                    value: mode,
+                    label: t(mode === "file" ? "dbnew.fileMode" : mode === "embedded" ? "dbnew.embeddedMode" : "dbnew.serverMode"),
+                  },
+                ]}
               />
             )}
           </div>
@@ -258,6 +312,48 @@ export function ConnectionModal({
                 </div>
               </Field>
             </>
+          ) : mode === "embedded" ? (
+            <>
+              <Field label={t("databases.dataDir")} hint={t("databases.dataDirHint")}>
+                <div className="flex gap-2">
+                  <TextInput
+                    value={values.path ?? ""}
+                    onChange={(v) => set("path", v)}
+                    placeholder={t("databases.dataDirPlaceholder")}
+                    mono
+                  />
+                  <button
+                    onClick={() => void pickDirectory()}
+                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+                  >
+                    <Icon name="HardDrive" className="h-3.5 w-3.5" />
+                    {t("databases.chooseDirectory")}
+                  </button>
+                </div>
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                {fields.map((f) => (
+                  <Field key={f.key} label={t(f.labelKey)} required={!f.optional}>
+                    {f.key === "password" ? (
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={values[f.key] ?? ""}
+                        placeholder={existing?.passwordRef ? t("databases.passwordPlaceholder") : undefined}
+                        onChange={(e) => set(f.key, e.target.value)}
+                        className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+                      />
+                    ) : (
+                      <TextInput
+                        value={values[f.key] ?? f.default ?? ""}
+                        onChange={(v) => set(f.key, v)}
+                        type={f.type === "number" ? "number" : "text"}
+                      />
+                    )}
+                  </Field>
+                ))}
+              </div>
+            </>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               {fields.map((f) => (
@@ -265,7 +361,7 @@ export function ConnectionModal({
                   key={f.key}
                   label={t(f.labelKey)}
                   required={!f.optional}
-                  className={f.key === "database" ? "col-span-2" : undefined}
+                  className={f.key === "address" ? "col-span-2" : undefined}
                 >
                   {f.key === "password" ? (
                     <input
@@ -294,10 +390,24 @@ export function ConnectionModal({
                       onChange={(v) => set(f.key, v)}
                       placeholder={f.placeholderKey ? t(f.placeholderKey) : undefined}
                       type={f.type === "number" ? "number" : "text"}
+                      mono={f.key === "address"}
                     />
                   )}
                 </Field>
               ))}
+              {driver === "redis" && (
+                <label className="col-span-2 flex items-center gap-2 text-[12px] text-ink-300">
+                  <input
+                    type="checkbox"
+                    checked={useTLS}
+                    onChange={(e) => {
+                      setUseTLS(e.target.checked);
+                      setTest("idle");
+                    }}
+                  />
+                  {t("databases.useTls")}
+                </label>
+              )}
             </div>
           )}
         </section>

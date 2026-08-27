@@ -118,6 +118,15 @@
       "path": "guides/common-pipeline.md"
     },
     {
+      "id": "guides/kv-databases",
+      "title": "Key/value databases",
+      "summary": "Register Redis-compatible servers, browse keys, and build pipelines with KV nodes.",
+      "category": [
+        "Guides"
+      ],
+      "path": "guides/kv-databases.md"
+    },
+    {
       "id": "guides/ai-workflows",
       "title": "AI workflows",
       "summary": "Use a model as a constrained decision maker.",
@@ -158,6 +167,44 @@
       "nodeTypes": [
         "twitch:event",
         "twitch:send_chat_message"
+      ]
+    },
+    {
+      "id": "guides/discord-bot",
+      "title": "Discord bots",
+      "summary": "Create a Discord bot, connect it, and build trusted gateway chat automations.",
+      "category": [
+        "Guides",
+        "Triggers"
+      ],
+      "path": "guides/discord-bot.md",
+      "nodeTypes": [
+        "discord:event",
+        "action:discord_send_message",
+        "action:discord_send_dm",
+        "action:discord_add_reaction",
+        "action:discord_edit_message",
+        "action:discord_delete_message"
+      ]
+    },
+    {
+      "id": "guides/telegram-bot",
+      "title": "Telegram bots",
+      "summary": "Create a Telegram bot, connect it, and build trusted polling chat automations.",
+      "category": [
+        "Guides",
+        "Triggers"
+      ],
+      "path": "guides/telegram-bot.md",
+      "nodeTypes": [
+        "telegram:event",
+        "action:telegram_send_message",
+        "action:telegram_send_photo",
+        "action:telegram_edit_message",
+        "action:telegram_delete_message",
+        "action:telegram_answer_callback",
+        "action:telegram_chat_action",
+        "action:telegram_pin_message"
       ]
     },
     {
@@ -864,6 +911,14 @@
     "data:clean_path": {
       "documentId": "reference/path-utilities",
       "anchor": "clean-path"
+    },
+    "discord:event": {
+      "documentId": "guides/discord-bot",
+      "anchor": "discord-event-trigger"
+    },
+    "telegram:event": {
+      "documentId": "guides/telegram-bot",
+      "anchor": "telegram-event-trigger"
     }
   }
 }

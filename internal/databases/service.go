@@ -248,6 +248,10 @@ func (s *Service) Ping(ctx context.Context, id string) (domain.DatabaseStatus, e
 		_ = s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusError)
 		return domain.DatabaseStatusError, err
 	}
+	if err := requireSQLDriver(item); err != nil {
+		_ = s.store.UpdateDatabaseStatus(ctx, id, domain.DatabaseStatusError)
+		return domain.DatabaseStatusError, err
+	}
 	dialect := dialectFor(item.Driver)
 	secret, err := s.resolveSecret(item.PasswordRef)
 	if err != nil {
@@ -284,6 +288,9 @@ func (s *Service) Ping(ctx context.Context, id string) (domain.DatabaseStatus, e
 // password without persisting any state. Used by the "Test connection"
 // button in the create modal.
 func (s *Service) TestConnection(ctx context.Context, item domain.Database, password string) (domain.DatabaseStatus, error) {
+	if err := requireSQLDriver(item); err != nil {
+		return domain.DatabaseStatusError, err
+	}
 	dialect := dialectFor(item.Driver)
 	db, err := dialect.Open(item, password)
 	if err != nil {
@@ -449,6 +456,9 @@ func (s *Service) connectionWithItem(ctx context.Context, id string) (*sql.DB, d
 	if err != nil {
 		return nil, domain.Database{}, err
 	}
+	if err := requireSQLDriver(item); err != nil {
+		return nil, domain.Database{}, err
+	}
 	dialect := dialectFor(item.Driver)
 	secret, err := s.resolveSecret(item.PasswordRef)
 	if err != nil {
@@ -540,6 +550,16 @@ func pingQueryRow(ctx context.Context, db *sql.DB, query string) error {
 	var ignored any
 	if err := db.QueryRowContext(ctx, query).Scan(&ignored); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
+	}
+	return nil
+}
+
+// requireSQLDriver keeps key/value connections (remote Redis-protocol servers
+// and the embedded SugarDB store) out of the SQL dialect machinery:
+// dialectFor would otherwise silently fall back to SQLite.
+func requireSQLDriver(item domain.Database) error {
+	if domain.IsKVDriver(item.Driver) {
+		return fmt.Errorf("database %q is a key/value connection, not a SQL database", item.Name)
 	}
 	return nil
 }

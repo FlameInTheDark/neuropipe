@@ -93,6 +93,24 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
     setExecutors(next);
   }, []);
 
+  /**
+   * Re-reads persisted settings. Used when a view that renders
+   * settings-backed state (identities, defaults) is opened or mutated:
+   * services like Discord/Telegram write identities straight into settings
+   * server-side, so the workspace snapshot goes stale until re-fetched.
+   * Language is deliberately NOT re-applied — an unsaved language edit in
+   * the settings draft must survive this refresh.
+   */
+  const refreshSettings = useCallback(async () => {
+    try {
+      const next = await desktop.getSettings();
+      if (!mounted.current) return;
+      setSettings(next);
+    } catch {
+      /* transient backend hiccup — keep previous settings */
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const [pipelineList, allTriggers, crons, reportList, nodes, fnList, variableList, nextSettings, executorList] =
@@ -265,6 +283,7 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
     refreshVariables,
     refreshFunctions,
     refreshExecutors,
+    refreshSettings,
     setUpdate,
     createPipeline,
     deletePipeline,

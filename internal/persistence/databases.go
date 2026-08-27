@@ -26,7 +26,7 @@ func isUniqueViolation(err error) bool {
 }
 
 func databaseColumns() []string {
-	return []string{"id", "name", "driver", "path", "host", "port", "database_name", "username", "password_ref", "schema_name", "ssl_mode", "charset", "options", "status", "last_ping_at", "created_at", "updated_at"}
+	return []string{"id", "name", "driver", "path", "host", "port", "database_name", "username", "password_ref", "schema_name", "ssl_mode", "charset", "options", "db_index", "use_tls", "client_name", "address", "status", "last_ping_at", "created_at", "updated_at"}
 }
 
 func (s *Store) CreateDatabase(ctx context.Context, item domain.Database) (domain.Database, error) {
@@ -41,6 +41,7 @@ func (s *Store) CreateDatabase(ctx context.Context, item domain.Database) (domai
 	_, err := statements(s.db).Insert("databases").Columns(databaseColumns()...).Values(
 		item.ID, item.Name, string(item.Driver), item.Path, item.Host, item.Port, item.Database,
 		item.Username, item.PasswordRef, item.Schema, item.SSLMode, item.Charset, item.Options,
+		item.DBIndex, item.UseTLS, item.ClientName, item.Address,
 		string(item.Status), stampOrNil(item.LastPingAt), stamp(now), stamp(now),
 	).ExecContext(ctx)
 	if err != nil {
@@ -89,6 +90,10 @@ func (s *Store) UpdateDatabase(ctx context.Context, item domain.Database) (domai
 		Set("ssl_mode", item.SSLMode).
 		Set("charset", item.Charset).
 		Set("options", item.Options).
+		Set("db_index", item.DBIndex).
+		Set("use_tls", item.UseTLS).
+		Set("client_name", item.ClientName).
+		Set("address", item.Address).
 		Set("status", string(item.Status)).
 		Set("last_ping_at", stampOrNil(item.LastPingAt)).
 		Set("updated_at", stamp(now)).
@@ -134,11 +139,12 @@ func scanDatabase(scanner databaseScanner) (domain.Database, error) {
 	var item domain.Database
 	var created, updated string
 	var driver, status string
-	var path, host, database, username, passwordRef, schema, sslMode, charset, options, lastPing sql.NullString
-	var port sql.NullInt64
+	var path, host, database, username, passwordRef, schema, sslMode, charset, options, clientName, address, lastPing sql.NullString
+	var port, dbIndex, useTLS sql.NullInt64
 	if err := scanner.Scan(
 		&item.ID, &item.Name, &driver, &path, &host, &port, &database,
 		&username, &passwordRef, &schema, &sslMode, &charset, &options,
+		&dbIndex, &useTLS, &clientName, &address,
 		&status, &lastPing, &created, &updated,
 	); err != nil {
 		return domain.Database{}, fmt.Errorf("get database: %w", err)
@@ -157,6 +163,10 @@ func scanDatabase(scanner databaseScanner) (domain.Database, error) {
 	item.SSLMode = sslMode.String
 	item.Charset = charset.String
 	item.Options = options.String
+	item.DBIndex = int(dbIndex.Int64)
+	item.UseTLS = useTLS.Int64 != 0
+	item.ClientName = clientName.String
+	item.Address = address.String
 	item.Status = domain.DatabaseStatus(status)
 	if item.Status == "" {
 		item.Status = domain.DatabaseStatusUnknown

@@ -13,6 +13,7 @@ import type { Edge, FunctionKind, GraphNode, LibraryItem, LogEntry, Port, PortKi
 import {
   applyRunStatus,
   dehydrate,
+  fieldDefFromConfig,
   fnKindFromBackend,
   fnKindToBackend,
   functionPinsFromPorts,
@@ -21,10 +22,11 @@ import {
   localizeDefinitions,
   mapDataType,
   nodeRunToLog,
+  portFromNodePort,
   refreshNode,
+  visibleFields,
   type DefinitionIndex,
 } from "@/lib/adapters";
-import type { NodePort } from "@/lib/types";
 import { isTypeAssignable } from "@/lib/type-spec";
 import {
   applyFunctionInterface,
@@ -707,14 +709,26 @@ export function useGraphEditor(options: {
                 icon: localized.icon,
                 group: localized.category,
                 summary: localized.description,
-                inputs: (localized.inputs ?? []).map(portFromBackendPin),
-                outputs: (localized.outputs ?? []).map(portFromBackendPin),
+                // The shared mapper keeps the pin's TypeSpec metadata (record
+                // names, fields, array element types) so pin tooltips can
+                // render the object structure of dynamic trigger outputs.
+                inputs: (localized.inputs ?? []).map(portFromNodePort),
+                outputs: (localized.outputs ?? []).map(portFromNodePort),
+                // Dynamic triggers (twitch/discord/telegram events, SQL) derive
+                // their config fields from the current config — e.g. the
+                // per-event condition and filter fields — so the resolved
+                // contract must replace the static catalog fields too.
+                fields: visibleFields(localized.fields ?? [], { ...localized.defaultConfig, ...node.values }).map(fieldDefFromConfig),
+                outputSchema: (localized.outputs ?? [])
+                  .flatMap((o) => o.fields ?? [])
+                  .slice(0, 6)
+                  .map((f) => ({ key: f.path, type: mapDataType(f.dataType ?? "any") })),
               }
               : n,
           ),
         );
       } catch {
-        /* keep locally derived pins */
+        /* keep locally derived pins and fields */
       }
     },
     [],
@@ -1109,17 +1123,6 @@ export type GraphEditor = ReturnType<typeof useGraphEditor>;
 
 function isBoundary(type: string) {
   return type === "function:entry" || type === "function:return";
-}
-
-function portFromBackendPin(p: NodePort): Port {
-  return {
-    id: p.id,
-    label: p.label,
-    kind: p.kind === "exec" ? "exec" : "data",
-    dataType: p.kind === "exec" ? "exec" : mapDataType(p.dataType),
-    spec: p.type,
-    maxConnections: p.maxConnections,
-  };
 }
 
 function fnKindOf(fn: CustomFunction): { kind: FunctionKind; inputs: Port[]; outputs: Port[] } {

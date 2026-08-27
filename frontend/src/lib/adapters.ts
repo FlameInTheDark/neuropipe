@@ -169,6 +169,10 @@ const COMPLEX_FIELD_KINDS = new Set([
   "json-schema",
   "form-builder",
   "sql-parameters",
+  "kv-arguments",
+  "kv-string-list",
+  "kv-hash-fields",
+  "kv-scored-entries",
 ]);
 
 /** Maps a backend ConfigField onto a canvas inspector field definition. */
@@ -198,8 +202,14 @@ export function fieldDefFromConfig(field: ConfigField): FieldDef {
       return { ...base, type: "code-sql" } as FieldDef;
     case "database-select":
       return { ...base, type: "select", dynamic: "databases" } as FieldDef;
+    case "kv-database-select":
+      return { ...base, type: "select", dynamic: "kv-databases" } as FieldDef;
     case "twitch-identity":
       return { ...base, type: "select", dynamic: "twitch-identity" } as FieldDef;
+    case "discord-identity":
+      return { ...base, type: "select", dynamic: "discord-identity" } as FieldDef;
+    case "telegram-identity":
+      return { ...base, type: "select", dynamic: "telegram-identity" } as FieldDef;
     case "pipeline-select":
       return { ...base, type: "select", dynamic: "pipelines" } as FieldDef;
     case "textarea":
@@ -244,9 +254,13 @@ export function indexDefinitions(definitions: readonly NodeDefinition[]): Defini
 
 const BACKEND_RESOLVED_TYPES = new Set([
   "twitch:event",
+  "discord:event",
+  "telegram:event",
+  "kv:subscribe",
   "data:get_global_variable",
   "flow:set_global_variable",
   "action:sql",
+  "action:kv_command",
 ]);
 
 function nodeTitle(definition: NodeDefinition | undefined, type: string): string {

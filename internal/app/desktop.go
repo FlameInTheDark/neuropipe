@@ -23,11 +23,14 @@ import (
 	chatservice "github.com/FlameInTheDark/neuropipe/internal/chat"
 	databaseservice "github.com/FlameInTheDark/neuropipe/internal/databases"
 	"github.com/FlameInTheDark/neuropipe/internal/dialogs"
+	discordservice "github.com/FlameInTheDark/neuropipe/internal/discord"
 	documentation "github.com/FlameInTheDark/neuropipe/internal/documentation"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/execution"
 	"github.com/FlameInTheDark/neuropipe/internal/hotkey"
 	"github.com/FlameInTheDark/neuropipe/internal/httpapi"
+	kvservice "github.com/FlameInTheDark/neuropipe/internal/kv"
+	kvsubservice "github.com/FlameInTheDark/neuropipe/internal/kvsub"
 	"github.com/FlameInTheDark/neuropipe/internal/llm"
 	"github.com/FlameInTheDark/neuropipe/internal/localization"
 	"github.com/FlameInTheDark/neuropipe/internal/metrics"
@@ -42,6 +45,7 @@ import (
 	localruntime "github.com/FlameInTheDark/neuropipe/internal/runtime"
 	"github.com/FlameInTheDark/neuropipe/internal/scheduler"
 	"github.com/FlameInTheDark/neuropipe/internal/security"
+	telegramservice "github.com/FlameInTheDark/neuropipe/internal/telegram"
 	twitchservice "github.com/FlameInTheDark/neuropipe/internal/twitch"
 	"github.com/FlameInTheDark/neuropipe/internal/updatecheck"
 	variablesservice "github.com/FlameInTheDark/neuropipe/internal/variables"
@@ -82,10 +86,14 @@ type Desktop struct {
 	modelInstallProgress   domain.InstallProgress
 	api                    *httpapi.Server
 	twitch                 *twitchservice.Service
+	discord                *discordservice.Service
+	telegram               *telegramservice.Service
 	settingsMu             sync.RWMutex
 	settings               domain.Settings
 	variables              *variablesservice.Service
 	databases              *databaseservice.Service
+	kv                     *kvservice.Service
+	kvsubs                 *kvsubservice.Service
 	trayMu                 sync.RWMutex
 	trayMenu               trayLabelSink
 	updates                UpdateChecker
@@ -139,6 +147,7 @@ func New(version string) (*Desktop, error) {
 		return nil, err
 	}
 	databases := databaseservice.New(store, vault)
+	kv := kvservice.New(store, vault, root)
 	getglobalvariablenodes.SetDeclaredType(variables.VariableType)
 	getglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
 	setglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
@@ -149,7 +158,7 @@ func New(version string) (*Desktop, error) {
 		_ = store.Close()
 		return nil, err
 	}
-	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version), variables: variables, databases: databases}
+	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version), variables: variables, databases: databases, kv: kv}
 	desktop.registry.SetVariableOptions(variables.VariableOptions)
 	if err := desktop.refreshFunctionRegistry(context.Background()); err != nil {
 		_ = store.Close()
@@ -170,6 +179,7 @@ func New(version string) (*Desktop, error) {
 		execution.WithMetricsRecorder(desktop.metrics),
 		execution.WithGlobalVariablesStore(variables),
 		execution.WithDatabaseService(databases),
+		execution.WithKVService(kv),
 		execution.WithDialogOpener(dialogs.NewOpenerAdapter(desktop.dialogs)),
 		execution.WithInputDialogOpener(dialogs.NewInputAdapter(desktop.dialogs)),
 		execution.WithFormDialogOpener(dialogs.NewFormAdapter(desktop.dialogs)),
@@ -178,6 +188,13 @@ func New(version string) (*Desktop, error) {
 	desktop.twitch = twitchservice.New(vault, store, desktop.runs, desktop.saveTwitchIdentity, desktop.emit)
 	desktop.twitch.Configure(settings.Twitch)
 	desktop.runs.SetTwitchChatSender(desktop.twitch)
+	desktop.discord = discordservice.New(vault, store, desktop.runs, desktop.saveDiscordIdentity, desktop.emit)
+	desktop.discord.Configure(settings.Discord)
+	desktop.runs.SetDiscordSender(desktop.discord)
+	desktop.telegram = telegramservice.New(vault, store, desktop.runs, desktop.saveTelegramIdentity, desktop.emit)
+	desktop.telegram.Configure(settings.Telegram)
+	desktop.runs.SetTelegramSender(desktop.telegram)
+	desktop.kvsubs = kvsubservice.New(store, kv, desktop.runs, desktop.emit)
 	bridge := &executorBridge{providers: desktop.providers, store: store, databases: databases, emit: func(event string) { desktop.emit(event, nil) }}
 	desktop.remote = remoteexec.NewManager(vault, bridge,
 		func(executorID string, execution domain.Execution) { desktop.runs.ApplyRemoteRunUpdate(execution) },
@@ -240,6 +257,9 @@ func (d *Desktop) Startup(app *application.App) {
 		d.emit("api.status.error", err.Error())
 	}
 	d.twitch.Start(d.ctx)
+	d.kvsubs.Start(d.ctx)
+	d.discord.Start(d.ctx)
+	d.telegram.Start(d.ctx)
 	if d.settings.LlamaRuntime.AutoStart {
 		_, _ = d.StartLlamaRuntime()
 	}
@@ -253,12 +273,16 @@ func (d *Desktop) Shutdown(context.Context) {
 	d.hotkeys.Stop()
 	d.scheduler.Stop()
 	d.twitch.Stop()
+	d.kvsubs.Stop()
+	d.discord.Stop()
+	d.telegram.Stop()
 	d.chat.Stop()
 	d.runs.Stop()
 	d.variables.Stop()
 	d.metrics.Stop()
 	d.llama.Stop()
 	_ = d.databases.Close()
+	_ = d.kv.Close()
 	_ = d.store.Close()
 }
 
@@ -269,27 +293,46 @@ func (d *Desktop) ListDatabases() ([]domain.Database, error) {
 // CreateDatabase registers a new database. The request payload carries the
 // full dialect-specific metadata; the service branches on driver internally.
 // For SQLite the file is created on disk; for Postgres and MySQL the metadata
-// is persisted and a connection is opened and pinged.
+// is persisted and a connection is opened and pinged. Key/value requests
+// (remote Redis-protocol servers and the embedded SugarDB store) route to
+// the KV service.
 func (d *Desktop) CreateDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
+	if domain.IsKVDriver(request.Driver) {
+		return d.kv.Create(d.context(), request)
+	}
 	return d.databases.Create(d.context(), request)
 }
 
 // RegisterDatabase records an existing database without creating it. For
 // SQLite the file must already exist; for Postgres/MySQL a connection is
-// opened and pinged.
+// opened and pinged. Key/value requests route to the KV service.
 func (d *Desktop) RegisterDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
+	if domain.IsKVDriver(request.Driver) {
+		return d.kv.Register(d.context(), request)
+	}
 	return d.databases.Register(d.context(), request)
 }
 
 func (d *Desktop) UpdateDatabase(request domain.SaveDatabaseRequest) (domain.Database, error) {
+	if domain.IsKVDriver(request.Driver) {
+		return d.kv.Update(d.context(), request)
+	}
 	return d.databases.Update(d.context(), request)
 }
 
-func (d *Desktop) DeleteDatabase(id string) error { return d.databases.Delete(d.context(), id) }
+func (d *Desktop) DeleteDatabase(id string) error {
+	if item, err := d.store.GetDatabase(d.context(), id); err == nil && domain.IsKVDriver(item.Driver) {
+		return d.kv.Delete(d.context(), id)
+	}
+	return d.databases.Delete(d.context(), id)
+}
 
 // PingDatabase opens (or reuses) a connection to the registered database,
 // runs the dialect's ping query, and persists the resulting status.
 func (d *Desktop) PingDatabase(id string) (domain.DatabaseStatus, error) {
+	if item, err := d.store.GetDatabase(d.context(), id); err == nil && domain.IsKVDriver(item.Driver) {
+		return d.kv.Ping(d.context(), id)
+	}
 	return d.databases.Ping(d.context(), id)
 }
 
@@ -297,6 +340,13 @@ func (d *Desktop) PingDatabase(id string) (domain.DatabaseStatus, error) {
 // anything. It is used by the "Test connection" button in the create modal.
 // If request.Password is set it overrides any passwordRef in the vault.
 func (d *Desktop) TestDatabase(request domain.SaveDatabaseRequest) (domain.DatabaseStatus, error) {
+	if domain.IsKVDriver(request.Driver) {
+		item, err := kvservice.BuildDatabase(request)
+		if err != nil {
+			return domain.DatabaseStatusError, err
+		}
+		return d.kv.TestConnection(d.context(), item, strings.TrimSpace(request.Password))
+	}
 	item, err := d.databases.BuildDatabase(request)
 	if err != nil {
 		return domain.DatabaseStatusError, err
@@ -310,6 +360,76 @@ func (d *Desktop) InspectDatabase(id string) (domain.DatabaseSchema, error) {
 
 func (d *Desktop) DebugDatabase(request domain.SQLDebugRequest) (domain.SQLResult, error) {
 	return d.databases.Debug(d.context(), request)
+}
+
+/* ---------------- KV (Redis protocol) bindings ---------------- */
+
+// KVInfo returns the connected server's summary for the browser Info tab.
+func (d *Desktop) KVInfo(id string) (domain.KVServerInfo, error) {
+	return d.kv.Info(d.context(), id)
+}
+
+// KVScanKeys pages through keys matching the request's pattern and type.
+func (d *Desktop) KVScanKeys(id string, request domain.KVScanRequest) (domain.KVKeyPage, error) {
+	return d.kv.ScanKeys(d.context(), id, request)
+}
+
+// KVKeyValue loads one key's typed value for the browser value panel.
+func (d *Desktop) KVKeyValue(id string, key string) (domain.KVKeyValue, error) {
+	return d.kv.KeyValue(d.context(), id, key)
+}
+
+// KVDeleteKeys removes keys from the browser after the renderer confirmed.
+func (d *Desktop) KVDeleteKeys(id string, keys []string) (int64, error) {
+	return d.kv.DeleteKeys(d.context(), id, keys)
+}
+
+// KVSetTTL applies a new expiry in seconds; a negative value persists the key.
+func (d *Desktop) KVSetTTL(id string, key string, ttlSeconds int64) error {
+	return d.kv.SetTTL(d.context(), id, key, ttlSeconds)
+}
+
+// KVDebug runs one console command. allowDangerous must come from an
+// explicit user confirmation for denylisted commands.
+func (d *Desktop) KVDebug(id string, command string, args []string, allowDangerous bool) (domain.KVCommandResult, error) {
+	return d.kv.Debug(d.context(), id, command, args, allowDangerous)
+}
+
+// ListKVTriggers exposes credential-free KV subscribe binding state for the
+// explicit trust/enable controls in the KV browser.
+func (d *Desktop) ListKVTriggers() ([]domain.TriggerBinding, error) {
+	return d.store.ListTriggers(d.context(), domain.TriggerKV)
+}
+
+func (d *Desktop) SetKVTriggerEnabled(id string, enabled bool) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerKV {
+		return fmt.Errorf("trigger %q is not a KV subscribe trigger", binding.Label)
+	}
+	if enabled && !binding.Trusted {
+		return fmt.Errorf("trust the published pipeline revision before enabling this KV trigger")
+	}
+	if err := d.store.SetTriggerEnabled(d.context(), id, enabled); err != nil {
+		return err
+	}
+	d.kvsubs.Reconcile()
+	return nil
+}
+
+// TrustKVTrigger marks the binding's pipeline revision as trusted, the
+// prerequisite for enabling unattended pub/sub delivery.
+func (d *Desktop) TrustKVTrigger(id string) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerKV {
+		return fmt.Errorf("trigger %q is not a KV subscribe trigger", binding.Label)
+	}
+	return d.TrustPipelineRevision(binding.PipelineID, binding.Revision)
 }
 
 func (d *Desktop) ChooseDatabaseFile() (string, error) {
@@ -326,6 +446,18 @@ func (d *Desktop) ChooseDatabaseCreateFile() (string, error) {
 		Filters: []application.FileFilter{
 			{DisplayName: "SQLite database", Pattern: "*.db;*.sqlite;*.sqlite3"},
 		},
+	})
+	return dialog.PromptForSingleSelection()
+}
+
+// ChooseDirectory opens a native directory picker. Used by connections that
+// persist to a folder, such as the embedded SugarDB store's data directory.
+func (d *Desktop) ChooseDirectory(title string) (string, error) {
+	dialog := d.app.Dialog.OpenFileWithOptions(&application.OpenFileDialogOptions{
+		Title:                title,
+		CanChooseDirectories: true,
+		CanChooseFiles:       false,
+		CanCreateDirectories: true,
 	})
 	return dialog.PromptForSingleSelection()
 }
@@ -440,6 +572,9 @@ func (d *Desktop) PublishPipeline(pipeline domain.Pipeline) (domain.Pipeline, er
 	}
 
 	d.twitch.Reconcile()
+	d.kvsubs.Reconcile()
+	d.discord.Reconcile()
+	d.telegram.Reconcile()
 	if published.ExecutorID != "" {
 		if err := d.DeployPipelineToExecutor(published.ID); err != nil {
 			// Local publication stands; the executor syncs automatically on
@@ -591,6 +726,9 @@ func (d *Desktop) SetTwitchTriggerEnabled(id string, enabled bool) error {
 		return err
 	}
 	d.twitch.Reconcile()
+	d.kvsubs.Reconcile()
+	d.discord.Reconcile()
+	d.telegram.Reconcile()
 	return nil
 }
 
@@ -815,6 +953,9 @@ func (d *Desktop) TrustPipelineRevision(pipelineID string, revision int) error {
 		return err
 	}
 	d.twitch.Reconcile()
+	d.kvsubs.Reconcile()
+	d.discord.Reconcile()
+	d.telegram.Reconcile()
 	return nil
 }
 
@@ -850,6 +991,112 @@ func (d *Desktop) TrustTwitchTrigger(id string) error {
 	}
 	if binding.Kind != domain.TriggerTwitch {
 		return fmt.Errorf("trigger %q is not a Twitch trigger", binding.Label)
+	}
+	return d.TrustPipelineRevision(binding.PipelineID, binding.Revision)
+}
+
+// GetDiscordStatus exposes gateway lifecycle state without exposing bot
+// tokens.
+func (d *Desktop) GetDiscordStatus() domain.DiscordStatus { return d.discord.Status() }
+
+// ListDiscordEventCatalog supplies the gateway event metadata used by the
+// trigger editor and settings UI.
+func (d *Desktop) ListDiscordEventCatalog() []domain.DiscordEventDescriptor {
+	return d.discord.Catalog()
+}
+
+func (d *Desktop) AddDiscordManualIdentity(request domain.DiscordManualIdentityRequest) (domain.DiscordIdentity, error) {
+	return d.discord.AddManualIdentity(d.context(), request)
+}
+
+func (d *Desktop) RemoveDiscordIdentity(id string) error {
+	return d.discord.RemoveIdentity(d.context(), id)
+}
+
+// ListDiscordTriggers exposes credential-free gateway binding state for the
+// explicit trust/enable controls in Discord settings.
+func (d *Desktop) ListDiscordTriggers() ([]domain.TriggerBinding, error) {
+	return d.store.ListTriggers(d.context(), domain.TriggerDiscord)
+}
+
+func (d *Desktop) SetDiscordTriggerEnabled(id string, enabled bool) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerDiscord {
+		return fmt.Errorf("trigger %q is not a Discord trigger", binding.Label)
+	}
+	if enabled && !binding.Trusted {
+		return fmt.Errorf("trust the published pipeline revision before enabling this Discord trigger")
+	}
+	if err := d.store.SetTriggerEnabled(d.context(), id, enabled); err != nil {
+		return err
+	}
+	d.discord.Reconcile()
+	return nil
+}
+
+func (d *Desktop) TrustDiscordTrigger(id string) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerDiscord {
+		return fmt.Errorf("trigger %q is not a Discord trigger", binding.Label)
+	}
+	return d.TrustPipelineRevision(binding.PipelineID, binding.Revision)
+}
+
+// GetTelegramStatus exposes polling lifecycle state without exposing bot
+// tokens.
+func (d *Desktop) GetTelegramStatus() domain.TelegramStatus { return d.telegram.Status() }
+
+// ListTelegramEventCatalog supplies the Bot API update metadata used by the
+// trigger editor and settings UI.
+func (d *Desktop) ListTelegramEventCatalog() []domain.TelegramEventDescriptor {
+	return d.telegram.Catalog()
+}
+
+func (d *Desktop) AddTelegramManualIdentity(request domain.TelegramManualIdentityRequest) (domain.TelegramIdentity, error) {
+	return d.telegram.AddManualIdentity(d.context(), request)
+}
+
+func (d *Desktop) RemoveTelegramIdentity(id string) error {
+	return d.telegram.RemoveIdentity(d.context(), id)
+}
+
+// ListTelegramTriggers exposes credential-free polling binding state for the
+// explicit trust/enable controls in Telegram settings.
+func (d *Desktop) ListTelegramTriggers() ([]domain.TriggerBinding, error) {
+	return d.store.ListTriggers(d.context(), domain.TriggerTelegram)
+}
+
+func (d *Desktop) SetTelegramTriggerEnabled(id string, enabled bool) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerTelegram {
+		return fmt.Errorf("trigger %q is not a Telegram trigger", binding.Label)
+	}
+	if enabled && !binding.Trusted {
+		return fmt.Errorf("trust the published pipeline revision before enabling this Telegram trigger")
+	}
+	if err := d.store.SetTriggerEnabled(d.context(), id, enabled); err != nil {
+		return err
+	}
+	d.telegram.Reconcile()
+	return nil
+}
+
+func (d *Desktop) TrustTelegramTrigger(id string) error {
+	binding, err := d.store.GetTrigger(d.context(), id)
+	if err != nil {
+		return err
+	}
+	if binding.Kind != domain.TriggerTelegram {
+		return fmt.Errorf("trigger %q is not a Telegram trigger", binding.Label)
 	}
 	return d.TrustPipelineRevision(binding.PipelineID, binding.Revision)
 }
@@ -919,6 +1166,62 @@ func (d *Desktop) saveTwitchIdentity(ctx context.Context, identity domain.Twitch
 	return d.store.SaveSettings(ctx, d.settings)
 }
 
+func (d *Desktop) saveDiscordIdentity(ctx context.Context, identity domain.DiscordIdentity) error {
+	d.settingsMu.Lock()
+	defer d.settingsMu.Unlock()
+	identities := d.settings.Discord.Identities[:0]
+	found := false
+	for _, item := range d.settings.Discord.Identities {
+		if item.ID != identity.ID {
+			identities = append(identities, item)
+			continue
+		}
+		found = true
+		if identity.Status != domain.DiscordIdentityRevoked {
+			identities = append(identities, identity)
+		}
+	}
+	if !found && identity.Status != domain.DiscordIdentityRevoked {
+		identities = append(identities, identity)
+	}
+	d.settings.Discord.Identities = identities
+	if d.settings.Discord.DefaultBotIdentityID == identity.ID && identity.Status == domain.DiscordIdentityRevoked {
+		d.settings.Discord.DefaultBotIdentityID = ""
+	}
+	if d.settings.Discord.DefaultBotIdentityID == "" && identity.Status == domain.DiscordIdentityConnected {
+		d.settings.Discord.DefaultBotIdentityID = identity.ID
+	}
+	return d.store.SaveSettings(ctx, d.settings)
+}
+
+func (d *Desktop) saveTelegramIdentity(ctx context.Context, identity domain.TelegramIdentity) error {
+	d.settingsMu.Lock()
+	defer d.settingsMu.Unlock()
+	identities := d.settings.Telegram.Identities[:0]
+	found := false
+	for _, item := range d.settings.Telegram.Identities {
+		if item.ID != identity.ID {
+			identities = append(identities, item)
+			continue
+		}
+		found = true
+		if identity.Status != domain.TelegramIdentityRevoked {
+			identities = append(identities, identity)
+		}
+	}
+	if !found && identity.Status != domain.TelegramIdentityRevoked {
+		identities = append(identities, identity)
+	}
+	d.settings.Telegram.Identities = identities
+	if d.settings.Telegram.DefaultBotIdentityID == identity.ID && identity.Status == domain.TelegramIdentityRevoked {
+		d.settings.Telegram.DefaultBotIdentityID = ""
+	}
+	if d.settings.Telegram.DefaultBotIdentityID == "" && identity.Status == domain.TelegramIdentityConnected {
+		d.settings.Telegram.DefaultBotIdentityID = identity.ID
+	}
+	return d.store.SaveSettings(ctx, d.settings)
+}
+
 func (d *Desktop) GetSettings() domain.Settings {
 	d.settingsMu.RLock()
 	defer d.settingsMu.RUnlock()
@@ -972,6 +1275,12 @@ func (d *Desktop) SaveSettings(settings domain.Settings) error {
 	d.settings = settings
 	if d.twitch != nil {
 		d.twitch.Configure(settings.Twitch)
+	}
+	if d.discord != nil {
+		d.discord.Configure(settings.Discord)
+	}
+	if d.telegram != nil {
+		d.telegram.Configure(settings.Telegram)
 	}
 	d.providers.Configure(settings)
 	d.metrics.UpdateSettings(settings.Metrics)

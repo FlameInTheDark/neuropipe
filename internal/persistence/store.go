@@ -269,6 +269,10 @@ CREATE TABLE IF NOT EXISTS databases (
   ssl_mode TEXT NOT NULL DEFAULT '',
   charset TEXT NOT NULL DEFAULT '',
   options TEXT NOT NULL DEFAULT '',
+  db_index INTEGER NOT NULL DEFAULT 0,
+  use_tls INTEGER NOT NULL DEFAULT 0,
+  client_name TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'unknown',
   last_ping_at TEXT,
   created_at TEXT NOT NULL,
@@ -459,6 +463,9 @@ CREATE TABLE IF NOT EXISTS remote_executors (
 		return err
 	}
 	if err := s.ensureDatabaseMultiDialectColumns(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureKVColumns(ctx); err != nil {
 		return err
 	}
 	if err := s.repairV3LegacyMarkers(ctx); err != nil {
@@ -664,6 +671,31 @@ ALTER TABLE databases_new RENAME TO databases;
 CREATE INDEX IF NOT EXISTS databases_name ON databases(name COLLATE NOCASE);
 `); err != nil {
 		return fmt.Errorf("migrate databases table to multi-dialect: %w", err)
+	}
+	return nil
+}
+
+// ensureKVColumns adds the Redis-family connection columns to the databases
+// table for existing installations. Fresh installs get them from the CREATE
+// TABLE statement; this only handles the ALTER TABLE path. Each column is
+// added independently so partially migrated installations converge.
+func (s *Store) ensureKVColumns(ctx context.Context) error {
+	for _, column := range []struct{ name, ddl string }{
+		{"db_index", "ALTER TABLE databases ADD COLUMN db_index INTEGER NOT NULL DEFAULT 0"},
+		{"use_tls", "ALTER TABLE databases ADD COLUMN use_tls INTEGER NOT NULL DEFAULT 0"},
+		{"client_name", "ALTER TABLE databases ADD COLUMN client_name TEXT NOT NULL DEFAULT ''"},
+		{"address", "ALTER TABLE databases ADD COLUMN address TEXT NOT NULL DEFAULT ''"},
+	} {
+		var present int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('databases') WHERE name = ?`, column.name).Scan(&present); err != nil {
+			return fmt.Errorf("inspect databases.%s migration: %w", column.name, err)
+		}
+		if present > 0 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, column.ddl); err != nil {
+			return fmt.Errorf("migrate databases.%s: %w", column.name, err)
+		}
 	}
 	return nil
 }

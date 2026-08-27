@@ -25,6 +25,11 @@ import type {
   TwitchIdentity,
   TwitchManualIdentityRequest,
   TwitchStatus,
+  DiscordEventDescriptor,
+  DiscordIdentity,
+  DiscordStatus,
+  TelegramIdentity,
+  TelegramStatus,
 } from "@/lib/types";
 import { formatBytes, formatCompact, formatDateTime } from "@/lib/format";
 import type { Workspace } from "@/features/workspace/useWorkspace";
@@ -46,6 +51,8 @@ const SECTIONS = [
   { id: "executors", labelKey: "executors.title", icon: "Server" },
   { id: "api", labelKey: "settings.api", icon: "Radio" },
   { id: "twitch", labelKey: "twitch.title", icon: "Radio" },
+  { id: "discord", labelKey: "discord.title", icon: "Hash" },
+  { id: "telegram", labelKey: "telegram.title", icon: "Send" },
   { id: "execution", labelKey: "settings.execution", icon: "Play" },
   { id: "metrics", labelKey: "settings.metrics", icon: "Activity" },
   { id: "extensions", labelKey: "settings.extensions", icon: "Sparkles" },
@@ -53,6 +60,35 @@ const SECTIONS = [
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
+
+/** How often integration panels re-read live service state while open. The
+ *  gateway/polling loops connect asynchronously after trust/enable/add-bot
+ *  actions, so a one-shot fetch would show stale state seconds later. */
+const PANEL_POLL_MS = 5000;
+
+interface IdentitySlice<I> {
+  identities: I[];
+  defaultBotIdentityId?: string;
+}
+
+/** Adopts backend-managed identity state into a dirty settings draft without
+ *  touching the user's unsaved edits: the identity list always follows the
+ *  backend (the UI only mutates it through backend calls), while the default
+ *  selection keeps the user's choice unless it is unset or no longer points
+ *  at an existing identity (removed bot), in which case the backend's
+ *  rotation wins. */
+function mergeIdentitySlice<S extends IdentitySlice<{ id: string }>>(draft: S, backend: S): S {
+  const draftDefault = draft.defaultBotIdentityId ?? "";
+  const backendDefault = backend.defaultBotIdentityId ?? "";
+  const draftDefaultValid =
+    draftDefault !== "" && backend.identities.some((identity) => identity.id === draftDefault);
+  const nextDefault = draftDefaultValid ? draftDefault : backendDefault;
+  return {
+    ...draft,
+    identities: backend.identities,
+    defaultBotIdentityId: nextDefault || undefined,
+  };
+}
 
 /** Normalises a loaded Settings object before it enters the editor draft. */
 function normalizeSettings(input: Settings): Settings {
@@ -76,6 +112,9 @@ function normalizeSettings(input: Settings): Settings {
       sampleIntervalSeconds: input.metrics.sampleIntervalSeconds ?? 30,
       priceRates: input.metrics.priceRates ?? [],
     },
+    twitch: { ...input.twitch, identities: input.twitch?.identities ?? [], clientId: input.twitch?.clientId ?? "" },
+    discord: { ...input.discord, identities: input.discord?.identities ?? [] },
+    telegram: { ...input.telegram, identities: input.telegram?.identities ?? [] },
     providers,
   };
 }
@@ -107,10 +146,21 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
   /* re-sync when the workspace loads/changes settings externally */
   useEffect(() => {
     if (!workspace.settings || saving) return;
-    if (dirtyRef.current) return; // keep unsaved local edits
-    setDraft(normalizeSettings(workspace.settings));
+    const next = normalizeSettings(workspace.settings);
+    setDraft((d) => {
+      if (!d || !dirtyRef.current) return next; // clean draft: adopt wholesale
+      // Dirty draft: unsaved edits survive, but backend-managed identity
+      // state (added/removed bots, default rotation) always flows in so the
+      // integration panels never show stale identities.
+      return {
+        ...d,
+        twitch: mergeIdentitySlice(d.twitch, next.twitch),
+        discord: mergeIdentitySlice(d.discord, next.discord),
+        telegram: mergeIdentitySlice(d.telegram, next.telegram),
+      };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.settings]);
+  }, [workspace.settings, saving]);
 
   if (!draft) {
     return (
@@ -200,7 +250,31 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
           {section === "api" && <ApiPanel draft={draft} patch={patch} />}
           {section === "executors" && <RemoteExecutorsPanel workspace={workspace} />}
           {section === "twitch" && (
-            <TwitchPanel draft={draft} patch={patch} triggers={workspace.triggers} refreshTriggers={workspace.refreshTriggers} />
+            <TwitchPanel
+              draft={draft}
+              patch={patch}
+              triggers={workspace.triggers}
+              refreshTriggers={workspace.refreshTriggers}
+              refreshSettings={workspace.refreshSettings}
+            />
+          )}
+          {section === "discord" && (
+            <DiscordPanel
+              draft={draft}
+              patch={patch}
+              triggers={workspace.triggers}
+              refreshTriggers={workspace.refreshTriggers}
+              refreshSettings={workspace.refreshSettings}
+            />
+          )}
+          {section === "telegram" && (
+            <TelegramPanel
+              draft={draft}
+              patch={patch}
+              triggers={workspace.triggers}
+              refreshTriggers={workspace.refreshTriggers}
+              refreshSettings={workspace.refreshSettings}
+            />
           )}
           {section === "execution" && <ExecutionPanel draft={draft} patch={patch} />}
           {section === "metrics" && <MetricsPanel draft={draft} patch={patch} />}
@@ -1318,11 +1392,13 @@ function TwitchPanel({
   patch,
   triggers,
   refreshTriggers,
+  refreshSettings,
 }: {
   draft: Settings;
   patch: (p: Partial<Settings>) => void;
   triggers: TriggerBinding[];
   refreshTriggers: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<TwitchStatus | null>(null);
@@ -1339,13 +1415,23 @@ function TwitchPanel({
     const [st, cat] = await Promise.all([
       desktop.getTwitchStatus().catch(() => null),
       desktop.listTwitchEventCatalog().catch(() => []),
+      refreshTriggers(),
+      refreshSettings(),
     ]);
     setStatus(st);
     setCatalog(cat);
-  }, []);
+  }, [refreshTriggers, refreshSettings]);
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  /* keep the panel live while it is open: device-code auth completes and
+     identities land server-side asynchronously, and the EventSub socket
+     connects seconds after trust/enable — a one-shot fetch goes stale */
+  useEffect(() => {
+    const timer = window.setInterval(() => void refresh(), PANEL_POLL_MS);
+    return () => window.clearInterval(timer);
   }, [refresh]);
 
   const connectScopes = useMemo(
@@ -1401,12 +1487,12 @@ function TwitchPanel({
 
   const trustTrigger = async (binding: TriggerBinding) => {
     await desktop.trustTwitchTrigger(binding.id).catch(() => undefined);
-    await refreshTriggers();
+    await refresh();
   };
 
   const toggleTrigger = async (binding: TriggerBinding, enabled: boolean) => {
     await desktop.setTwitchTriggerEnabled(binding.id, enabled).catch(() => undefined);
-    await refreshTriggers();
+    await refresh();
   };
 
   const openVerification = async () => {
@@ -1591,6 +1677,431 @@ function TwitchPanel({
 
 async function workspace_save(settings: Settings): Promise<void> {
   await desktop.saveSettings(settings);
+}
+
+/* ------------------------------------------------------------------ */
+/* discord                                                             */
+/* ------------------------------------------------------------------ */
+
+function DiscordPanel({
+  draft,
+  patch,
+  triggers,
+  refreshTriggers,
+  refreshSettings,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+  triggers: TriggerBinding[];
+  refreshTriggers: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<DiscordStatus | null>(null);
+  const [catalog, setCatalog] = useState<DiscordEventDescriptor[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addLabel, setAddLabel] = useState("");
+  const [addToken, setAddToken] = useState("");
+  const [addError, setAddError] = useState("");
+
+  const discordTriggers = triggers.filter((tr) => tr.kind === "discord");
+
+  const refresh = useCallback(async () => {
+    const [st, cat] = await Promise.all([
+      desktop.getDiscordStatus().catch(() => null),
+      desktop.listDiscordEventCatalog().catch(() => [] as DiscordEventDescriptor[]),
+      refreshTriggers(),
+      refreshSettings(),
+    ]);
+    setStatus(st);
+    setCatalog(cat);
+  }, [refreshTriggers, refreshSettings]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  /* keep the panel live while it is open: the gateway session opens
+     asynchronously after add-bot/trust/enable, so a one-shot fetch would
+     keep showing the previous connection state */
+  useEffect(() => {
+    const timer = window.setInterval(() => void refresh(), PANEL_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const needsPrivilegedIntents = useMemo(
+    () => catalog.some((descriptor) => descriptor.privileged),
+    [catalog],
+  );
+
+  const addBot = async () => {
+    if (!addToken.trim()) return;
+    try {
+      await desktop.addDiscordManualIdentity({ label: addLabel.trim(), token: addToken.trim() });
+      setAddOpen(false);
+      setAddLabel("");
+      setAddToken("");
+      setAddError("");
+      await refresh();
+    } catch (error) {
+      setAddError(String((error as { message?: string })?.message ?? error));
+    }
+  };
+
+  const removeIdentity = async (identity: DiscordIdentity) => {
+    const ok = await ask({
+      title: t("discord.removeTitle"),
+      description: t("discord.removeDescription", { name: identity.label }),
+      confirmLabel: t("common.delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    await desktop.removeDiscordIdentity(identity.id).catch(() => undefined);
+    await refresh();
+  };
+
+  const trustTrigger = async (binding: TriggerBinding) => {
+    await desktop.trustDiscordTrigger(binding.id).catch(() => undefined);
+    await refreshTriggers();
+    await refresh();
+  };
+
+  const toggleTrigger = async (binding: TriggerBinding, enabled: boolean) => {
+    await desktop.setDiscordTriggerEnabled(binding.id, enabled).catch(() => undefined);
+    await refreshTriggers();
+    await refresh();
+  };
+
+  return (
+    <div className="mx-auto max-w-[720px] space-y-3">
+      <SectionCard title={t("discord.connection")}>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-medium text-ink-100">
+                {status?.connected ? t("discord.connected") : t("discord.disconnected")}
+              </p>
+              <p className="truncate text-[11px] text-ink-500">
+                {status?.lastError || t("discord.gatewayDescription", { count: status?.activeSubscriptions ?? 0 })}
+              </p>
+            </div>
+            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />}
+          </div>
+          {needsPrivilegedIntents && (
+            <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-[11.5px] leading-relaxed text-amber-200">
+              {t("discord.intentsWarning")}
+            </p>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title={t("discord.identities")}>
+        <div className="space-y-3">
+          <Button icon="Cable" variant="primary" onClick={() => setAddOpen(true)}>
+            {t("discord.addBot")}
+          </Button>
+
+          <Field label={t("discord.defaultBotIdentity")}>
+            <Dropdown
+              value={draft.discord.defaultBotIdentityId ?? ""}
+              onChange={(v) => patch({ discord: { ...draft.discord, defaultBotIdentityId: v || undefined } })}
+              placeholder={t("discord.defaultBotIdentityPlaceholder")}
+              options={[
+                { value: "", label: t("discord.defaultBotIdentityPlaceholder") },
+                ...draft.discord.identities
+                  .filter((identity) => identity.status === "connected")
+                  .map((identity) => ({ value: identity.id, label: identity.label, icon: "Bot" })),
+              ]}
+            />
+          </Field>
+
+          {draft.discord.identities.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+              {t("discord.noIdentities")}
+            </p>
+          ) : (
+            draft.discord.identities.map((identity) => (
+              <div key={identity.id} className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12.5px] font-medium text-ink-100">{identity.label}</p>
+                  <p className="truncate text-[11px] text-ink-500">@{identity.username}</p>
+                </div>
+                {identity.status !== "connected" && (
+                  <span className="shrink-0 rounded bg-amber-400/15 px-2 py-1 text-[10.5px] text-amber-300">
+                    {t("discord.invalidIdentity")}
+                  </span>
+                )}
+                <Button icon="Trash2" variant="solid" onClick={() => void removeIdentity(identity)}>
+                  {t("common.delete")}
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title={t("discord.triggers")}>
+        <p className="mb-3 text-[11.5px] leading-relaxed text-ink-500">{t("discord.triggersHelp")}</p>
+        {discordTriggers.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+            {t("discord.noTriggers")}
+          </p>
+        ) : (
+          discordTriggers.map((binding) => (
+            <div key={binding.id} className="flex items-center gap-3 border-b border-seam/70 py-2 last:border-b-0">
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-100">{binding.label}</span>
+              {!binding.trusted ? (
+                <Button icon="ShieldCheck" variant="solid" onClick={() => void trustTrigger(binding)}>
+                  {t("schedules.trust")}
+                </Button>
+              ) : (
+                <Toggle on={binding.enabled} onChange={(v) => void toggleTrigger(binding, v)} />
+              )}
+            </div>
+          ))
+        )}
+      </SectionCard>
+
+      {addOpen && (
+        <Modal
+          title={t("discord.addTitle")}
+          icon="KeyRound"
+          onClose={() => setAddOpen(false)}
+          footer={
+            <ModalActions
+              onCancel={() => setAddOpen(false)}
+              onConfirm={() => void addBot()}
+              confirmLabel={t("common.save")}
+              disabled={!addToken.trim()}
+            />
+          }
+        >
+          <div className="space-y-3">
+            <p className="text-[12px] leading-relaxed text-ink-400">{t("discord.tokenDescription")}</p>
+            <Field label={t("discord.identityLabel")}>
+              <TextInput autoFocus value={addLabel} onChange={setAddLabel} placeholder={t("discord.identityLabelPlaceholder")} />
+            </Field>
+            <Field label={t("discord.botToken")}>
+              <input
+                type="password"
+                autoComplete="off"
+                value={addToken}
+                onChange={(e) => setAddToken(e.target.value)}
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+              />
+            </Field>
+            {addError && <p className="text-[11.5px] text-rose-300">{addError}</p>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* telegram                                                            */
+/* ------------------------------------------------------------------ */
+
+function TelegramPanel({
+  draft,
+  patch,
+  triggers,
+  refreshTriggers,
+  refreshSettings,
+}: {
+  draft: Settings;
+  patch: (p: Partial<Settings>) => void;
+  triggers: TriggerBinding[];
+  refreshTriggers: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<TelegramStatus | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addLabel, setAddLabel] = useState("");
+  const [addToken, setAddToken] = useState("");
+  const [addError, setAddError] = useState("");
+
+  const telegramTriggers = triggers.filter((tr) => tr.kind === "telegram");
+
+  const refresh = useCallback(async () => {
+    const st = await desktop.getTelegramStatus().catch(() => null);
+    setStatus(st);
+    await Promise.all([refreshTriggers(), refreshSettings()]);
+  }, [refreshTriggers, refreshSettings]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  /* keep the panel live while it is open: the long-poll loop (re)starts
+     asynchronously after add-bot/trust/enable, so a one-shot fetch would
+     keep showing the previous connection state */
+  useEffect(() => {
+    const timer = window.setInterval(() => void refresh(), PANEL_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const addBot = async () => {
+    if (!addToken.trim()) return;
+    try {
+      await desktop.addTelegramManualIdentity({ label: addLabel.trim(), token: addToken.trim() });
+      setAddOpen(false);
+      setAddLabel("");
+      setAddToken("");
+      setAddError("");
+      await refresh();
+    } catch (error) {
+      setAddError(String((error as { message?: string })?.message ?? error));
+    }
+  };
+
+  const removeIdentity = async (identity: TelegramIdentity) => {
+    const ok = await ask({
+      title: t("telegram.removeTitle"),
+      description: t("telegram.removeDescription", { name: identity.label }),
+      confirmLabel: t("common.delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    await desktop.removeTelegramIdentity(identity.id).catch(() => undefined);
+    await refresh();
+  };
+
+  const trustTrigger = async (binding: TriggerBinding) => {
+    await desktop.trustTelegramTrigger(binding.id).catch(() => undefined);
+    await refreshTriggers();
+    await refresh();
+  };
+
+  const toggleTrigger = async (binding: TriggerBinding, enabled: boolean) => {
+    await desktop.setTelegramTriggerEnabled(binding.id, enabled).catch(() => undefined);
+    await refreshTriggers();
+    await refresh();
+  };
+
+  return (
+    <div className="mx-auto max-w-[720px] space-y-3">
+      <SectionCard title={t("telegram.connection")}>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-medium text-ink-100">
+                {status?.connected ? t("telegram.connected") : t("telegram.disconnected")}
+              </p>
+              <p className="truncate text-[11px] text-ink-500">
+                {status?.lastError || t("telegram.pollingDescription", { count: status?.activeSubscriptions ?? 0 })}
+              </p>
+            </div>
+            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />}
+          </div>
+          <p className="rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-500">
+            {t("telegram.privacyModeHint")}
+          </p>
+        </div>
+      </SectionCard>
+
+      <SectionCard title={t("telegram.identities")}>
+        <div className="space-y-3">
+          <Button icon="Cable" variant="primary" onClick={() => setAddOpen(true)}>
+            {t("telegram.addBot")}
+          </Button>
+
+          <Field label={t("telegram.defaultBotIdentity")}>
+            <Dropdown
+              value={draft.telegram.defaultBotIdentityId ?? ""}
+              onChange={(v) => patch({ telegram: { ...draft.telegram, defaultBotIdentityId: v || undefined } })}
+              placeholder={t("telegram.defaultBotIdentityPlaceholder")}
+              options={[
+                { value: "", label: t("telegram.defaultBotIdentityPlaceholder") },
+                ...draft.telegram.identities
+                  .filter((identity) => identity.status === "connected")
+                  .map((identity) => ({ value: identity.id, label: identity.label, icon: "Bot" })),
+              ]}
+            />
+          </Field>
+
+          {draft.telegram.identities.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+              {t("telegram.noIdentities")}
+            </p>
+          ) : (
+            draft.telegram.identities.map((identity) => (
+              <div key={identity.id} className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12.5px] font-medium text-ink-100">{identity.label}</p>
+                  <p className="truncate text-[11px] text-ink-500">@{identity.username}</p>
+                </div>
+                {identity.status !== "connected" && (
+                  <span className="shrink-0 rounded bg-amber-400/15 px-2 py-1 text-[10.5px] text-amber-300">
+                    {t("telegram.invalidIdentity")}
+                  </span>
+                )}
+                <Button icon="Trash2" variant="solid" onClick={() => void removeIdentity(identity)}>
+                  {t("common.delete")}
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title={t("telegram.triggers")}>
+        <p className="mb-3 text-[11.5px] leading-relaxed text-ink-500">{t("telegram.triggersHelp")}</p>
+        {telegramTriggers.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+            {t("telegram.noTriggers")}
+          </p>
+        ) : (
+          telegramTriggers.map((binding) => (
+            <div key={binding.id} className="flex items-center gap-3 border-b border-seam/70 py-2 last:border-b-0">
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-100">{binding.label}</span>
+              {!binding.trusted ? (
+                <Button icon="ShieldCheck" variant="solid" onClick={() => void trustTrigger(binding)}>
+                  {t("schedules.trust")}
+                </Button>
+              ) : (
+                <Toggle on={binding.enabled} onChange={(v) => void toggleTrigger(binding, v)} />
+              )}
+            </div>
+          ))
+        )}
+      </SectionCard>
+
+      {addOpen && (
+        <Modal
+          title={t("telegram.addTitle")}
+          icon="KeyRound"
+          onClose={() => setAddOpen(false)}
+          footer={
+            <ModalActions
+              onCancel={() => setAddOpen(false)}
+              onConfirm={() => void addBot()}
+              confirmLabel={t("common.save")}
+              disabled={!addToken.trim()}
+            />
+          }
+        >
+          <div className="space-y-3">
+            <p className="text-[12px] leading-relaxed text-ink-400">{t("telegram.tokenDescription")}</p>
+            <Field label={t("telegram.identityLabel")}>
+              <TextInput autoFocus value={addLabel} onChange={setAddLabel} placeholder={t("telegram.identityLabelPlaceholder")} />
+            </Field>
+            <Field label={t("telegram.botToken")}>
+              <input
+                type="password"
+                autoComplete="off"
+                value={addToken}
+                onChange={(e) => setAddToken(e.target.value)}
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+              />
+            </Field>
+            {addError && <p className="text-[11.5px] text-rose-300">{addError}</p>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ */

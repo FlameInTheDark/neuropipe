@@ -6,7 +6,7 @@
  * hard-coding fields per engine. All user-visible copy lives in i18n keys.
  */
 
-export type ConnMode = "file" | "server";
+export type ConnMode = "file" | "server" | "embedded";
 
 export interface EngineField {
   key: string;
@@ -22,7 +22,7 @@ export interface EngineField {
 }
 
 export interface DbEngine {
-  id: "sqlite" | "postgres" | "mysql" | "duckdb";
+  id: "sqlite" | "postgres" | "mysql" | "duckdb" | "redis" | "sugardb";
   name: string;
   icon: string;
   /** i18n key of the short blurb shown in the picker */
@@ -63,6 +63,21 @@ export const DB_ENGINES: DbEngine[] = [
     modes: ["server"],
     defaultPort: 3306,
   },
+  {
+    id: "redis",
+    name: "Redis / Valkey / KeyDB",
+    icon: "Database",
+    blurbKey: "dbnew.blurbRedis",
+    modes: ["server"],
+    defaultPort: 6379,
+  },
+  {
+    id: "sugardb",
+    name: "SugarDB",
+    icon: "Database",
+    blurbKey: "dbnew.blurbSugardb",
+    modes: ["embedded"],
+  },
 ];
 
 export function engineById(id: string): DbEngine {
@@ -91,4 +106,23 @@ export function postgresExtras(): EngineField[] {
 /** File-mode field for engines backed by a path. */
 export function fileField(): EngineField {
   return { key: "path", labelKey: "databases.path", placeholderKey: "databases.pathPlaceholder", mode: "file" };
+}
+
+/** Redis-only extras appended after the shared server fields. */
+export function redisExtras(): EngineField[] {
+  return [
+    { key: "dbIndex", labelKey: "databases.dbIndex", type: "number", default: "0", mode: "server" },
+    { key: "address", labelKey: "databases.address", placeholderKey: "databases.addressPlaceholder", optional: true, mode: "server" },
+    { key: "clientName", labelKey: "databases.clientName", optional: true, mode: "server" },
+  ];
+}
+
+/** SugarDB-only fields for the embedded engine: a persistence directory, a
+ * logical database index, and an optional password protecting the loopback
+ * listener. */
+export function sugardbFields(): EngineField[] {
+  return [
+    { key: "dbIndex", labelKey: "databases.dbIndex", type: "number", default: "0" },
+    { key: "password", labelKey: "databases.password", type: "password", optional: true },
+  ];
 }

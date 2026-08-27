@@ -132,6 +132,20 @@ func WithTwitchChatSender(sender nodes.TwitchChatSender) EngineOption {
 	return func(engine *Engine) { engine.twitch = sender }
 }
 
+// WithDiscordSender supplies the outbound Discord capability required by the
+// Discord node modules. Gateway sessions, rate limits, and persistence remain
+// outside the graph engine.
+func WithDiscordSender(sender nodes.DiscordSender) EngineOption {
+	return func(engine *Engine) { engine.discord = sender }
+}
+
+// WithTelegramSender supplies the outbound Telegram capability required by
+// the Telegram node modules. Long polling and persistence remain outside the
+// graph engine.
+func WithTelegramSender(sender nodes.TelegramSender) EngineOption {
+	return func(engine *Engine) { engine.telegram = sender }
+}
+
 // WithGlobalVariablesStore makes workspace-scoped global variables available to
 // running graphs. A nil store keeps the engine usable in headless tests and
 // turns reads/writes into clear node errors.
@@ -142,6 +156,13 @@ func WithGlobalVariablesStore(store GlobalVariablesStore) EngineOption {
 // WithSQLExecutor enables registered SQLite database access for SQL nodes.
 func WithSQLExecutor(executor nodes.SQLExecutor) EngineOption {
 	return func(engine *Engine) { engine.databases = executor }
+}
+
+// WithKVExecutor enables registered key/value database access for KV nodes.
+// A nil executor keeps the engine usable in headless tests and turns KV node
+// calls into explicit errors.
+func WithKVExecutor(executor nodes.KVExecutor) EngineOption {
+	return func(engine *Engine) { engine.kv = executor }
 }
 
 // WithDialogOpener enables Display Message and Display Question nodes by

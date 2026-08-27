@@ -13,6 +13,7 @@ import { FormBuilderEditor } from "./FormBuilderEditor";
 import { RouteOptionsEditor, SchemaEditor, SwitchCasesEditor } from "./StructuredFieldEditors";
 import { HtmlExtractionsEditor } from "./HtmlExtractionsEditor";
 import { HeadersEditor } from "./HeadersEditor";
+import { KVArgumentsEditor, KVHashFieldsEditor, KVScoredEntriesEditor, KVStringListEditor } from "./KVFieldEditors";
 import { TypeSpecField, specTopToken, tokenToPinDataType } from "./TypeSpecField";
 import { typeSpecFromDataType } from "../lib/type-spec";
 import { unmapDataType } from "../lib/adapters";
@@ -378,7 +379,11 @@ function InspectBody({
     node.status === "done" ? "ok" : node.status === "running" ? "run" : "muted";
 
   const dbOptions = useMemo(
-    () => api.databases.map((d) => ({ value: d.id, label: d.name, icon: "Database" })),
+    () => api.databases.filter((d) => d.driver !== "redis" && d.driver !== "sugardb").map((d) => ({ value: d.id, label: d.name, icon: "Database" })),
+    [api.databases],
+  );
+  const kvDbOptions = useMemo(
+    () => api.databases.filter((d) => d.driver === "redis" || d.driver === "sugardb").map((d) => ({ value: d.id, label: d.name, icon: "Database" })),
     [api.databases],
   );
   const secretOptions = useMemo<{ value: string; label: string; icon?: string }[]>(
@@ -397,6 +402,26 @@ function InspectBody({
       })),
     ],
     [api.identities, t],
+  );
+  const discordIdentityOptions = useMemo<{ value: string; label: string; icon?: string }[]>(
+    () => [
+      { value: "", label: t("discord.identityPlaceholder") },
+      ...api.discordIdentities.map((i) => ({
+        value: i.id,
+        label: i.status === "connected" ? i.label : `${i.label} · ${t("discord.invalidIdentity")}`,
+      })),
+    ],
+    [api.discordIdentities, t],
+  );
+  const telegramIdentityOptions = useMemo<{ value: string; label: string; icon?: string }[]>(
+    () => [
+      { value: "", label: t("telegram.identityPlaceholder") },
+      ...api.telegramIdentities.map((i) => ({
+        value: i.id,
+        label: i.status === "connected" ? i.label : `${i.label} · ${t("telegram.invalidIdentity")}`,
+      })),
+    ],
+    [api.telegramIdentities, t],
   );
   const pipelineOptions = useMemo(
     () =>
@@ -515,8 +540,11 @@ function InspectBody({
                 field={f}
                 node={node}
                 dbOptions={dbOptions}
+                kvDbOptions={kvDbOptions}
                 secretOptions={secretOptions}
                 identityOptions={identityOptions}
+                discordIdentityOptions={discordIdentityOptions}
+                telegramIdentityOptions={telegramIdentityOptions}
                 pipelineOptions={pipelineOptions}
                 onChange={onChange}
                 onExpand={(key, label) =>
@@ -610,8 +638,11 @@ function InspectorField({
   field,
   node,
   dbOptions,
+  kvDbOptions,
   secretOptions,
   identityOptions,
+  discordIdentityOptions,
+  telegramIdentityOptions,
   pipelineOptions,
   onChange,
   onExpand,
@@ -621,8 +652,11 @@ function InspectorField({
   field: import("@/types").FieldDef;
   node: GraphNode;
   dbOptions: DropdownOption[];
+  kvDbOptions: DropdownOption[];
   secretOptions: DropdownOption[];
   identityOptions: { value: string; label: string }[];
+  discordIdentityOptions: { value: string; label: string }[];
+  telegramIdentityOptions: { value: string; label: string }[];
   pipelineOptions: DropdownOption[];
   onChange: (key: string, value: unknown) => void;
   onExpand: (key: string, label: string) => void;
@@ -656,6 +690,30 @@ function InspectorField({
 
   if (field.kind === "html-extractions") {
     return <HtmlExtractionsEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />;
+  }
+
+  /* KV visual editors: lists, hash fields, scored entries, command arguments */
+  if (field.kind === "kv-string-list") {
+    return (
+      <KVStringListEditor
+        label={field.label}
+        value={raw}
+        placeholder={field.placeholder}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+
+  if (field.kind === "kv-hash-fields") {
+    return <KVHashFieldsEditor label={field.label} value={raw} onChange={(next) => onChange(fieldKey, next)} />;
+  }
+
+  if (field.kind === "kv-scored-entries") {
+    return <KVScoredEntriesEditor label={field.label} value={raw} onChange={(next) => onChange(fieldKey, next)} />;
+  }
+
+  if (field.kind === "kv-arguments") {
+    return <KVArgumentsEditor label={field.label} value={raw} onChange={(next) => onChange(fieldKey, next)} />;
   }
 
   /* wire-type picker (Type Assert, JS output contracts) */
@@ -726,13 +784,19 @@ function InspectorField({
     const options =
       field.dynamic === "databases"
         ? dbOptions
-        : field.dynamic === "secrets"
-          ? secretOptions
-          : field.dynamic === "twitch-identity"
-            ? identityOptions
-            : field.dynamic === "pipelines"
-              ? pipelineOptions
-              : (field.options ?? []).map((o) => ({ value: o.value, label: o.label }));
+        : field.dynamic === "kv-databases"
+          ? kvDbOptions
+          : field.dynamic === "secrets"
+            ? secretOptions
+            : field.dynamic === "twitch-identity"
+              ? identityOptions
+              : field.dynamic === "discord-identity"
+                ? discordIdentityOptions
+                : field.dynamic === "telegram-identity"
+                  ? telegramIdentityOptions
+                  : field.dynamic === "pipelines"
+                    ? pipelineOptions
+                    : (field.options ?? []).map((o) => ({ value: o.value, label: o.label }));
     return (
       <label className="block">
         <span className="mb-1 block">

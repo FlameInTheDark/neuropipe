@@ -4,7 +4,7 @@ import { Events } from "@wailsio/runtime";
 import { ask } from "@/stores/confirmation";
 import i18n from "@/i18n";
 import { desktop } from "@/lib/bridge";
-import type { Database, Pipeline, TwitchIdentity } from "@/lib/types";
+import type { Database, Pipeline, TwitchIdentity, DiscordIdentity, TelegramIdentity } from "@/lib/types";
 import { pipelineFromBackend } from "@/lib/adapters";
 import { TopBar } from "./components/TopBar";
 import { IconRail, NAV_ALL } from "./components/IconRail";
@@ -200,6 +200,12 @@ export default function App() {
       case "runs":
         void workspace.refreshTriggers();
         break;
+      case "settings":
+        // integration pages render settings-backed identities and trigger
+        // bindings; both mutate server-side while the user is elsewhere
+        void workspace.refreshSettings();
+        void workspace.refreshTriggers();
+        break;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav.rail, nav.inEditor]);
@@ -277,6 +283,9 @@ export default function App() {
         graph.setDirty(false);
         await graph.loadPipeline(published);
         nav.updateEditingPipeline(pipelineFromBackend(published));
+        // publishing creates/updates trigger bindings; keep trigger lists
+        // (board, triggers view, integration pages) honest immediately
+        void workspace.refreshTriggers();
         notify(t("editor.published"), "UploadCloud");
       } else if (nav.editorKind === "function" && graph.fn && nav.editingFunction) {
         const item = graph.serializeFunction(view);
@@ -506,6 +515,14 @@ export default function App() {
     () => workspace.settings?.twitch.identities ?? [],
     [workspace.settings],
   );
+  const discordIdentities: DiscordIdentity[] = useMemo(
+    () => workspace.settings?.discord?.identities ?? [],
+    [workspace.settings],
+  );
+  const telegramIdentities: TelegramIdentity[] = useMemo(
+    () => workspace.settings?.telegram?.identities ?? [],
+    [workspace.settings],
+  );
 
   const viewTitle = t(NAV_ALL.find((n) => n.id === nav.rail)?.labelKey ?? "app.title");
   const activeRuns = Object.values(workspace.running).filter(Boolean).length;
@@ -607,6 +624,8 @@ export default function App() {
                     secrets,
                     databases,
                     identities,
+                    discordIdentities,
+                    telegramIdentities,
                     validateJavaScript: desktop.validateJavaScript,
                     generateCode: desktop.generateCode,
                     inspectDatabase: desktop.inspectDatabase,

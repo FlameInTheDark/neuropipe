@@ -28,7 +28,7 @@ export interface Viewport {
 }
 
 export type PipelineStatus = "draft" | "active" | "archived" | "legacy";
-export type TriggerKind = "button" | "cron" | "file" | "hotkey" | "webhook" | "chat" | "twitch";
+export type TriggerKind = "button" | "cron" | "file" | "hotkey" | "webhook" | "chat" | "twitch" | "kvsubscribe" | "discord" | "telegram";
 export type RunStatus =
   "pending" | "running" | "completed" | "failed" | "skipped" | "cancelled";
 
@@ -302,7 +302,7 @@ export interface SaveGlobalVariableRequest {
   defaultValue: unknown;
 }
 
-export type DatabaseDriver = "sqlite" | "postgres" | "mysql" | "duckdb";
+export type DatabaseDriver = "sqlite" | "postgres" | "mysql" | "duckdb" | "redis" | "sugardb";
 export type DatabaseStatus = "unknown" | "connected" | "error" | "unverified";
 
 export interface Database {
@@ -319,6 +319,10 @@ export interface Database {
   sslMode?: string;
   charset?: string;
   options?: string;
+  dbIndex?: number;
+  useTLS?: boolean;
+  clientName?: string;
+  address?: string;
   status: DatabaseStatus;
   lastPingAt?: string;
   createdAt: string;
@@ -340,6 +344,10 @@ export interface SaveDatabaseRequest {
   sslMode?: string;
   charset?: string;
   options?: string;
+  dbIndex?: number;
+  useTLS?: boolean;
+  clientName?: string;
+  address?: string;
 }
 export interface DatabaseSchema { tables: DatabaseTable[]; }
 export interface DatabaseTable { name: string; columns: DatabaseColumn[]; indexes: DatabaseIndex[]; }
@@ -350,6 +358,27 @@ export interface SQLArgument { name: string; value: unknown; }
 export interface SQLRequest { databaseId: string; sql: string; parameters: SQLArgument[]; maxRows?: number; }
 export type SQLDebugRequest = SQLRequest;
 export interface SQLResult { columns: string[]; rows: Record<string, unknown>[]; rowsAffected: number; lastInsertId?: number; truncated: boolean; }
+
+/* ---------------- Key/value (Redis protocol) contracts ---------------- */
+
+export interface KVArgument { id: string; name: string; label: string; type: TypeSpec; required?: boolean; }
+export interface KVCommandRequest { databaseId: string; command: string; args: string[]; maxResults?: number; allowDangerous?: boolean; }
+export interface KVCommandResult { value: unknown; isNil: boolean; truncated?: boolean; }
+export interface KVScanRequest { cursor: number; match?: string; type?: string; count?: number; }
+export interface KVKey { name: string; type: string; ttl: number; encoding?: string; size?: number; }
+export interface KVKeyPage { keys: KVKey[]; nextCursor: number; totalSeen: number; }
+export interface KVKeyValue { type: string; value: unknown; ttl: number; truncated?: boolean; }
+export interface KVDatabaseInfo { index: number; keys: number; }
+export interface KVServerInfo {
+  flavor: string;
+  version: string;
+  uptimeSeconds: number;
+  connectedClients: number;
+  usedMemory: number;
+  usedMemoryHuman: string;
+  totalKeys: number;
+  databases: KVDatabaseInfo[];
+}
 
 export interface ProviderConfig {
   id: string;
@@ -504,6 +533,8 @@ export interface Settings {
   api: APISettings;
   metrics: MetricsSettings;
           twitch: TwitchSettings;
+          discord: DiscordSettings;
+          telegram: TelegramSettings;
 }
 export type TwitchIdentityStatus = "connected" | "expired" | "reconnect-required" | "revoked";
 export type TwitchConnectionMethod = "device-code" | "manual";
@@ -515,6 +546,20 @@ export interface TwitchStatus { connected: boolean; connectionState: string; act
 export interface TwitchDeviceAuthorizationRequest { identityId?: string; label: string; scopes: string[]; }
 export interface TwitchDeviceAuthorization { id: string; userCode: string; verificationUri: string; expiresAt: string; intervalSeconds: number; }
 export interface TwitchManualIdentityRequest { label: string; accessToken: string; }
+export type DiscordIdentityStatus = "connected" | "invalid" | "revoked";
+export interface DiscordIdentity { id: string; label: string; botUserId: string; username: string; status: DiscordIdentityStatus; }
+export interface DiscordSettings { defaultBotIdentityId?: string; identities: DiscordIdentity[]; }
+export interface DiscordStatus { connected: boolean; connectionState: string; activeSubscriptions: number; lastError?: string; }
+export interface DiscordManualIdentityRequest { label: string; token: string; }
+export interface DiscordEventConditionField { id: string; label: string; description: string; required: boolean; }
+export interface DiscordEventDescriptor { type: string; gatewayEvent: string; label: string; description: string; intents: number; privileged: boolean; chatMessage: boolean; conditions: DiscordEventConditionField[]; }
+export type TelegramIdentityStatus = "connected" | "invalid" | "revoked";
+export interface TelegramIdentity { id: string; label: string; botUserId: string; username: string; status: TelegramIdentityStatus; }
+export interface TelegramSettings { defaultBotIdentityId?: string; identities: TelegramIdentity[]; }
+export interface TelegramStatus { connected: boolean; connectionState: string; activeSubscriptions: number; lastError?: string; }
+export interface TelegramManualIdentityRequest { label: string; token: string; }
+export interface TelegramEventConditionField { id: string; label: string; description: string; required: boolean; }
+export interface TelegramEventDescriptor { type: string; label: string; description: string; chatMessage: boolean; callback: boolean; conditions: TelegramEventConditionField[]; }
 export interface TrayMenuLabels {
   show: string;
   settings: string;

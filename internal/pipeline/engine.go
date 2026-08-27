@@ -54,8 +54,11 @@ type Engine struct {
 	chat          ChatWriter
 	javascript    nodes.JavaScriptHost
 	twitch        nodes.TwitchChatSender
+	discord       nodes.DiscordSender
+	telegram      nodes.TelegramSender
 	globals       GlobalVariablesStore
 	databases     nodes.SQLExecutor
+	kv            nodes.KVExecutor
 	dialogs       nodes.DialogOpener
 	inputDialogs  nodes.InputDialogOpener
 	formDialogs   nodes.FormDialogOpener

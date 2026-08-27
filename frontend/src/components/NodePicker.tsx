@@ -18,6 +18,10 @@ const CAT_ICON: Record<string, string> = {
   Date: "Clock",
   Display: "MessageSquare",
   Files: "FileText",
+  "KV Store": "Boxes",
+  Discord: "Hash",
+  Telegram: "Send",
+  Twitch: "Radio",
 };
 
 export interface PickerAnchor {

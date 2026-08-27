@@ -11,6 +11,7 @@ import { Button } from "../components/ui";
 import { Icon } from "../components/icons";
 import { useCtxMenu } from "../components/ContextMenu";
 import { ConnectionModal } from "../features/database/ConnectionModal";
+import { KVBrowser } from "../features/database/KVBrowser";
 import { Modal, ModalActions } from "../components/primitives/Modal";
 import { Field, TextArea, TextInput } from "../components/primitives/Field";
 import { Dropdown } from "../components/Dropdown";
@@ -309,7 +310,7 @@ const [pageSize, setPageSize] = useState(50);
     setQueryResult(null);
     setQueryError(null);
     setTab("schema");
-    if (!selected) return;
+    if (!selected || selected.driver === "redis" || selected.driver === "sugardb") return;
     let cancelled = false;
     desktop
       .inspectDatabase(selected.id)
@@ -515,7 +516,9 @@ const [pageSize, setPageSize] = useState(50);
               <div className="mt-4 grid grid-cols-4 gap-2.5">
                 {[
                   [t("datastores.driver"), selected.driver.toUpperCase()],
-                  [t("datastores.tables"), String(schemaTables?.length ?? "…")],
+                  selected.driver === "redis" || selected.driver === "sugardb"
+                    ? [t("databases.dbIndex"), `db${selected.dbIndex ?? 0}`]
+                    : [t("datastores.tables"), String(schemaTables?.length ?? "…")],
                   [
                     t("datastores.updated"),
                     formatDateTime(selected.updatedAt),
@@ -529,6 +532,10 @@ const [pageSize, setPageSize] = useState(50);
                 ))}
               </div>
 
+              {selected.driver === "redis" || selected.driver === "sugardb" ? (
+                <KVBrowser database={selected} />
+              ) : (
+              <>
               {/* tabs: schema / data / query */}
               <div className="mt-5 flex items-center gap-2">
                 <div className="flex items-center gap-0.5 rounded-lg border border-ink-700 bg-ink-900 p-0.5">
@@ -787,6 +794,8 @@ const [pageSize, setPageSize] = useState(50);
                   </div>
                 </div>
               )}
+              </>
+              )}
             </>
         </div>
         )}
@@ -820,6 +829,14 @@ function StatusDot({ status }: { status: string }) {
 
 function detailLine(db: Database): string {
   if (db.driver === "sqlite") return db.path ?? "";
+  if (db.driver === "sugardb") {
+    if (db.path) return `${db.path}/db${db.dbIndex ?? 0}`;
+    return `embedded · app data/db${db.dbIndex ?? 0}`;
+  }
+  if (db.driver === "redis") {
+    if (db.address) return db.address;
+    return `${db.host}:${db.port ?? 6379}/db${db.dbIndex ?? 0}`;
+  }
   return `${db.host}:${db.port ?? (db.driver === "postgres" ? 5432 : 3306)}/${db.database ?? ""}`;
 }
 

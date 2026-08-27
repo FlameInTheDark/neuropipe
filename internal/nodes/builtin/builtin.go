@@ -34,8 +34,22 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/reroute"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/typeassert"
 	uuidnode "github.com/FlameInTheDark/neuropipe/internal/nodes/data/uuid"
+	kvcommand "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/command"
+	kvhash "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/hash"
+	kvkeys "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/keys"
+	kvlist "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/list"
+	kvscan "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/scan"
+	kvset "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/set"
+	kvsubscribe "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/subscribe"
+	kvzset "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/zset"
 	sqlnode "github.com/FlameInTheDark/neuropipe/internal/nodes/database/sql"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/date"
+	discordaddreaction "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/addreaction"
+	discorddeletemessage "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/deletemessage"
+	discordeditmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/editmessage"
+	discordevent "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/event"
+	discordsenddm "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/senddm"
+	discordsendmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/sendmessage"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/branch"
 	breaknode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/break"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/doonce"
@@ -79,6 +93,14 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/divide"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/multiply"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/subtract"
+	telegramanswercallback "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/answercallback"
+	telegramchataction "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/chataction"
+	telegramdeletemessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/deletemessage"
+	telegrameditmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/editmessage"
+	telegramevent "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/event"
+	telegrampinmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/pinmessage"
+	telegramsendmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/sendmessage"
+	telegramsendphoto "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/sendphoto"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/case"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/contains"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/endswith"
@@ -98,6 +120,30 @@ func RegisterAll(registrar nodes.Registrar) error {
 	for _, register := range []func(nodes.Registrar) error{
 		javascript.Register,
 		sqlnode.Register,
+		kvkeys.RegisterGet,
+		kvkeys.RegisterSet,
+		kvkeys.RegisterDelete,
+		kvkeys.RegisterExists,
+		kvkeys.RegisterIncrement,
+		kvkeys.RegisterRename,
+		kvkeys.RegisterExpire,
+		kvkeys.RegisterTTL,
+		kvhash.RegisterGet,
+		kvhash.RegisterSet,
+		kvlist.RegisterPush,
+		kvlist.RegisterPop,
+		kvlist.RegisterRange,
+		kvset.RegisterAdd,
+		kvset.RegisterMembers,
+		kvset.RegisterRemove,
+		kvzset.RegisterAdd,
+		kvzset.RegisterRange,
+		kvzset.RegisterRemove,
+		kvscan.RegisterScan,
+		kvscan.RegisterPublish,
+		kvscan.RegisterInfo,
+		kvcommand.Register,
+		kvsubscribe.Register,
 		constant.Register,
 		formattext.Register,
 		getfield.Register,
@@ -154,6 +200,20 @@ func RegisterAll(registrar nodes.Registrar) error {
 		form.Register,
 		event.Register,
 		sendchatmessage.Register,
+		discordaddreaction.Register,
+		discorddeletemessage.Register,
+		discordevent.Register,
+		discordeditmessage.Register,
+		discordsenddm.Register,
+		discordsendmessage.Register,
+		telegramanswercallback.Register,
+		telegramchataction.Register,
+		telegramdeletemessage.Register,
+		telegramevent.Register,
+		telegrameditmessage.Register,
+		telegrampinmessage.Register,
+		telegramsendmessage.Register,
+		telegramsendphoto.Register,
 		split.Register,
 		join.Register,
 		contains.Register,

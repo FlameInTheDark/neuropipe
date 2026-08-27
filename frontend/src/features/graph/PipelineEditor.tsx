@@ -3,7 +3,7 @@ import { Inspector } from "../../components/Inspector";
 import { LibraryPanel } from "../../components/LibraryPanel";
 import { FloatPanel } from "../../components/layout/FloatPanel";
 import type { MenuItem } from "../../components/ContextMenu";
-import type { Database, TwitchIdentity, CodeGenerationRequest, CodeGenerationResponse, DatabaseSchema, Execution, SQLDebugRequest, SQLResult } from "@/lib/types";
+import type { Database, TwitchIdentity, DiscordIdentity, TelegramIdentity, CodeGenerationRequest, CodeGenerationResponse, DatabaseSchema, Execution, SQLDebugRequest, SQLResult } from "@/lib/types";
 import type { EditorComment, Edge, GraphNode, GroupColor, LibraryCategory, LogEntry, NodeGroup, Port, PortKind } from "@/types";
 
 const PANEL_BOUNDS = { minLeft: 220, maxLeft: 420, minRight: 280, maxRight: 520 };
@@ -27,6 +27,8 @@ export interface EditorApi {
   pipelines: import("@/lib/adapters").UiPipeline[];
   databases: Database[];
   identities: TwitchIdentity[];
+  discordIdentities: DiscordIdentity[];
+  telegramIdentities: TelegramIdentity[];
   validateJavaScript: (code: string) => Promise<void>;
   generateCode: (request: CodeGenerationRequest) => Promise<CodeGenerationResponse>;
   inspectDatabase: (id: string) => Promise<DatabaseSchema>;

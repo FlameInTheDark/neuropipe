@@ -116,6 +116,15 @@ const (
 	TriggerChat TriggerKind = "chat"
 	// TriggerTwitch starts a trusted pipeline from a Twitch EventSub event.
 	TriggerTwitch TriggerKind = "twitch"
+	// TriggerKV starts a trusted pipeline from a Redis pub/sub message
+	// received on a registered KV connection.
+	TriggerKV TriggerKind = "kvsubscribe"
+	// TriggerDiscord starts a trusted pipeline from a Discord gateway
+	// event received by a connected bot identity.
+	TriggerDiscord TriggerKind = "discord"
+	// TriggerTelegram starts a trusted pipeline from a Telegram Bot API
+	// update received by a connected bot identity.
+	TriggerTelegram TriggerKind = "telegram"
 )
 
 type RunStatus string
@@ -642,7 +651,25 @@ const (
 	DatabaseDriverPostgres DatabaseDriver = "postgres"
 	DatabaseDriverMySQL    DatabaseDriver = "mysql"
 	DatabaseDriverDuckDB   DatabaseDriver = "duckdb"
+	// DatabaseDriverRedis is the Redis-protocol key/value family (Redis,
+	// Valkey, KeyDB, Dragonfly). All flavours share the RESP wire protocol and
+	// are served by the same go-redis client; the server flavour is reported
+	// for display only.
+	DatabaseDriverRedis DatabaseDriver = "redis"
+	// DatabaseDriverSugarDB is the embedded SugarDB store: an in-process
+	// key/value engine that speaks RESP on a loopback listener, so the same
+	// go-redis client stack serves it without any external server. Data
+	// persists under the configured directory (Path) via AOF and snapshots.
+	DatabaseDriverSugarDB DatabaseDriver = "sugardb"
 )
+
+// IsKVDriver reports whether the driver belongs to the key/value family served
+// by the KV service (remote Redis-protocol servers and the embedded SugarDB
+// store). Callers gate routing, node pickers, and browser views on this instead
+// of comparing against a single driver constant.
+func IsKVDriver(driver DatabaseDriver) bool {
+	return driver == DatabaseDriverRedis || driver == DatabaseDriverSugarDB
+}
 
 // DatabaseStatus reports the last-known connection state of a database.
 type DatabaseStatus string
@@ -655,7 +682,11 @@ const (
 )
 
 // Database is a user-registered database connection. SQLite uses Path;
-// Postgres and MySQL use Host/Port/Database/Username/PasswordRef.
+// Postgres and MySQL use Host/Port/Database/Username/PasswordRef. Redis-family
+// stores use Host/Port/Username/PasswordRef plus the KV-specific fields below;
+// Address optionally carries a complete redis:// URL that overrides them.
+// The embedded SugarDB driver reuses Path as its persistence directory and
+// ignores Host/Port/Address entirely - the engine runs inside the app.
 type Database struct {
 	ID          string         `json:"id"`
 	Name        string         `json:"name"`
@@ -670,10 +701,15 @@ type Database struct {
 	SSLMode     string         `json:"sslMode,omitempty"`
 	Charset     string         `json:"charset,omitempty"`
 	Options     string         `json:"options,omitempty"`
-	Status      DatabaseStatus `json:"status"`
-	LastPingAt  *time.Time     `json:"lastPingAt,omitempty"`
-	CreatedAt   time.Time      `json:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
+	// KV-specific connection settings (drivers "redis" and "sugardb").
+	DBIndex    int            `json:"dbIndex,omitempty"`
+	UseTLS     bool           `json:"useTLS,omitempty"`
+	ClientName string         `json:"clientName,omitempty"`
+	Address    string         `json:"address,omitempty"`
+	Status     DatabaseStatus `json:"status"`
+	LastPingAt *time.Time     `json:"lastPingAt,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
 }
 
 // SaveDatabaseRequest carries editable database metadata across Wails.
@@ -693,6 +729,11 @@ type SaveDatabaseRequest struct {
 	SSLMode     string         `json:"sslMode,omitempty"`
 	Charset     string         `json:"charset,omitempty"`
 	Options     string         `json:"options,omitempty"`
+	// KV-specific connection settings (drivers "redis" and "sugardb").
+	DBIndex    int    `json:"dbIndex,omitempty"`
+	UseTLS     bool   `json:"useTLS,omitempty"`
+	ClientName string `json:"clientName,omitempty"`
+	Address    string `json:"address,omitempty"`
 }
 
 // DatabaseSchema is the inspectable SQLite catalog exposed to the editor.
@@ -758,6 +799,96 @@ type SQLDebugRequest struct {
 	SQL        string        `json:"sql"`
 	Parameters []SQLArgument `json:"parameters"`
 	MaxRows    int           `json:"maxRows,omitempty"`
+}
+
+/* ------------------------------------------------------------------ */
+/* Key/value (Redis protocol) contracts                                */
+/* ------------------------------------------------------------------ */
+
+// KVArgument is the persisted dynamic input contract of an action:kv_command
+// node. It mirrors SQLParameter so the editor reuses the same structured
+// parameter UI; Name is only a label because Redis arguments are positional.
+type KVArgument struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Label    string   `json:"label"`
+	Type     TypeSpec `json:"type"`
+	Required bool     `json:"required,omitempty"`
+}
+
+// KVCommandRequest is the narrow execution contract shared by KV nodes and
+// the KV service. Args carries the command's positional arguments as strings;
+// typed pin values are converted by the node before crossing this boundary.
+type KVCommandRequest struct {
+	DatabaseID     string   `json:"databaseId"`
+	Command        string   `json:"command"`
+	Args           []string `json:"args"`
+	MaxResults     int      `json:"maxResults,omitempty"`
+	AllowDangerous bool     `json:"allowDangerous,omitempty"`
+}
+
+// KVCommandResult contains only JSON-safe values suitable for Blueprint
+// packets. IsNil reports a Redis nil reply (missing key), which is a valid
+// outcome rather than an error.
+type KVCommandResult struct {
+	Value     any  `json:"value"`
+	IsNil     bool `json:"isNil"`
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// KVScanRequest pages through keys with cursor-based SCAN.
+type KVScanRequest struct {
+	Cursor uint64 `json:"cursor"`
+	Match  string `json:"match,omitempty"`
+	Type   string `json:"type,omitempty"`
+	Count  int    `json:"count,omitempty"`
+}
+
+// KVKeyPage is one SCAN page enriched with per-key type, TTL, and size.
+type KVKeyPage struct {
+	Keys       []KVKey `json:"keys"`
+	NextCursor uint64  `json:"nextCursor"`
+	TotalSeen  int     `json:"totalSeen"`
+}
+
+// KVKey describes one key in the browser. TTL uses the Redis convention:
+// -1 means no expiry, -2 means the key no longer exists.
+type KVKey struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	TTL      int64  `json:"ttl"`
+	Encoding string `json:"encoding,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+}
+
+// KVKeyValue is the value viewer payload for one key. Value's shape depends
+// on Type: string, map[string]string (hash), []string (list, set),
+// []map[string]any with member/score (zset), or []map[string]any with
+// id/fields (stream).
+type KVKeyValue struct {
+	Type      string `json:"type"`
+	Value     any    `json:"value"`
+	TTL       int64  `json:"ttl"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// KVServerInfo is the display-only server summary shown on the browser's
+// Info tab. Fields missing from a flavour's INFO output stay zero-valued.
+type KVServerInfo struct {
+	Flavor           string           `json:"flavor"`
+	Version          string           `json:"version"`
+	UptimeSeconds    int64            `json:"uptimeSeconds"`
+	ConnectedClients int64            `json:"connectedClients"`
+	UsedMemory       int64            `json:"usedMemory"`
+	UsedMemoryHuman  string           `json:"usedMemoryHuman"`
+	TotalKeys        int64            `json:"totalKeys"`
+	Databases        []KVDatabaseInfo `json:"databases"`
+}
+
+// KVDatabaseInfo is the key count of one logical Redis database index.
+type KVDatabaseInfo struct {
+	Index int   `json:"index"`
+	Keys  int64 `json:"keys"`
 }
 
 // GlobalVariableSummary is the compact Variables-library card. Value carries
@@ -856,6 +987,8 @@ type Settings struct {
 	API                  APISettings          `json:"api"`
 	Metrics              MetricsSettings      `json:"metrics"`
 	Twitch               TwitchSettings       `json:"twitch"`
+	Discord              DiscordSettings      `json:"discord"`
+	Telegram             TelegramSettings     `json:"telegram"`
 }
 
 // TwitchSettings contains public configuration only. OAuth credentials remain
@@ -958,6 +1091,229 @@ type TwitchChatMessageResult struct {
 	MessageID string `json:"messageId,omitempty"`
 	Sent      bool   `json:"sent"`
 	Reason    string `json:"reason,omitempty"`
+}
+
+// DiscordSettings contains public configuration only. Bot tokens remain in the
+// DPAPI-backed vault and must never be returned through Wails.
+type DiscordSettings struct {
+	DefaultBotIdentityID string            `json:"defaultBotIdentityId,omitempty"`
+	Identities           []DiscordIdentity `json:"identities"`
+}
+
+type DiscordIdentityStatus string
+
+const (
+	DiscordIdentityConnected DiscordIdentityStatus = "connected"
+	DiscordIdentityInvalid   DiscordIdentityStatus = "invalid"
+	DiscordIdentityRevoked   DiscordIdentityStatus = "revoked"
+)
+
+// DiscordIdentity is safe to persist in settings and expose to the editor. It
+// deliberately omits the bot token and its vault key.
+type DiscordIdentity struct {
+	ID        string                `json:"id"`
+	Label     string                `json:"label"`
+	BotUserID string                `json:"botUserId"`
+	Username  string                `json:"username"`
+	Status    DiscordIdentityStatus `json:"status"`
+}
+
+type DiscordStatus struct {
+	Connected           bool   `json:"connected"`
+	ConnectionState     string `json:"connectionState"`
+	ActiveSubscriptions int    `json:"activeSubscriptions"`
+	LastError           string `json:"lastError,omitempty"`
+}
+
+type DiscordManualIdentityRequest struct {
+	Label string `json:"label"`
+	Token string `json:"token"` // bot token; moved to the vault, never persisted here
+}
+
+// DiscordEventConditionField describes one client-side filter without leaking
+// gateway implementation details into node packages or the renderer.
+type DiscordEventConditionField struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+}
+
+// DiscordEventDescriptor is the catalog contract shared by settings and the
+// dynamic trigger node. Intents is the bitmask union required to receive the
+// gateway event; Privileged marks descriptors whose intents need a Developer
+// Portal toggle.
+type DiscordEventDescriptor struct {
+	Type         string                       `json:"type"`
+	GatewayEvent string                       `json:"gatewayEvent"`
+	Label        string                       `json:"label"`
+	Description  string                       `json:"description"`
+	Intents      int                          `json:"intents"`
+	Privileged   bool                         `json:"privileged"`
+	ChatMessage  bool                         `json:"chatMessage"`
+	Conditions   []DiscordEventConditionField `json:"conditions"`
+}
+
+type DiscordMessageRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChannelID  string `json:"channelId"`
+	Message    string `json:"message"`
+	ReplyToID  string `json:"replyToMessageId,omitempty"`
+}
+
+type DiscordDMRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	UserID     string `json:"userId"`
+	Message    string `json:"message"`
+}
+
+type DiscordReactionRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChannelID  string `json:"channelId"`
+	MessageID  string `json:"messageId"`
+	Emoji      string `json:"emoji"`
+}
+
+type DiscordEditRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChannelID  string `json:"channelId"`
+	MessageID  string `json:"messageId"`
+	Message    string `json:"message"`
+}
+
+type DiscordDeleteRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChannelID  string `json:"channelId"`
+	MessageID  string `json:"messageId"`
+}
+
+type DiscordMessageResult struct {
+	MessageID string `json:"messageId,omitempty"`
+	Sent      bool   `json:"sent"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type DiscordActionResult struct {
+	Done   bool   `json:"done"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// TelegramSettings contains public configuration only. Bot tokens remain in
+// the DPAPI-backed vault and must never be returned through Wails.
+type TelegramSettings struct {
+	DefaultBotIdentityID string             `json:"defaultBotIdentityId,omitempty"`
+	Identities           []TelegramIdentity `json:"identities"`
+}
+
+type TelegramIdentityStatus string
+
+const (
+	TelegramIdentityConnected TelegramIdentityStatus = "connected"
+	TelegramIdentityInvalid   TelegramIdentityStatus = "invalid"
+	TelegramIdentityRevoked   TelegramIdentityStatus = "revoked"
+)
+
+// TelegramIdentity is safe to persist in settings and expose to the editor. It
+// deliberately omits the bot token and its vault key.
+type TelegramIdentity struct {
+	ID        string                 `json:"id"`
+	Label     string                 `json:"label"`
+	BotUserID string                 `json:"botUserId"`
+	Username  string                 `json:"username"` // without @
+	Status    TelegramIdentityStatus `json:"status"`
+}
+
+type TelegramStatus struct {
+	Connected           bool   `json:"connected"`
+	ConnectionState     string `json:"connectionState"`
+	ActiveSubscriptions int    `json:"activeSubscriptions"`
+	LastError           string `json:"lastError,omitempty"`
+}
+
+type TelegramManualIdentityRequest struct {
+	Label string `json:"label"`
+	Token string `json:"token"`
+}
+
+type TelegramEventConditionField struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+}
+
+// TelegramEventDescriptor is the catalog contract shared by settings and the
+// dynamic trigger node. Type is the Bot API update field name.
+type TelegramEventDescriptor struct {
+	Type        string                        `json:"type"`
+	Label       string                        `json:"label"`
+	Description string                        `json:"description"`
+	ChatMessage bool                          `json:"chatMessage"`
+	Callback    bool                          `json:"callback"`
+	Conditions  []TelegramEventConditionField `json:"conditions"`
+}
+
+type TelegramMessageRequest struct {
+	IdentityID          string `json:"identityId,omitempty"`
+	ChatID              string `json:"chatId"`
+	Message             string `json:"message"`
+	ParseMode           string `json:"parseMode,omitempty"` // "" | HTML | MarkdownV2
+	ReplyToMessageID    string `json:"replyToMessageId,omitempty"`
+	DisableNotification bool   `json:"disableNotification,omitempty"`
+}
+
+type TelegramPhotoRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChatID     string `json:"chatId"`
+	PhotoURL   string `json:"photoUrl"`
+	Caption    string `json:"caption,omitempty"`
+	ParseMode  string `json:"parseMode,omitempty"`
+}
+
+type TelegramEditRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChatID     string `json:"chatId"`
+	MessageID  string `json:"messageId"`
+	Message    string `json:"message"`
+	ParseMode  string `json:"parseMode,omitempty"`
+}
+
+type TelegramDeleteRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChatID     string `json:"chatId"`
+	MessageID  string `json:"messageId"`
+}
+
+type TelegramCallbackAnswerRequest struct {
+	IdentityID      string `json:"identityId,omitempty"`
+	CallbackQueryID string `json:"callbackQueryId"`
+	Text            string `json:"text,omitempty"`
+	ShowAlert       bool   `json:"showAlert,omitempty"`
+}
+
+type TelegramChatActionRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChatID     string `json:"chatId"`
+	Action     string `json:"action"`
+}
+
+type TelegramPinRequest struct {
+	IdentityID string `json:"identityId,omitempty"`
+	ChatID     string `json:"chatId"`
+	MessageID  string `json:"messageId"`
+	Notify     bool   `json:"notify,omitempty"`
+	Unpin      bool   `json:"unpin,omitempty"`
+}
+
+type TelegramMessageResult struct {
+	MessageID string `json:"messageId,omitempty"`
+	Sent      bool   `json:"sent"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+type TelegramActionResult struct {
+	Done   bool   `json:"done"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // LLMMetricContext identifies a call without retaining its prompt, response,

@@ -1,7 +1,9 @@
 import { memo } from "react";
 import type { GraphNode, Port } from "../types";
+import type { TypeSpec } from "../lib/types";
 import { BODY_TOP, HEADER_H, NODE_W, ROW_H } from "../data/graph";
 import { pinPalette } from "../lib/pins";
+import { mapSpecToPin } from "../lib/adapters";
 import { Icon } from "./icons";
 import { Tooltip } from "./Tooltip";
 import { useTranslation } from "react-i18next";
@@ -9,9 +11,71 @@ import { cn } from "../utils/cn";
 
 /* ---- pin tooltip body ---- */
 
+type Translate = ReturnType<typeof useTranslation>["t"];
+
+/** Human-readable type name of a TypeSpec (falls back to "Any"). */
+function specTypeLabel(t: Translate, spec?: TypeSpec): string {
+  switch (spec?.kind) {
+    case "string": return t("pins.type_text");
+    case "int":
+    case "float": return t("pins.type_number");
+    case "bool": return t("pins.type_boolean");
+    case "list": return t("pins.type_array");
+    case "map": return t("pins.type_map");
+    case "record": return spec.name || t("pins.type_object");
+    default: return t("pins.type_any");
+  }
+}
+
+/** Extra structural hint for map/list fields, e.g. "(Text → Any)". */
+function specTypeDetail(t: Translate, spec?: TypeSpec): string | undefined {
+  if (spec?.kind === "map") {
+    return `(${specTypeLabel(t, spec.key)} ${t("pins.mapArrow")} ${specTypeLabel(t, spec.value)})`;
+  }
+  if (spec?.kind === "list" && spec.element) {
+    return `(${specTypeLabel(t, spec.element)})`;
+  }
+  return undefined;
+}
+
+interface StructureRow {
+  key: string;
+  /** canvas pin type driving the row's dot colour */
+  pinType: string;
+  typeLabel: string;
+  detail?: string;
+}
+
+/**
+ * Structure rows for object pins. A backend record TypeSpec is authoritative
+ * (named fields with full sub-types — e.g. the Discord/Telegram event
+ * envelopes); the derived objectFields (spec fields or documented result
+ * fields) are the fallback for ports without a record spec.
+ */
+function structureRows(t: Translate, port: Port): StructureRow[] {
+  if (port.spec?.kind === "record" && port.spec.fields?.length) {
+    return port.spec.fields.map((f) => ({
+      key: f.name,
+      pinType: mapSpecToPin(f.type),
+      typeLabel: specTypeLabel(t, f.type),
+      detail: specTypeDetail(t, f.type),
+    }));
+  }
+  if (port.dataType === "object" && port.objectFields?.length) {
+    return port.objectFields.map((f) => ({
+      key: f.key,
+      pinType: String(f.type),
+      typeLabel: t(`pins.type_${f.type}`),
+    }));
+  }
+  return [];
+}
+
 function PinTip({ port }: { port: Port }) {
   const { t } = useTranslation();
   const pal = pinPalette(port.dataType);
+  const recordName = port.spec?.kind === "record" ? port.spec.name : undefined;
+  const rows = structureRows(t, port);
   return (
     <span className="flex flex-col gap-1 py-0.5">
       <span className="flex items-center gap-2">
@@ -20,17 +84,30 @@ function PinTip({ port }: { port: Port }) {
         <span className="ml-1 rounded bg-ink-800 px-1 py-px font-mono text-[9.5px]" style={{ color: pal.label }}>
           {t(`pins.type_${port.dataType ?? "any"}`)}
         </span>
+        {recordName && (
+          <span className="rounded bg-ink-800 px-1 py-px font-mono text-[9.5px] text-ink-300">{recordName}</span>
+        )}
       </span>
-      {port.dataType === "array" && port.arrayOf && (
-        <span className="pl-4 text-[10.5px] text-ink-400">{t("pins.elementType", { type: String(port.arrayOf) })}</span>
+      {port.spec?.kind === "map" && (
+        <span className="pl-4 font-mono text-[10.5px] text-ink-400">
+          {t("pins.mapStructure", { key: specTypeLabel(t, port.spec.key), value: specTypeLabel(t, port.spec.value) })}
+        </span>
       )}
-      {port.dataType === "object" && port.objectFields && port.objectFields.length > 0 && (
+      {port.dataType === "array" && port.arrayOf && (
+        <span className="pl-4 text-[10.5px] text-ink-400">
+          {t("pins.elementType", { type: t(`pins.type_${port.arrayOf}`) })}
+        </span>
+      )}
+      {rows.length > 0 && (
         <span className="mt-0.5 flex flex-col gap-[2px] pl-4">
-          {port.objectFields.map((f) => (
+          {rows.map((f) => (
             <span key={f.key} className="flex items-center gap-1.5 text-[10.5px]">
-              <span className="h-1 w-1 rounded-full" style={{ background: pinPalette(f.type as any).dot }} />
+              <span className="h-1 w-1 rounded-full" style={{ background: pinPalette(f.pinType as Port["dataType"]).dot }} />
               <span className="font-mono text-ink-200">{f.key}</span>
-              <span className="text-ink-500">{f.type}</span>
+              <span className="text-ink-500">
+                {f.typeLabel}
+                {f.detail && <span className="font-mono text-[9.5px]"> {f.detail}</span>}
+              </span>
             </span>
           ))}
         </span>

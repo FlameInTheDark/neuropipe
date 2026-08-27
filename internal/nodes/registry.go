@@ -267,6 +267,18 @@ type SQLExecutor interface {
 	ExecuteSQL(context.Context, domain.SQLRequest) (domain.SQLResult, error)
 }
 
+// KVExecutorProvider supplies the registered KV boundary to KV nodes.
+type KVExecutorProvider interface {
+	KVExecutor() KVExecutor
+}
+
+// KVExecutor is the only key/value operation available to Blueprint nodes.
+// It deliberately mirrors SQLExecutor's one-method shape so the graph host
+// stays free of go-redis dependencies.
+type KVExecutor interface {
+	ExecuteCommand(context.Context, domain.KVCommandRequest) (domain.KVCommandResult, error)
+}
+
 // JavaScriptHostProvider supplies the deliberately narrow application services
 // that a JavaScript node can reach through its np object. Node modules depend
 // on this port rather than Wails, persistence, or a graph-engine concrete type.
@@ -327,6 +339,20 @@ type JavaScriptHTTPResponse struct {
 // service, HTTP client, vault, or Wails façade.
 type TwitchChatSenderProvider interface {
 	TwitchChatSender() TwitchChatSender
+}
+
+// DiscordSenderProvider is the narrow runtime port used by the Discord action
+// nodes. It prevents a node module from importing the gateway service,
+// discordgo, the vault, or the Wails façade.
+type DiscordSenderProvider interface {
+	DiscordSender() DiscordSender
+}
+
+// TelegramSenderProvider is the narrow runtime port used by the Telegram
+// action nodes. It prevents a node module from importing the polling service,
+// the HTTP client, the vault, or the Wails façade.
+type TelegramSenderProvider interface {
+	TelegramSender() TelegramSender
 }
 
 // DialogOpenerProvider is the runtime port consumed by Display Message and
@@ -437,6 +463,30 @@ type InputResponse struct {
 // owned by infrastructure.
 type TwitchChatSender interface {
 	SendTwitchChatMessage(context.Context, domain.TwitchChatMessageRequest) (domain.TwitchChatMessageResult, error)
+}
+
+// DiscordSender accepts only the actions' typed requests and returns
+// non-secret results. Identity selection and bot token handling are owned by
+// infrastructure.
+type DiscordSender interface {
+	SendDiscordMessage(ctx context.Context, request domain.DiscordMessageRequest) (domain.DiscordMessageResult, error)
+	SendDiscordDirectMessage(ctx context.Context, request domain.DiscordDMRequest) (domain.DiscordMessageResult, error)
+	AddDiscordReaction(ctx context.Context, request domain.DiscordReactionRequest) (domain.DiscordActionResult, error)
+	EditDiscordMessage(ctx context.Context, request domain.DiscordEditRequest) (domain.DiscordActionResult, error)
+	DeleteDiscordMessage(ctx context.Context, request domain.DiscordDeleteRequest) (domain.DiscordActionResult, error)
+}
+
+// TelegramSender accepts only the actions' typed requests and returns
+// non-secret results. Identity selection and bot token handling are owned by
+// infrastructure.
+type TelegramSender interface {
+	SendTelegramMessage(ctx context.Context, request domain.TelegramMessageRequest) (domain.TelegramMessageResult, error)
+	SendTelegramPhoto(ctx context.Context, request domain.TelegramPhotoRequest) (domain.TelegramMessageResult, error)
+	EditTelegramMessage(ctx context.Context, request domain.TelegramEditRequest) (domain.TelegramActionResult, error)
+	DeleteTelegramMessage(ctx context.Context, request domain.TelegramDeleteRequest) (domain.TelegramActionResult, error)
+	AnswerTelegramCallbackQuery(ctx context.Context, request domain.TelegramCallbackAnswerRequest) (domain.TelegramActionResult, error)
+	SendTelegramChatAction(ctx context.Context, request domain.TelegramChatActionRequest) (domain.TelegramActionResult, error)
+	PinTelegramMessage(ctx context.Context, request domain.TelegramPinRequest) (domain.TelegramActionResult, error)
 }
 
 // Registry checks node IDs and provides deterministic access to first-party

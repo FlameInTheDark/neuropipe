@@ -34,8 +34,11 @@ type Service struct {
 	notifier pipeline.NotificationSender
 	metrics  MetricsRecorder
 	twitch   nodes.TwitchChatSender
+	discord  nodes.DiscordSender
+	telegram nodes.TelegramSender
 	globals  pipeline.GlobalVariablesStore
 	database nodes.SQLExecutor
+	kv       nodes.KVExecutor
 	dialogs  nodes.DialogOpener
 	inputs   nodes.InputDialogOpener
 	forms    nodes.FormDialogOpener
@@ -113,6 +116,12 @@ func WithDatabaseService(service nodes.SQLExecutor) ServiceOption {
 	return func(s *Service) { s.database = service }
 }
 
+// WithKVService supplies the registered key/value executor to graph runs.
+// A nil service keeps the engine usable in headless tests.
+func WithKVService(service nodes.KVExecutor) ServiceOption {
+	return func(s *Service) { s.kv = service }
+}
+
 // WithDialogOpener attaches the native dialog opener used by Display Message
 // and Display Question nodes. A nil opener keeps the engine usable in
 // headless tests and turns dialog calls into explicit node errors.
@@ -134,6 +143,12 @@ func WithFormDialogOpener(opener nodes.FormDialogOpener) ServiceOption {
 
 // SetTwitchChatSender completes Desktop composition before workers start.
 func (s *Service) SetTwitchChatSender(sender nodes.TwitchChatSender) { s.twitch = sender }
+
+// SetDiscordSender completes Desktop composition before workers start.
+func (s *Service) SetDiscordSender(sender nodes.DiscordSender) { s.discord = sender }
+
+// SetTelegramSender completes Desktop composition before workers start.
+func (s *Service) SetTelegramSender(sender nodes.TelegramSender) { s.telegram = sender }
 
 // SetRemoteDispatcher wires the remote-executor connection manager. A nil
 // dispatcher makes every run local.
@@ -596,8 +611,11 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		pipeline.WithChatWriter(chatWriter),
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, execution.PipelineID, execution.ID)),
 		pipeline.WithTwitchChatSender(s.twitch),
+		pipeline.WithDiscordSender(s.discord),
+		pipeline.WithTelegramSender(s.telegram),
 		pipeline.WithGlobalVariablesStore(s.globals),
 		pipeline.WithSQLExecutor(s.database),
+		pipeline.WithKVExecutor(s.kv),
 		pipeline.WithDialogOpener(s.dialogs),
 		pipeline.WithInputDialogOpener(s.inputs),
 		pipeline.WithFormDialogOpener(s.forms),
@@ -805,8 +823,11 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 		pipeline.WithChatWriter(chatWriter),
 		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, pipelineID, execution.ID)),
 		pipeline.WithTwitchChatSender(s.twitch),
+		pipeline.WithDiscordSender(s.discord),
+		pipeline.WithTelegramSender(s.telegram),
 		pipeline.WithGlobalVariablesStore(s.globals),
 		pipeline.WithSQLExecutor(s.database),
+		pipeline.WithKVExecutor(s.kv),
 		pipeline.WithDialogOpener(s.dialogs),
 		pipeline.WithInputDialogOpener(s.inputs),
 		pipeline.WithFormDialogOpener(s.forms),

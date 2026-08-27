@@ -27,6 +27,9 @@ const KIND_ICON: Record<string, string> = {
   webhook: "Radio",
   chat: "MessagesSquare",
   twitch: "Radio",
+  kvsubscribe: "Database",
+  discord: "Hash",
+  telegram: "Send",
 };
 
 export function TriggersView({ workspace, nav }: { workspace: Workspace; nav: NavApi }) {
@@ -102,7 +105,10 @@ export function TriggersView({ workspace, nav }: { workspace: Workspace; nav: Na
                     </Button>
                   ) : (
                     tr.kind !== "chat" &&
-                    tr.kind !== "twitch" && (
+                    tr.kind !== "twitch" &&
+                    tr.kind !== "kvsubscribe" &&
+                    tr.kind !== "discord" &&
+                    tr.kind !== "telegram" && (
                       <Button
                         icon={busyId === tr.id ? "Loader2" : "Play"}
                         variant="solid"

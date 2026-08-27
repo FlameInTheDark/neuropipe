@@ -47,6 +47,94 @@ var knownResultFields = map[string][]domain.DataField{
 		{Path: "llm.choice", Label: "Choice", DataType: domain.DataText, Description: "Selected configured option ID."},
 		{Path: "llm.content", Label: "Content", DataType: domain.DataText, Description: "Model response text."},
 	},
+	"action:kv_get": {
+		{Path: "value", Label: "Value", DataType: domain.DataText, Description: "Stored string value."},
+		{Path: "found", Label: "Found", DataType: domain.DataBoolean, Description: "Whether the key existed."},
+	},
+	"action:kv_set": {
+		{Path: "ok", Label: "Set", DataType: domain.DataBoolean, Description: "Whether the write was applied."},
+		{Path: "previous", Label: "Previous", DataType: domain.DataText, Description: "Previous value, when requested via GET.", Optional: true},
+	},
+	"action:kv_delete": {
+		{Path: "deleted", Label: "Deleted", DataType: domain.DataNumber, Description: "Number of keys removed."},
+	},
+	"action:kv_exists": {
+		{Path: "count", Label: "Existing keys", DataType: domain.DataNumber, Description: "Number of keys that existed."},
+		{Path: "exists", Label: "Exists", DataType: domain.DataBoolean, Description: "Whether at least one key existed."},
+	},
+	"action:kv_increment": {
+		{Path: "value", Label: "New value", DataType: domain.DataNumber, Description: "Counter value after the increment."},
+	},
+	"action:kv_rename": {
+		{Path: "ok", Label: "Renamed", DataType: domain.DataBoolean, Description: "Whether the rename succeeded."},
+	},
+	"action:kv_expire": {
+		{Path: "ok", Label: "Applied", DataType: domain.DataBoolean, Description: "Whether the expiry change was applied."},
+	},
+	"action:kv_ttl": {
+		{Path: "ttl", Label: "TTL seconds", DataType: domain.DataNumber, Description: "Remaining time to live; -1 means no expiry, -2 means the key is gone."},
+	},
+	"action:kv_hash_get": {
+		{Path: "value", Label: "Value", DataType: domain.DataText, Description: "Single field value."},
+		{Path: "found", Label: "Found", DataType: domain.DataBoolean, Description: "Whether the field or hash existed."},
+		{Path: "fields", Label: "Fields", DataType: domain.DataObject, Description: "Whole hash as an object."},
+	},
+	"action:kv_hash_set": {
+		{Path: "added", Label: "New fields", DataType: domain.DataNumber, Description: "Fields newly created by HSET or removed by HDEL."},
+	},
+	"action:kv_list_push": {
+		{Path: "length", Label: "List length", DataType: domain.DataNumber, Description: "List length after the push."},
+	},
+	"action:kv_list_pop": {
+		{Path: "values", Label: "Values", DataType: domain.DataList, Description: "Popped values in pop order."},
+		{Path: "value", Label: "Value", DataType: domain.DataText, Description: "First popped value."},
+		{Path: "found", Label: "Found", DataType: domain.DataBoolean, Description: "Whether the list had elements."},
+	},
+	"action:kv_list_range": {
+		{Path: "items", Label: "Items", DataType: domain.DataList, Description: "Requested list slice."},
+		{Path: "count", Label: "Count", DataType: domain.DataNumber, Description: "Number of returned items."},
+	},
+	"action:kv_set_add": {
+		{Path: "added", Label: "New members", DataType: domain.DataNumber, Description: "Members newly added."},
+	},
+	"action:kv_set_members": {
+		{Path: "members", Label: "Members", DataType: domain.DataList, Description: "All set members."},
+		{Path: "count", Label: "Count", DataType: domain.DataNumber, Description: "Member count."},
+	},
+	"action:kv_set_remove": {
+		{Path: "removed", Label: "Removed members", DataType: domain.DataNumber, Description: "Members actually removed."},
+	},
+	"action:kv_zset_add": {
+		{Path: "added", Label: "New members", DataType: domain.DataNumber, Description: "Members newly added."},
+	},
+	"action:kv_zset_range": {
+		{Path: "entries", Label: "Entries", DataType: domain.DataList, Description: "Member/score objects in rank order."},
+		{Path: "count", Label: "Count", DataType: domain.DataNumber, Description: "Number of returned entries."},
+	},
+	"action:kv_zset_remove": {
+		{Path: "removed", Label: "Removed members", DataType: domain.DataNumber, Description: "Members actually removed."},
+	},
+	"action:kv_scan": {
+		{Path: "keys", Label: "Keys", DataType: domain.DataList, Description: "Keys from this SCAN page."},
+		{Path: "nextCursor", Label: "Next cursor", DataType: domain.DataNumber, Description: "Cursor for the next page; 0 means done."},
+		{Path: "done", Label: "Done", DataType: domain.DataBoolean, Description: "Whether the scan is complete."},
+	},
+	"action:kv_publish": {
+		{Path: "receivers", Label: "Receivers", DataType: domain.DataNumber, Description: "Clients that received the message."},
+	},
+	"action:kv_info": {
+		{Path: "info.version", Label: "Version", DataType: domain.DataText, Description: "Server version."},
+		{Path: "info.flavor", Label: "Flavor", DataType: domain.DataText, Description: "Server flavour."},
+		{Path: "info.totalKeys", Label: "Total keys", DataType: domain.DataNumber, Description: "Keys in the selected database."},
+		{Path: "version", Label: "Version", DataType: domain.DataText, Description: "Server version."},
+		{Path: "flavor", Label: "Flavor", DataType: domain.DataText, Description: "Server flavour."},
+		{Path: "keyCount", Label: "Key count", DataType: domain.DataNumber, Description: "Keys in the selected database."},
+	},
+	"action:kv_command": {
+		{Path: "value", Label: "Value", DataType: domain.DataAny, Description: "Normalized command reply."},
+		{Path: "valueText", Label: "Value (text)", DataType: domain.DataText, Description: "Reply rendered as text."},
+		{Path: "isNil", Label: "Is nil", DataType: domain.DataBoolean, Description: "Whether Redis replied with nil."},
+	},
 }
 
 func llmResultFields() []domain.DataField {
