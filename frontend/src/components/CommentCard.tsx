@@ -4,14 +4,18 @@ import type { EditorComment } from "@/types";
 import { Icon } from "./icons";
 import { cn } from "../utils/cn";
 
-/** Soft acrylic colors for sticky notes, matching our graphite theme. */
+/**
+ * Soft acrylic colors for sticky notes. Values are theme variables
+ * (index.css) so cards stay legible on light and dark canvases; tints are
+ * derived from the hue vars via color-mix.
+ */
 const ACCENTS: Record<EditorComment["color"], { border: string; bg: string; text: string; dot: string; head: string }> = {
-  slate:   { border: "#3a3a43", bg: "rgba(20,20,23,0.85)",  text: "#c9c9d2", dot: "#55555f", head: "rgba(85,85,95,0.08)" },
-  violet:  { border: "#6d28d9", bg: "rgba(109,40,217,0.06)", text: "#c4b5fd", dot: "#7c3aed", head: "rgba(124,58,237,0.12)" },
-  emerald: { border: "#047857", bg: "rgba(4,120,87,0.06)",   text: "#a7f3d0", dot: "#059669", head: "rgba(5,150,105,0.12)" },
-  amber:   { border: "#b45309", bg: "rgba(180,83,9,0.06)",   text: "#fde68a", dot: "#ea580c", head: "rgba(217,119,6,0.12)" },
-  sky:     { border: "#0369a1", bg: "rgba(3,105,161,0.06)",  text: "#bae6fd", dot: "#0284c7", head: "rgba(3,137,201,0.12)" },
-  rose:    { border: "#be123c", bg: "rgba(190,18,60,0.06)",   text: "#fecdd3", dot: "#e11d48", head: "rgba(225,29,72,0.12)" },
+  slate:   { border: "var(--hue-slate-deep)", bg: "var(--hue-slate-card)", text: "var(--hue-slate-text)", dot: "var(--hue-slate)", head: "color-mix(in srgb, var(--hue-slate) 8%, transparent)" },
+  violet:  { border: "var(--hue-violet-deep)", bg: "color-mix(in srgb, var(--hue-violet-deep) 6%, transparent)", text: "var(--hue-violet-text)", dot: "var(--hue-violet)", head: "color-mix(in srgb, var(--hue-violet) 12%, transparent)" },
+  emerald: { border: "var(--hue-emerald-deep)", bg: "color-mix(in srgb, var(--hue-emerald-deep) 6%, transparent)", text: "var(--hue-emerald-text)", dot: "var(--hue-emerald)", head: "color-mix(in srgb, var(--hue-emerald) 12%, transparent)" },
+  amber:   { border: "var(--hue-amber-deep)", bg: "color-mix(in srgb, var(--hue-amber-deep) 6%, transparent)", text: "var(--hue-amber-text)", dot: "var(--hue-amber)", head: "color-mix(in srgb, var(--hue-amber) 12%, transparent)" },
+  sky:     { border: "var(--hue-sky-deep)", bg: "color-mix(in srgb, var(--hue-sky-deep) 6%, transparent)", text: "var(--hue-sky-text)", dot: "var(--hue-sky)", head: "color-mix(in srgb, var(--hue-sky) 12%, transparent)" },
+  rose:    { border: "var(--hue-rose-deep)", bg: "color-mix(in srgb, var(--hue-rose-deep) 6%, transparent)", text: "var(--hue-rose-text)", dot: "var(--hue-rose)", head: "color-mix(in srgb, var(--hue-rose) 12%, transparent)" },
 };
 
 const RESIZE_SIZE = 12;
@@ -86,8 +90,8 @@ export const CommentCard = memo(function CommentCard({
         className="flex h-7 shrink-0 cursor-grab items-center gap-1.5 px-2.5 active:cursor-grabbing"
       >
         <span style={{ color: accent.dot }}><Icon name="StickyNote" className="h-3.5 w-3.5" /></span>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-400">{t("editor.note")}</span>
-        <Icon name="GripVertical" className="ml-auto h-3.5 w-3.5 text-ink-600 opacity-60" />
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-subtle">{t("editor.note")}</span>
+        <Icon name="GripVertical" className="ml-auto h-3.5 w-3.5 text-fg-faint opacity-60" />
       </div>
 
       {/* body */}
@@ -104,7 +108,7 @@ export const CommentCard = memo(function CommentCard({
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commit(); }
               if (e.key === "Escape") { setDraft(comment.text); finish(); }
             }}
-            className="h-full w-full resize-none rounded-md bg-ink-950/70 p-2 text-[12px] leading-relaxed text-ink-50 outline-none ring-1 ring-ink-500"
+            className="h-full w-full resize-none rounded-md bg-ink-950/70 p-2 text-[12px] leading-relaxed text-fg outline-none ring-1 ring-ring/60"
           />
         ) : (
           <p
@@ -123,7 +127,7 @@ export const CommentCard = memo(function CommentCard({
         style={{ width: RESIZE_SIZE, height: RESIZE_SIZE }}
         className="absolute bottom-1 right-1 cursor-se-resize opacity-60 hover:opacity-100"
       >
-        <svg viewBox="0 0 10 10" className="h-full w-full text-ink-500">
+        <svg viewBox="0 0 10 10" className="h-full w-full text-fg-faint">
           <path d="M10,0 L0,10 M10,4 L4,10 M10,8 L8,10" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
         </svg>
       </span>

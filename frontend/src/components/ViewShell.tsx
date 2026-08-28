@@ -20,11 +20,11 @@ export function ViewShell({
   return (
     <section className="fade-in flex h-full flex-col overflow-hidden">
       <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-seam px-4">
-        <h1 className="text-[13.5px] font-semibold tracking-tight text-ink-50">{title}</h1>
+        <h1 className="text-[13.5px] font-semibold tracking-tight text-fg">{title}</h1>
         {subtitle && (
           <>
             <span className="h-3 w-px bg-ink-700" />
-            <span className="truncate text-[11.5px] text-ink-500">{subtitle}</span>
+            <span className="truncate text-[11.5px] text-fg-faint">{subtitle}</span>
           </>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>
@@ -55,15 +55,15 @@ export function SearchInput({
         className,
       )}
     >
-      <Icon name="Search" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
+      <Icon name="Search" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink-50 placeholder:text-ink-500"
+        className="min-w-0 flex-1 bg-transparent text-[12.5px] text-fg placeholder:text-fg-faint"
       />
       {value && (
-        <button onClick={() => onChange("")} className="text-ink-500 hover:text-ink-200">
+        <button onClick={() => onChange("")} className="text-fg-faint hover:text-fg-muted">
           <Icon name="X" className="h-3.5 w-3.5" />
         </button>
       )}
@@ -103,7 +103,7 @@ export function Card({
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-2 flex items-center gap-2">
-      <h2 className="text-[10.5px] font-medium tracking-[0.09em] text-ink-400 uppercase">{children}</h2>
+      <h2 className="text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">{children}</h2>
       <div className="ml-auto">{right}</div>
     </div>
   );
@@ -111,21 +111,21 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
 
 export function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
-    completed: "bg-emerald-400/10 text-emerald-300/90",
-    published: "bg-emerald-400/10 text-emerald-300/90",
-    connected: "bg-emerald-400/10 text-emerald-300/90",
-    running: "bg-ink-50/12 text-ink-50",
-    queued: "bg-amber-400/10 text-amber-300/90",
-    draft: "bg-ink-750 text-ink-300",
-    idle: "bg-ink-750 text-ink-300",
-    failed: "bg-rose-400/10 text-rose-300/90",
-    error: "bg-rose-400/10 text-rose-300/90",
+    completed: "bg-success/10 text-success-fg/90",
+    published: "bg-success/10 text-success-fg/90",
+    connected: "bg-success/10 text-success-fg/90",
+    running: "bg-ink-50/12 text-fg",
+    queued: "bg-warning/10 text-warning-fg/90",
+    draft: "bg-ink-750 text-fg-subtle",
+    idle: "bg-ink-750 text-fg-subtle",
+    failed: "bg-danger/10 text-danger-fg/90",
+    error: "bg-danger/10 text-danger-fg/90",
   };
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded px-1.5 py-[2px] font-mono text-[10px] tracking-tight",
-        map[status] ?? "bg-ink-750 text-ink-300",
+        map[status] ?? "bg-ink-750 text-fg-subtle",
       )}
     >
       {status === "running" && <span className="h-1.5 w-1.5 rounded-full bg-ink-50 pulse-ring" />}
@@ -137,11 +137,11 @@ export function StatusPill({ status }: { status: string }) {
 export function EmptyState({ icon, title, hint }: { icon: string; title: string; hint?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-      <span className="grid h-10 w-10 place-items-center rounded-xl border border-ink-700 bg-ink-850 text-ink-400">
+      <span className="grid h-10 w-10 place-items-center rounded-xl border border-ink-700 bg-ink-850 text-fg-subtle">
         <Icon name={icon} className="h-4 w-4" />
       </span>
-      <p className="text-[13px] font-medium text-ink-100">{title}</p>
-      {hint && <p className="max-w-[280px] text-[11.5px] leading-relaxed text-ink-500">{hint}</p>}
+      <p className="text-[13px] font-medium text-fg">{title}</p>
+      {hint && <p className="max-w-[280px] text-[11.5px] leading-relaxed text-fg-faint">{hint}</p>}
     </div>
   );
 }

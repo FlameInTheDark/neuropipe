@@ -1,14 +1,24 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/neuropipe.svg" />
     <title>Neuropipe</title>
+    <script>
+      /* pre-paint theme (mirrors stores/theme.ts storage format) */
+      try {
+        var t = JSON.parse(localStorage.getItem("neuropipe.theme.v1") || '"dark"');
+        t = t === "light" ? "light" : "dark";
+        document.documentElement.dataset.theme = t;
+        document.documentElement.style.colorScheme = t;
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

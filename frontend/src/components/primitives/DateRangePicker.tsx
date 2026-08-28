@@ -111,18 +111,18 @@ function TimeField({
             (kind === "hour" ? minuteRef : hourRef)?.current?.focus();
           }
         }}
-        className="w-[22px] bg-transparent text-center font-mono text-[12px] tabular-nums text-ink-100 outline-none placeholder:text-ink-600"
+        className="w-[22px] bg-transparent text-center font-mono text-[12px] tabular-nums text-fg outline-none placeholder:text-fg-faint"
       />
     );
   };
 
   return (
     <div
-      className="flex h-7 items-center rounded-md border border-ink-700 bg-ink-850 px-1 transition focus-within:border-sky-400/60"
+      className="flex h-7 items-center rounded-md border border-ink-700 bg-ink-850 px-1 transition focus-within:border-info/60"
       aria-label={ariaLabel}
     >
       {segment("hour")}
-      <span className="px-px font-mono text-[12px] text-ink-500">:</span>
+      <span className="px-px font-mono text-[12px] text-fg-faint">:</span>
       {segment("minute")}
     </div>
   );
@@ -288,14 +288,14 @@ export function DateRangePicker({
         className={cn(
           "flex h-8 items-center gap-2 rounded-md border px-2.5 text-[12px] transition",
           open || value.from
-            ? "border-ink-500 bg-ink-800 text-ink-50"
-            : "border-ink-700 bg-ink-850 text-ink-400 hover:border-ink-600 hover:text-ink-200",
+            ? "border-ink-500 bg-ink-800 text-fg"
+            : "border-ink-700 bg-ink-850 text-fg-subtle hover:border-ink-600 hover:text-fg-muted",
           className,
         )}
       >
-        <Icon name="CalendarDays" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
+        <Icon name="CalendarDays" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
         <span className="max-w-[240px] truncate">{label}</span>
-        <Icon name="ChevronDown" className="h-3 w-3 shrink-0 text-ink-500" />
+        <Icon name="ChevronDown" className="h-3 w-3 shrink-0 text-fg-faint" />
       </button>
 
       {open &&
@@ -310,18 +310,18 @@ export function DateRangePicker({
                 type="button"
                 aria-label={t("reports.prevMonth")}
                 onClick={() => shiftMonth(-1)}
-                className="grid h-6 w-6 place-items-center rounded-md text-ink-400 transition hover:bg-ink-750 hover:text-ink-100"
+                className="grid h-6 w-6 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-750 hover:text-fg"
               >
                 <Icon name="ChevronLeft" className="h-3.5 w-3.5" />
               </button>
-              <span className="min-w-0 flex-1 truncate text-center text-[12px] font-medium capitalize text-ink-50">
+              <span className="min-w-0 flex-1 truncate text-center text-[12px] font-medium capitalize text-fg">
                 {monthTitle}
               </span>
               <button
                 type="button"
                 aria-label={t("reports.nextMonth")}
                 onClick={() => shiftMonth(1)}
-                className="grid h-6 w-6 place-items-center rounded-md text-ink-400 transition hover:bg-ink-750 hover:text-ink-100"
+                className="grid h-6 w-6 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-750 hover:text-fg"
               >
                 <Icon name="ChevronRight" className="h-3.5 w-3.5" />
               </button>
@@ -329,7 +329,7 @@ export function DateRangePicker({
 
             <div className="grid grid-cols-7 gap-y-0.5">
               {weekdays.map((day) => (
-                <span key={day} className="grid h-6 place-items-center text-[10px] text-ink-600">
+                <span key={day} className="grid h-6 place-items-center text-[10px] text-fg-faint">
                   {day}
                 </span>
               ))}
@@ -347,14 +347,14 @@ export function DateRangePicker({
                       "h-7 rounded-md text-[11.5px] tabular-nums transition",
                       iso === splitValue(value.from).date ||
                         (value.to && iso === splitValue(value.to).date)
-                        ? "bg-sky-500 font-medium text-white"
+                        ? "bg-info font-medium text-white"
                         : inPreview(iso)
-                          ? "bg-sky-500/20 text-sky-100"
-                          : "text-ink-200 hover:bg-ink-750",
+                          ? "bg-info/20 text-info-fg"
+                          : "text-fg-muted hover:bg-ink-750",
                       iso === todayIso() &&
                         iso !== splitValue(value.from).date &&
                         iso !== splitValue(value.to).date &&
-                        "ring-1 ring-inset ring-ink-600",
+                        "ring-1 ring-inset ring-ring/60",
                     )}
                   >
                     {Number(iso.slice(8, 10))}
@@ -366,7 +366,7 @@ export function DateRangePicker({
             {withTime && (
               <div className="mt-2 space-y-1.5 border-t border-seam pt-2">
                 <div className="flex items-center gap-2">
-                  <span className="w-12 shrink-0 text-[10.5px] text-ink-500">{t("reports.from")}</span>
+                  <span className="w-12 shrink-0 text-[10.5px] text-fg-faint">{t("reports.from")}</span>
                   <TimeField
                     value={value.from ? splitValue(value.from).time || "00:00" : ""}
                    
@@ -381,7 +381,7 @@ export function DateRangePicker({
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="w-12 shrink-0 text-[10.5px] text-ink-500">{t("reports.to")}</span>
+                  <span className="w-12 shrink-0 text-[10.5px] text-fg-faint">{t("reports.to")}</span>
                   <TimeField
                     value={value.to ? splitValue(value.to).time || "23:59" : ""}
                    
@@ -408,7 +408,7 @@ export function DateRangePicker({
                   key={preset.back}
                   type="button"
                   onClick={() => applyPreset(preset.back)}
-                  className="rounded-md px-2 py-1 text-[11px] text-ink-300 transition hover:bg-ink-750 hover:text-ink-50"
+                  className="rounded-md px-2 py-1 text-[11px] text-fg-subtle transition hover:bg-ink-750 hover:text-fg"
                 >
                   {preset.label}
                 </button>
@@ -420,7 +420,7 @@ export function DateRangePicker({
                   onChange({ from: "", to: "" });
                   setOpen(false);
                 }}
-                className="ml-auto rounded-md px-2 py-1 text-[11px] text-rose-300 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+                className="ml-auto rounded-md px-2 py-1 text-[11px] text-danger-fg transition hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t("common.clear")}
               </button>

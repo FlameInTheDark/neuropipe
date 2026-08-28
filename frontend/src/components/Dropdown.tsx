@@ -53,13 +53,13 @@ export function Dropdown({
           className,
         )}
       >
-        {current?.icon && <Icon name={current.icon} className="h-3.5 w-3.5 shrink-0 text-ink-400" />}
-        <span className={cn("min-w-0 flex-1 truncate", current ? "text-ink-50" : "text-ink-500")}>
+        {current?.icon && <Icon name={current.icon} className="h-3.5 w-3.5 shrink-0 text-fg-subtle" />}
+        <span className={cn("min-w-0 flex-1 truncate", current ? "text-fg" : "text-fg-faint")}>
           {current?.label ?? resolvedPlaceholder}
         </span>
         <Icon
           name="ChevronDown"
-          className={cn("h-3.5 w-3.5 shrink-0 text-ink-500 transition-transform duration-150", open && "rotate-180")}
+          className={cn("h-3.5 w-3.5 shrink-0 text-fg-faint transition-transform duration-150", open && "rotate-180")}
         />
       </button>
       {open && (
@@ -159,16 +159,16 @@ function Menu({
           onClick={() => onPick(o.value)}
           className={cn(
             "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] transition-colors",
-            i === hi ? "bg-ink-650/80 text-ink-50" : "text-ink-100",
+            i === hi ? "bg-ink-650/80 text-fg" : "text-fg",
           )}
         >
           {o.icon ? (
-            <Icon name={o.icon} className="h-[14px] w-[14px] shrink-0 text-ink-400" />
+            <Icon name={o.icon} className="h-[14px] w-[14px] shrink-0 text-fg-subtle" />
           ) : null}
           <span className="min-w-0 truncate">{o.label}</span>
-          {o.hint && <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-500">{o.hint}</span>}
+          {o.hint && <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-faint">{o.hint}</span>}
           {o.value === value && !o.hint && (
-            <Icon name="Check" className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-200" />
+            <Icon name="Check" className="ml-auto h-3.5 w-3.5 shrink-0 text-fg-muted" />
           )}
         </button>
       ))}

@@ -32,8 +32,8 @@ export function IconPickerGrid({
           className={cn(
             "grid aspect-square place-items-center rounded-md border transition",
             value === ic
-              ? "border-ink-300 bg-ink-750 text-ink-50"
-              : "border-transparent text-ink-400 hover:border-ink-600 hover:bg-ink-850 hover:text-ink-100",
+              ? "border-ink-300 bg-ink-750 text-fg"
+              : "border-transparent text-fg-subtle hover:border-ink-600 hover:bg-ink-850 hover:text-fg",
           )}
         >
           <Icon name={ic} className="h-4 w-4" />

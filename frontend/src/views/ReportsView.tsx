@@ -234,7 +234,7 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                   key={`filter-${tag.toLowerCase()}`}
                   onClick={() => toggleTag(tag)}
                   aria-label={`${t("common.clear")}: #${tag}`}
-                  className="flex items-center gap-1 rounded-md border border-sky-500/40 bg-sky-500/15 px-2 py-1 font-mono text-[11px] text-sky-200 transition hover:bg-sky-500/25"
+                  className="flex items-center gap-1 rounded-md border border-info/40 bg-info/15 px-2 py-1 font-mono text-[11px] text-info-fg transition hover:bg-info/25"
                 >
                   #{tag}
                   <Icon name="X" className="h-3 w-3" />
@@ -265,21 +265,21 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                 }}
                 onContextMenu={(e) => reportMenu(e, r)}
                 className={cn(
-                  "mb-2 block w-full cursor-pointer rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink-500",
+                  "mb-2 block w-full cursor-pointer rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
                   active?.id === r.id
                     ? "border-ink-500 bg-ink-800/70"
                     : "border-ink-700/80 bg-ink-850/50 hover:border-ink-600 hover:bg-ink-850",
                 )}
               >
-                <span className="block truncate text-[12.5px] font-semibold text-ink-50">{r.title}</span>
-                <span className="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-ink-400">
+                <span className="block truncate text-[12.5px] font-semibold text-fg">{r.title}</span>
+                <span className="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-fg-subtle">
                   {excerpt(r.markdown)}
                 </span>
-                <span className="mt-2 flex items-center gap-1.5 text-[10.5px] text-ink-500">
+                <span className="mt-2 flex items-center gap-1.5 text-[10.5px] text-fg-faint">
                   <Icon name="Clock" className="h-3 w-3" />
                   {dateFmt.format(new Date(r.createdAt))}
                 </span>
-                <span className="mt-1 flex items-center gap-1.5 text-[10.5px] text-ink-500">
+                <span className="mt-1 flex items-center gap-1.5 text-[10.5px] text-fg-faint">
                   <Icon name="Cable" className="h-3 w-3" />
                   <button
                     onClick={(e) => {
@@ -287,7 +287,7 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                       openReportPipeline(r);
                     }}
                     title={t("reports.openPipeline")}
-                    className="truncate text-left transition hover:text-sky-300"
+                    className="truncate text-left transition hover:text-info-fg"
                   >
                     {r.pipelineName}
                   </button>
@@ -308,8 +308,8 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                           className={cn(
                             "flex items-center gap-1 rounded px-1.5 py-px font-mono text-[10px] transition",
                             isActive
-                              ? "bg-sky-500/20 text-sky-200 hover:bg-sky-500/30"
-                              : "bg-ink-800 text-ink-300 hover:bg-ink-700 hover:text-ink-100",
+                              ? "bg-info/20 text-info-fg hover:bg-info/30"
+                              : "bg-ink-800 text-fg-subtle hover:bg-ink-700 hover:text-fg",
                           )}
                         >
                           {isActive && <Icon name="X" className="h-2.5 w-2.5" />}
@@ -326,7 +326,7 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
           <article className="fade-in min-w-0 flex-1 overflow-y-auto px-7 py-6">
             {active ? (
               <div className="mx-auto max-w-[680px]">
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-500">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-fg-faint">
                   <Icon name="Clock" className="h-3 w-3" />
                   {dateFmt.format(new Date(active.createdAt))}
                   <span className="h-3 w-px bg-ink-700" />
@@ -334,7 +334,7 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                   <button
                     onClick={() => openReportPipeline(active)}
                     title={t("reports.openPipeline")}
-                    className="truncate transition hover:text-sky-300"
+                    className="truncate transition hover:text-info-fg"
                   >
                     {active.pipelineName}
                   </button>
@@ -352,8 +352,8 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                             className={cn(
                               "flex items-center gap-1 rounded px-1.5 py-px font-mono text-[10px] transition",
                               isActive
-                                ? "bg-sky-500/20 text-sky-200 hover:bg-sky-500/30"
-                                : "bg-ink-800 text-ink-300 hover:bg-ink-700 hover:text-ink-100",
+                                ? "bg-info/20 text-info-fg hover:bg-info/30"
+                                : "bg-ink-800 text-fg-subtle hover:bg-ink-700 hover:text-fg",
                             )}
                           >
                             {isActive && <Icon name="X" className="h-2.5 w-2.5" />}
@@ -373,7 +373,7 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                   </Button>
                 </div>
 
-                <h1 className="mt-3 text-[22px] font-semibold tracking-tight text-ink-50">{active.title}</h1>
+                <h1 className="mt-3 text-[22px] font-semibold tracking-tight text-fg">{active.title}</h1>
 
                 <div className="my-5 h-px bg-ink-750" />
 

@@ -55,17 +55,17 @@ export function HeadersEditor({
   };
 
   const inputCls =
-    "h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 font-mono text-[11.5px] text-ink-100 transition focus:border-ink-500 focus:outline-none";
+    "h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 font-mono text-[11.5px] text-fg transition focus:border-ink-500 focus:outline-none";
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label>{label}</Label>
-        <span className="font-mono text-[10px] text-ink-600">{rows.length}</span>
+        <span className="font-mono text-[10px] text-fg-faint">{rows.length}</span>
       </div>
 
       {rows.length > 0 && (
-        <div className="flex items-center gap-1.5 px-0.5 text-[10px] tracking-wide text-ink-600 uppercase">
+        <div className="flex items-center gap-1.5 px-0.5 text-[10px] tracking-wide text-fg-faint uppercase">
           <span className="flex-1">{t("editor.headerName")}</span>
           <span className="flex-1">{t("editor.headerValue")}</span>
           <span className="w-7 shrink-0" />
@@ -97,7 +97,7 @@ export function HeadersEditor({
           <button
             onClick={() => onChange(rows.filter((_, current) => current !== index))}
             aria-label={t("common.delete")}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-500 transition hover:bg-rose-500/15 hover:text-rose-300"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-faint transition hover:bg-danger/15 hover:text-danger-fg"
           >
             <Icon name="Trash2" className="h-3.5 w-3.5" />
           </button>
@@ -105,14 +105,14 @@ export function HeadersEditor({
       ))}
 
       {rows.length === 0 && (
-        <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-ink-500">
+        <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-fg-faint">
           {t("editor.noHeaders")}
         </p>
       )}
 
       <button
         onClick={() => onChange([...rows, { name: "", value: "" }])}
-        className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-ink-700 bg-ink-850/50 px-2 text-[11.5px] text-ink-300 transition hover:border-ink-500 hover:bg-ink-750"
+        className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-ink-700 bg-ink-850/50 px-2 text-[11.5px] text-fg-subtle transition hover:border-ink-500 hover:bg-ink-750"
       >
         <Icon name="Plus" className="h-3.5 w-3.5" />
         {t("editor.addHeader")}
@@ -122,5 +122,5 @@ export function HeadersEditor({
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <span className="block text-[11px] font-medium text-ink-300">{children}</span>;
+  return <span className="block text-[11px] font-medium text-fg-subtle">{children}</span>;
 }

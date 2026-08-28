@@ -49,8 +49,8 @@ function ConfirmHost() {
             onClick={() => respond(true)}
             className={
               request.danger
-                ? "h-7 rounded-md bg-rose-500/90 px-3 text-[11.5px] font-medium text-white transition hover:bg-rose-500"
-                : "h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-ink-950 transition hover:bg-white"
+                ? "h-7 rounded-md bg-danger/90 px-3 text-[11.5px] font-medium text-white transition hover:bg-danger"
+                : "h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-fg-onEmphasis transition hover:bg-ink-25"
             }
           >
             {request.confirmLabel}
@@ -58,7 +58,7 @@ function ConfirmHost() {
         </div>
       }
     >
-      <p className="text-[12.5px] leading-relaxed text-ink-300">{request.description}</p>
+      <p className="text-[12.5px] leading-relaxed text-fg-subtle">{request.description}</p>
     </Modal>
   );
 }
@@ -111,7 +111,7 @@ function InputHost() {
     >
       <div className="space-y-3">
         {request.message && (
-          <p className="text-[12.5px] leading-relaxed text-ink-300">{request.message}</p>
+          <p className="text-[12.5px] leading-relaxed text-fg-subtle">{request.message}</p>
         )}
         <Field label={request.label || t("inputDialog.value")} hint={error ?? undefined}>
           <input
@@ -127,7 +127,7 @@ function InputHost() {
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
             }}
-            className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 placeholder:text-ink-500 transition focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+            className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg placeholder:text-fg-faint transition focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
           />
         </Field>
       </div>
@@ -184,7 +184,7 @@ function FormHost() {
     };
     if (item.kind === "text") {
       return (
-        <p key={item.id} style={style} className="self-end pb-1 text-[12px] leading-snug text-ink-300">
+        <p key={item.id} style={style} className="self-end pb-1 text-[12px] leading-snug text-fg-subtle">
           {item.label}
         </p>
       );
@@ -192,7 +192,7 @@ function FormHost() {
     if (item.kind === "dropdown") {
       return (
         <label key={item.id} style={style} className="block">
-          <span className="mb-1 block text-[11px] text-ink-400">{item.label}</span>
+          <span className="mb-1 block text-[11px] text-fg-subtle">{item.label}</span>
           <Dropdown
             value={values[item.id] ?? ""}
             onChange={(v) => setValues((prev) => ({ ...prev, [item.id]: v }))}
@@ -204,7 +204,7 @@ function FormHost() {
     }
     return (
       <label key={item.id} style={style} className="block">
-        <span className="mb-1 block text-[11px] text-ink-400">{item.label}</span>
+        <span className="mb-1 block text-[11px] text-fg-subtle">{item.label}</span>
         <input
           type={item.inputType === "number" ? "number" : "text"}
           value={values[item.id] ?? ""}
@@ -213,7 +213,7 @@ function FormHost() {
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
           }}
-          className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 placeholder:text-ink-500 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+          className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg placeholder:text-fg-faint focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
         />
       </label>
     );
@@ -228,7 +228,7 @@ function FormHost() {
       footer={
         <div className="ml-auto flex items-center gap-2">
           {error && (
-            <span className="flex items-center gap-1.5 text-[11.5px] text-rose-300">
+            <span className="flex items-center gap-1.5 text-[11.5px] text-danger-fg">
               <Icon name="AlertTriangle" className="h-3.5 w-3.5" />
               {error}
             </span>
@@ -244,7 +244,7 @@ function FormHost() {
     >
       <div className="space-y-3">
         {request.message && (
-          <p className="text-[12.5px] leading-relaxed text-ink-300">{request.message}</p>
+          <p className="text-[12.5px] leading-relaxed text-fg-subtle">{request.message}</p>
         )}
         <div
           style={{

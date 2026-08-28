@@ -62,15 +62,15 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-seam px-4">
-          {icon && <Icon name={icon} className="h-4 w-4 shrink-0 text-ink-400" />}
-          <h2 className="truncate text-[13px] font-semibold text-ink-50">{title}</h2>
+          {icon && <Icon name={icon} className="h-4 w-4 shrink-0 text-fg-subtle" />}
+          <h2 className="truncate text-[13px] font-semibold text-fg">{title}</h2>
           {badge}
           <div className="ml-auto flex items-center gap-1">
             {headerExtra}
             <button
               onClick={onClose}
               aria-label={t("common.close")}
-              className="grid h-7 w-7 place-items-center rounded-md text-ink-400 transition hover:bg-ink-800 hover:text-ink-50"
+              className="grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-800 hover:text-fg"
             >
               <Icon name="X" className="h-4 w-4" />
             </button>
@@ -115,7 +115,7 @@ export function ModalActions({
     <div className="ml-auto flex items-center gap-2">
       <button
         onClick={onCancel}
-        className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+        className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-fg-muted transition hover:bg-ink-750"
       >
         {resolvedCancel}
       </button>
@@ -125,8 +125,8 @@ export function ModalActions({
         className={cn(
           "h-7 rounded-md px-3 text-[11.5px] font-medium transition",
           disabled
-            ? "cursor-not-allowed bg-ink-800 text-ink-500"
-            : "bg-ink-50 text-ink-950 hover:bg-white",
+            ? "cursor-not-allowed bg-ink-800 text-fg-faint"
+            : "bg-ink-50 text-fg-onEmphasis hover:bg-ink-25",
         )}
       >
         {resolvedConfirm}

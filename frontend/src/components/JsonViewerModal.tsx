@@ -48,23 +48,23 @@ export function JsonViewerModal({ entry, onClose }: { entry: LogEntry; onClose: 
       >
         {/* ── header: node identity + run meta ── */}
         <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-seam px-4">
-          <Icon name="Braces" className="h-4 w-4 shrink-0 text-sky-300" />
-          <h2 className="min-w-0 truncate text-[13px] font-semibold text-ink-50" title={entry.node}>
+          <Icon name="Braces" className="h-4 w-4 shrink-0 text-info-fg" />
+          <h2 className="min-w-0 truncate text-[13px] font-semibold text-fg" title={entry.node}>
             {entry.node}
           </h2>
-          <span className="flex shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 py-0.5 text-[10.5px] capitalize text-ink-300">
+          <span className="flex shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 py-0.5 text-[10.5px] capitalize text-fg-subtle">
             <Dot tone={tone} />
             {t(`runStatus.${entry.status}`)}
           </span>
-          <span className="shrink-0 font-mono text-[10.5px] text-ink-500">{formatDuration(entry.ms)}</span>
-          <span className="shrink-0 text-[10.5px] text-ink-600">·</span>
-          <span className="shrink-0 font-mono text-[10.5px] text-ink-500">{formatDateTime(entry.time)}</span>
+          <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">{formatDuration(entry.ms)}</span>
+          <span className="shrink-0 text-[10.5px] text-fg-faint">·</span>
+          <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">{formatDateTime(entry.time)}</span>
 
           <div className="ml-auto flex items-center gap-1">
             <Tooltip content={t("common.close")} hint="Esc" side="bottom">
               <button
                 onClick={onClose}
-                className="grid h-7 w-7 place-items-center rounded-md text-ink-400 transition hover:bg-ink-800 hover:text-ink-50"
+                className="grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-800 hover:text-fg"
               >
                 <Icon name="X" className="h-4 w-4" />
               </button>
@@ -74,7 +74,7 @@ export function JsonViewerModal({ entry, onClose }: { entry: LogEntry; onClose: 
 
         {/* ── error strip (failed nodes) ── */}
         {entry.error && (
-          <pre className="max-h-[88px] shrink-0 overflow-auto border-b border-seam bg-rose-500/5 px-4 py-2 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-rose-200">
+          <pre className="max-h-[88px] shrink-0 overflow-auto border-b border-seam bg-danger/5 px-4 py-2 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-danger-fg">
             {entry.error}
           </pre>
         )}
@@ -89,7 +89,7 @@ export function JsonViewerModal({ entry, onClose }: { entry: LogEntry; onClose: 
         </div>
 
         {/* ── footer ── */}
-        <div className="flex h-9 shrink-0 items-center gap-3 border-t border-seam px-4 text-[10.5px] text-ink-500">
+        <div className="flex h-9 shrink-0 items-center gap-3 border-t border-seam px-4 text-[10.5px] text-fg-faint">
           <span className="truncate font-mono" title={entry.type}>
             {entry.type}
           </span>
@@ -97,7 +97,7 @@ export function JsonViewerModal({ entry, onClose }: { entry: LogEntry; onClose: 
           <span className="shrink-0">{t("jsonViewer.treeHint")}</span>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-ink-500">Esc</kbd>
+            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-fg-faint">Esc</kbd>
             <span>{t("common.close")}</span>
           </div>
         </div>
@@ -155,7 +155,7 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
           label={t("jsonViewer.copyElement")}
           onClick={props.onClick as unknown as React.MouseEventHandler<HTMLButtonElement>}
           icon={elementCopied ? "Check" : "Copy"}
-          iconClass={elementCopied ? "text-emerald-400" : undefined}
+          iconClass={elementCopied ? "text-success-fg" : undefined}
         />
         {path && <CopyPathButton path={path} label={t("jsonViewer.copyPath")} />}
       </span>
@@ -168,14 +168,14 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-seam px-3">
         <Icon
           name={isInput ? "FileInput" : "FileOutput"}
-          className={cn("h-3.5 w-3.5 shrink-0", isInput ? "text-sky-300/80" : "text-emerald-300/80")}
+          className={cn("h-3.5 w-3.5 shrink-0", isInput ? "text-info-fg/80" : "text-success-fg/80")}
         />
-        <span className="shrink-0 text-[10.5px] font-medium tracking-[0.09em] text-ink-300 uppercase">
+        <span className="shrink-0 text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">
           {t(isInput ? "editor.entryInput" : "editor.entryOutput")}
         </span>
         {stats && (
           <span
-            className="min-w-0 truncate font-mono text-[10px] text-ink-400"
+            className="min-w-0 truncate font-mono text-[10px] text-fg-subtle"
             title={`${stats.kind} · ${stats.bytes.toLocaleString()} chars`}
           >
             {formatBytes(stats.bytes)} · {stats.kind}
@@ -192,7 +192,7 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
                     onClick={() => setMode(m)}
                     className={cn(
                       "grid h-[20px] w-[24px] place-items-center rounded transition",
-                      mode === m ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                      mode === m ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
                     )}
                   >
                     <Icon name={m === "tree" ? "ListTree" : "Text"} className="h-3 w-3" />
@@ -216,7 +216,7 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
               icon={copied ? "Check" : "Copy"}
               label={copied ? t("jsonViewer.copied") : t("common.copy")}
               onClick={copy}
-              iconClass={copied ? "text-emerald-300" : undefined}
+              iconClass={copied ? "text-success-fg" : undefined}
             />
           </div>
         )}
@@ -225,13 +225,13 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
       {/* pane body */}
       {!has ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2.5 px-6 py-10 text-center">
-          <Icon name={isInput ? "FileInput" : "FileOutput"} className="h-7 w-7 text-ink-600" />
-          <p className="max-w-[240px] text-[12px] leading-relaxed text-ink-500">
+          <Icon name={isInput ? "FileInput" : "FileOutput"} className="h-7 w-7 text-fg-faint" />
+          <p className="max-w-[240px] text-[12px] leading-relaxed text-fg-faint">
             {t(isInput ? "jsonViewer.noInput" : "jsonViewer.noOutput")}
           </p>
         </div>
       ) : mode === "raw" ? (
-        <pre className="min-h-0 flex-1 overflow-auto px-3.5 py-3 font-mono text-[11px] leading-[1.7] whitespace-pre text-ink-200 select-text">
+        <pre className="min-h-0 flex-1 overflow-auto px-3.5 py-3 font-mono text-[11px] leading-[1.7] whitespace-pre text-fg-muted select-text">
           {formatJson(value)}
         </pre>
       ) : (
@@ -274,7 +274,7 @@ function PaneBtn({
     <Tooltip content={label} side="bottom" delay={200}>
       <button
         onClick={onClick}
-        className="grid h-6 w-6 place-items-center rounded-md text-ink-400 transition hover:bg-ink-750 hover:text-ink-50 active:scale-95"
+        className="grid h-6 w-6 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-750 hover:text-fg active:scale-95"
       >
         <Icon name={icon} className={cn("h-3.5 w-3.5", iconClass)} />
       </button>
@@ -314,8 +314,8 @@ function NodeToolButton({
         aria-label={label}
         onClick={onClick}
         className={cn(
-          "grid h-4 w-4 place-items-center rounded text-ink-500 transition-colors",
-          "hover:text-sky-300 focus-visible:outline focus-visible:outline-1 focus-visible:outline-sky-400/60",
+          "grid h-4 w-4 place-items-center rounded text-fg-faint transition-colors",
+          "hover:text-info-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-info/60",
           iconClass,
         )}
       >
@@ -356,45 +356,45 @@ function CopyPathButton({ path, label }: { path: string; label: string }) {
           <span>{label}</span>
           {/* mono + key color to mirror the tree; capped so a deep path can never
               push the nowrap bubble past the viewport (position clamps only) */}
-          <span className="max-w-[420px] truncate font-mono text-sky-300/90">{path}</span>
+          <span className="max-w-[420px] truncate font-mono text-info-fg/90">{path}</span>
         </>
       }
       onClick={onClick}
       icon={copied ? "Check" : "Route"}
-      iconClass={copied ? "text-emerald-400" : undefined}
+      iconClass={copied ? "text-success-fg" : undefined}
     />
   );
 }
 
 /* ---------- helpers ---------- */
 
-/** JSON tree colors tuned to the app's ink palette (values from index.css). */
+/** JSON tree colors resolved from the theme variables (index.css) — flips with [data-theme]. */
 const jsonTheme = {
   "--w-rjv-font-family": "var(--font-mono)",
   "--w-rjv-background-color": "transparent",
-  "--w-rjv-color": "#7c7c88", // ink-300 — braces & brackets
-  "--w-rjv-line-color": "#1a1a1f", // seam indent guides
-  "--w-rjv-arrow-color": "#55555f", // ink-400 fold arrows
-  "--w-rjv-info-color": "#55555f", // "N items" counts
-  "--w-rjv-ellipsis-color": "#7c7c88",
-  "--w-rjv-key-string": "#7dd3fc", // sky-300 — object keys
-  "--w-rjv-key-number": "#7dd3fc", // array indices
-  "--w-rjv-curlybraces-color": "#7c7c88",
-  "--w-rjv-brackets-color": "#7c7c88",
-  "--w-rjv-colon-color": "#55555f",
-  "--w-rjv-quotes-color": "#7dd3fc",
-  "--w-rjv-quotes-string-color": "#c9c9d2",
-  "--w-rjv-type-string-color": "#c9c9d2", // ink-100 — string values
-  "--w-rjv-type-int-color": "#34d399", // emerald-400 — numbers
-  "--w-rjv-type-float-color": "#34d399",
-  "--w-rjv-type-bigint-color": "#34d399",
-  "--w-rjv-type-boolean-color": "#c4b5fd", // violet-300 — booleans
-  "--w-rjv-type-null-color": "#55555f",
-  "--w-rjv-type-undefined-color": "#55555f",
-  "--w-rjv-type-date-color": "#a1a1ad",
-  "--w-rjv-type-url-color": "#7dd3fc",
-  "--w-rjv-copied-color": "#7dd3fc",
-  "--w-rjv-copied-success-color": "#34d399",
+  "--w-rjv-color": "var(--fg-subtle)", // braces & brackets
+  "--w-rjv-line-color": "var(--seam)", // seam indent guides
+  "--w-rjv-arrow-color": "var(--fg-faint)", // fold arrows
+  "--w-rjv-info-color": "var(--fg-faint)", // "N items" counts
+  "--w-rjv-ellipsis-color": "var(--fg-subtle)",
+  "--w-rjv-key-string": "var(--code-number)", // object keys
+  "--w-rjv-key-number": "var(--code-number)", // array indices
+  "--w-rjv-curlybraces-color": "var(--fg-subtle)",
+  "--w-rjv-brackets-color": "var(--fg-subtle)",
+  "--w-rjv-colon-color": "var(--fg-faint)",
+  "--w-rjv-quotes-color": "var(--code-number)",
+  "--w-rjv-quotes-string-color": "var(--code-fg)",
+  "--w-rjv-type-string-color": "var(--code-fg)", // string values
+  "--w-rjv-type-int-color": "var(--code-function)", // numbers
+  "--w-rjv-type-float-color": "var(--code-function)",
+  "--w-rjv-type-bigint-color": "var(--code-function)",
+  "--w-rjv-type-boolean-color": "var(--code-keyword)", // booleans
+  "--w-rjv-type-null-color": "var(--fg-faint)",
+  "--w-rjv-type-undefined-color": "var(--fg-faint)",
+  "--w-rjv-type-date-color": "var(--fg-subtle)",
+  "--w-rjv-type-url-color": "var(--code-number)",
+  "--w-rjv-copied-color": "var(--code-number)",
+  "--w-rjv-copied-success-color": "var(--status-success)",
 } as React.CSSProperties;
 
 /** Objects/arrays render natively in the tree; primitives get wrapped because

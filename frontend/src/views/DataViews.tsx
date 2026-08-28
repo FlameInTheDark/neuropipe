@@ -72,7 +72,7 @@ export function VariablesView({ workspace }: { workspace: Workspace }) {
         <EmptyState icon="Braces" title={t("variables.emptyTitle")} hint={t("variables.emptyDescription")} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-ink-700/80">
-          <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_90px_150px_32px] items-center gap-3 border-b border-seam bg-ink-850/70 px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">
+          <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_90px_150px_32px] items-center gap-3 border-b border-seam bg-ink-850/70 px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">
             <span>{t("variables.nameLabel")}</span>
             <span>{t("inputDialog.value")}</span>
             <span>{t("variables.typeLabel")}</span>
@@ -87,16 +87,16 @@ export function VariablesView({ workspace }: { workspace: Workspace }) {
               className="group grid cursor-default grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_90px_150px_32px] items-center gap-3 border-b border-seam/70 px-3 py-2 transition last:border-b-0 hover:bg-ink-850"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <Icon name="Braces" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
-                <span className="truncate font-mono text-[11.5px] text-ink-50">{v.name}</span>
+                <Icon name="Braces" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+                <span className="truncate font-mono text-[11.5px] text-fg">{v.name}</span>
               </span>
-              <span className="truncate font-mono text-[11.5px] text-ink-300">{valuePreview(v.value)}</span>
-              <span className="text-[11.5px] text-ink-400">{t(`variables.type.${v.dataType}`)}</span>
-              <span className="truncate text-right text-[11px] text-ink-400">{formatDateTime(v.updatedAt)}</span>
+              <span className="truncate font-mono text-[11.5px] text-fg-subtle">{valuePreview(v.value)}</span>
+              <span className="text-[11.5px] text-fg-subtle">{t(`variables.type.${v.dataType}`)}</span>
+              <span className="truncate text-right text-[11px] text-fg-subtle">{formatDateTime(v.updatedAt)}</span>
               <button
                 onClick={() => setEditing(v)}
                 aria-label={t("common.edit")}
-                className="grid h-6 w-6 place-items-center rounded text-ink-600 opacity-0 transition group-hover:opacity-100 hover:text-ink-100"
+                className="grid h-6 w-6 place-items-center rounded text-fg-faint opacity-0 transition group-hover:opacity-100 hover:text-fg"
               >
                 <Icon name="ChevronRight" className="h-4 w-4" />
               </button>
@@ -104,7 +104,7 @@ export function VariablesView({ workspace }: { workspace: Workspace }) {
           ))}
         </div>
       )}
-      <p className="mt-3 flex items-center gap-1.5 px-1 text-[11.5px] text-ink-500">
+      <p className="mt-3 flex items-center gap-1.5 px-1 text-[11.5px] text-fg-faint">
         <Icon name="Info" className="h-3.5 w-3.5" />
         {t("variables.referenceHint")}
       </p>
@@ -187,7 +187,7 @@ function VariableDialog({
         <div className="grid grid-cols-2 gap-3">
           <Field label={t("variables.typeLabel")} hint={existing ? t("variables.typeFrozen") : undefined}>
             {existing ? (
-              <div className="flex h-8 items-center rounded-md border border-ink-700 bg-ink-900 px-2.5 text-[12.5px] text-ink-400">
+              <div className="flex h-8 items-center rounded-md border border-ink-700 bg-ink-900 px-2.5 text-[12.5px] text-fg-subtle">
                 {t(`variables.type.${dataType}`)}
               </div>
             ) : (
@@ -444,12 +444,12 @@ const [pageSize, setPageSize] = useState(50);
                     : "border-transparent hover:border-ink-700 hover:bg-ink-850",
                 )}
               >
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-300">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-subtle">
                   <Icon name="Database" className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px] font-medium text-ink-50">{d.name}</span>
-                  <span className="block truncate text-[11px] capitalize text-ink-500">{d.driver}</span>
+                  <span className="block truncate text-[12.5px] font-medium text-fg">{d.name}</span>
+                  <span className="block truncate text-[11px] capitalize text-fg-faint">{d.driver}</span>
                 </span>
                 <StatusDot status={d.status} />
               </button>
@@ -461,7 +461,7 @@ const [pageSize, setPageSize] = useState(50);
               setEditing(null);
               setDialogOpen(true);
             }}
-            className="mt-1 flex w-full items-center gap-2 rounded-lg border border-dashed border-ink-700 px-2.5 py-2 text-[11.5px] text-ink-500 transition hover:border-ink-500 hover:text-ink-200"
+            className="mt-1 flex w-full items-center gap-2 rounded-lg border border-dashed border-ink-700 px-2.5 py-2 text-[11.5px] text-fg-faint transition hover:border-ink-500 hover:text-fg-muted"
           >
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850">
               <Icon name="Plus" className="h-4 w-4" />
@@ -478,15 +478,15 @@ const [pageSize, setPageSize] = useState(50);
         <div className="fade-in flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
           <>
             <div className="flex items-start gap-3">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-ink-700 bg-ink-850 text-ink-100">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-ink-700 bg-ink-850 text-fg">
                   <Icon name="Database" className="h-[18px] w-[18px]" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="truncate text-[15px] font-semibold text-ink-50">{selected.name}</h2>
+                    <h2 className="truncate text-[15px] font-semibold text-fg">{selected.name}</h2>
                     <StatusPill status={selected.status === "connected" ? "connected" : selected.status === "error" ? "error" : "idle"} />
                   </div>
-                  <p className="mt-0.5 truncate font-mono text-[11px] text-ink-500">
+                  <p className="mt-0.5 truncate font-mono text-[11px] text-fg-faint">
                     {detailLine(selected)}
                   </p>
                 </div>
@@ -506,7 +506,7 @@ const [pageSize, setPageSize] = useState(50);
                 <Button
                   variant="solid"
                   icon="Trash2"
-                  className="hover:bg-rose-500/20 hover:text-rose-200"
+                  className="hover:bg-danger/20 hover:text-danger-fg"
                   onClick={() => void removeDb(selected)}
                 >
                   {t("databases.unregister")}
@@ -526,8 +526,8 @@ const [pageSize, setPageSize] = useState(50);
                   [t("datastores.lastPing"), formatDateTime(selected.lastPingAt)],
                 ].map(([k, v]) => (
                   <Card key={k} className="p-3">
-                    <span className="text-[10px] tracking-wide text-ink-500 uppercase">{k}</span>
-                    <p className="mt-1 truncate text-[13px] font-semibold capitalize text-ink-50">{v}</p>
+                    <span className="text-[10px] tracking-wide text-fg-faint uppercase">{k}</span>
+                    <p className="mt-1 truncate text-[13px] font-semibold capitalize text-fg">{v}</p>
                   </Card>
                 ))}
               </div>
@@ -550,7 +550,7 @@ const [pageSize, setPageSize] = useState(50);
                       aria-pressed={tab === tb.id}
                       className={cn(
                         "flex h-7 items-center gap-1.5 rounded-md px-3 text-[11.5px] transition",
-                        tab === tb.id ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                        tab === tb.id ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
                       )}
                     >
                       <Icon name={tb.icon} className="h-3 w-3" />
@@ -599,35 +599,35 @@ const [pageSize, setPageSize] = useState(50);
                           onClick={() => setExpandedTable(expanded ? null : tb.name)}
                           className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-ink-850"
                         >
-                          <Icon name="ChevronRight" className={cn("h-3 w-3 shrink-0 text-ink-500 transition-transform", expanded && "rotate-90")} />
-                          <Icon name="Table2" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
-                          <span className="font-mono text-[11.5px] text-ink-100">{tb.name}</span>
-                          <span className="ml-auto font-mono text-[10.5px] text-ink-500">
+                          <Icon name="ChevronRight" className={cn("h-3 w-3 shrink-0 text-fg-faint transition-transform", expanded && "rotate-90")} />
+                          <Icon name="Table2" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+                          <span className="font-mono text-[11.5px] text-fg">{tb.name}</span>
+                          <span className="ml-auto font-mono text-[10.5px] text-fg-faint">
                             {t("datastores.columns", { count: tb.columns.length })}
                           </span>
                         </button>
                         {expanded && (
                           <div className="border-t border-seam/70 bg-ink-950/40 px-6 py-2">
-                            <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("datastores.columnsTitle")}</p>
+                            <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-fg-faint">{t("datastores.columnsTitle")}</p>
                             {tb.columns.map((col) => (
                               <div key={col.name} className="flex items-baseline gap-2 py-0.5">
-                                <span className="font-mono text-[11px] text-ink-100">{col.name}</span>
-                                <span className="font-mono text-[10.5px] text-sky-300/70">{col.dataType}</span>
+                                <span className="font-mono text-[11px] text-fg">{col.name}</span>
+                                <span className="font-mono text-[10.5px] text-info-fg/70">{col.dataType}</span>
                                 {col.primaryKey && (
-                                  <span className="rounded bg-amber-400/15 px-1 font-mono text-[9.5px] text-amber-300">PK</span>
+                                  <span className="rounded bg-warning/15 px-1 font-mono text-[9.5px] text-warning-fg">PK</span>
                                 )}
-                                {!col.nullable && <span className="text-[9.5px] text-ink-500">NOT NULL</span>}
-                                {col.default && <span className="truncate font-mono text-[10px] text-ink-600">= {col.default}</span>}
+                                {!col.nullable && <span className="text-[9.5px] text-fg-faint">NOT NULL</span>}
+                                {col.default && <span className="truncate font-mono text-[10px] text-fg-faint">= {col.default}</span>}
                               </div>
                             ))}
                             {tb.indexes.length > 0 && (
                               <>
-                                <p className="mb-1 mt-2 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("datastores.indexes")}</p>
+                                <p className="mb-1 mt-2 text-[10px] uppercase tracking-[0.09em] text-fg-faint">{t("datastores.indexes")}</p>
                                 {tb.indexes.map((ix) => (
                                   <div key={ix.name} className="flex items-baseline gap-2 py-0.5">
-                                    <span className="font-mono text-[11px] text-ink-200">{ix.name}</span>
+                                    <span className="font-mono text-[11px] text-fg-muted">{ix.name}</span>
                                     {ix.unique && <span className="text-[9.5px] text-violet-300/80">UNIQUE</span>}
-                                    <span className="truncate font-mono text-[10px] text-ink-500">({ix.columns.join(", ")})</span>
+                                    <span className="truncate font-mono text-[10px] text-fg-faint">({ix.columns.join(", ")})</span>
                                   </div>
                                 ))}
                               </>
@@ -641,7 +641,7 @@ const [pageSize, setPageSize] = useState(50);
                     );
                   })}
                   {schemaTables !== null && schemaTables.length === 0 && (
-                    <p className="bg-ink-850/40 px-3 py-3 text-[12px] text-ink-500">{t("sql.noTables")}</p>
+                    <p className="bg-ink-850/40 px-3 py-3 text-[12px] text-fg-faint">{t("sql.noTables")}</p>
                   )}
                 </div>
               )}
@@ -649,16 +649,16 @@ const [pageSize, setPageSize] = useState(50);
               {tab === "data" && (
                 dataTable ? (
                   <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/60 flex flex-col">
-                    <div className="flex items-center gap-2 border-b border-seam px-3 py-1.5 text-[11px] text-ink-400">
-                      <Icon name="Table2" className="h-3.5 w-3.5 text-ink-500" />
-                      <span className="font-mono text-[11.5px] text-ink-200">{dataTable}</span>
+                    <div className="flex items-center gap-2 border-b border-seam px-3 py-1.5 text-[11px] text-fg-subtle">
+                      <Icon name="Table2" className="h-3.5 w-3.5 text-fg-faint" />
+                      <span className="font-mono text-[11.5px] text-fg-muted">{dataTable}</span>
                       <span className="ml-auto font-mono text-[10.5px]">
                         {loadingRows ? t("common.loading") : totalRows !== null ? t("datastores.rowsTotal", { count: totalRows }) : ""}
                       </span>
                     </div>
                     <div className="min-h-0 flex-1 overflow-auto">
                       {rowsError ? (
-                        <p className="flex items-start gap-2 bg-rose-500/10 px-4 py-3 text-[11.5px] text-rose-300">
+                        <p className="flex items-start gap-2 bg-danger/10 px-4 py-3 text-[11.5px] text-danger-fg">
                           <Icon name="AlertTriangle" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                           {rowsError}
                         </p>
@@ -667,7 +667,7 @@ const [pageSize, setPageSize] = useState(50);
                           <thead className="sticky top-0 bg-ink-900">
                             <tr className="border-b border-seam">
                               {rowsPage.columns.map((c) => (
-                                <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-ink-300">{c}</th>
+                                <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-fg-subtle">{c}</th>
                               ))}
                             </tr>
                           </thead>
@@ -675,20 +675,20 @@ const [pageSize, setPageSize] = useState(50);
                             {rowsPage.rows.map((row, i) => (
                               <tr key={i} className="border-b border-seam/60 last:border-b-0 hover:bg-ink-850/60">
                                 {rowsPage.columns.map((c) => (
-                                  <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-ink-200">
+                                  <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-fg-muted">
                                     {cellText(row[c])}
                                   </td>
                                 ))}
                               </tr>
                             ))}
                             {rowsPage.rows.length === 0 && (
-                              <tr><td colSpan={Math.max(rowsPage.columns.length, 1)} className="px-3 py-2 text-[11.5px] text-ink-500">{t("sql.noResult")}</td></tr>
+                              <tr><td colSpan={Math.max(rowsPage.columns.length, 1)} className="px-3 py-2 text-[11.5px] text-fg-faint">{t("sql.noResult")}</td></tr>
                             )}
                           </tbody>
                         </table>
                       ) : null}
                     </div>
-                    <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-3 text-[11px] text-ink-500">
+                    <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-3 text-[11px] text-fg-faint">
                       <select
                         value={pageSize}
                         onChange={(e) => {
@@ -696,7 +696,7 @@ const [pageSize, setPageSize] = useState(50);
                           setPageSize(Number(e.target.value));
                         }}
                         aria-label={t("datastores.perPage", { count: pageSize })}
-                        className="h-6 rounded-md border border-ink-700 bg-ink-850 px-1 font-mono text-[10.5px] text-ink-200 [color-scheme:dark] focus:border-ink-500 focus:outline-none"
+                        className="h-6 rounded-md border border-ink-700 bg-ink-850 px-1 font-mono text-[10.5px] text-fg-muted [color-scheme:dark] focus:border-ink-500 focus:outline-none"
                       >
                         {[25, 50, 100, 200].map((n) => (
                           <option key={n} value={n}>{n}</option>
@@ -716,7 +716,7 @@ const [pageSize, setPageSize] = useState(50);
                           if (Number.isFinite(next) && next >= 1) setPage(next - 1);
                         }}
                         aria-label={t("datastores.page")}
-                        className="h-6 w-[52px] rounded-md border border-ink-700 bg-ink-850 px-1.5 text-center font-mono text-[10.5px] tabular-nums text-ink-200 [color-scheme:dark] focus:border-ink-500 focus:outline-none"
+                        className="h-6 w-[52px] rounded-md border border-ink-700 bg-ink-850 px-1.5 text-center font-mono text-[10.5px] tabular-nums text-fg-muted [color-scheme:dark] focus:border-ink-500 focus:outline-none"
                       />
                       <Button variant="ghost" icon="ChevronRight"
                         disabled={loadingRows || (totalRows !== null && (page + 1) * pageSize >= totalRows)}
@@ -754,11 +754,11 @@ const [pageSize, setPageSize] = useState(50);
                         automaticLayout: true,
                         tabSize: 2,
                       }}
-                      loading={<span className="absolute inset-0 grid place-items-center text-[12px] text-ink-500">{t("common.loading")}</span>}
+                      loading={<span className="absolute inset-0 grid place-items-center text-[12px] text-fg-faint">{t("common.loading")}</span>}
                     />
                   </div>
                   {queryError && (
-                    <p className="flex items-start gap-2 rounded-lg bg-rose-500/10 px-3 py-2 text-[11.5px] leading-relaxed text-rose-300">
+                    <p className="flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2 text-[11.5px] leading-relaxed text-danger-fg">
                       <Icon name="AlertTriangle" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                       {queryError}
                     </p>
@@ -769,7 +769,7 @@ const [pageSize, setPageSize] = useState(50);
                         <thead>
                           <tr className="border-b border-seam bg-ink-850/60">
                             {queryResult.columns.map((c) => (
-                              <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-ink-300">{c}</th>
+                              <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-fg-subtle">{c}</th>
                             ))}
                           </tr>
                         </thead>
@@ -777,7 +777,7 @@ const [pageSize, setPageSize] = useState(50);
                           {queryResult.rows.map((row, i) => (
                             <tr key={i} className="border-b border-seam/60 hover:bg-ink-850/60">
                               {queryResult.columns.map((c) => (
-                                <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-ink-200">
+                                <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-fg-muted">
                                   {cellText(row[c])}
                                 </td>
                               ))}
@@ -821,7 +821,7 @@ function StatusDot({ status }: { status: string }) {
     <span
       className={cn(
         "h-1.5 w-1.5 shrink-0 rounded-full",
-        status === "connected" ? "bg-emerald-400" : status === "error" ? "bg-rose-400" : "bg-ink-500",
+        status === "connected" ? "bg-success" : status === "error" ? "bg-danger" : "bg-ink-500",
       )}
     />
   );

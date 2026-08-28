@@ -234,8 +234,8 @@ export function BoardView({ workspace, nav }: { workspace: Workspace; nav: NavAp
                 }}
                 className={cn(
                   "flex h-8 shrink-0 items-center gap-2 rounded-lg px-2.5 text-[12px] transition",
-                  active ? "bg-ink-750 text-ink-50" : "text-ink-400 hover:bg-ink-850 hover:text-ink-100",
-                  overDeck === d.id && !active && "ring-1 ring-ink-300",
+                  active ? "bg-ink-750 text-fg" : "text-fg-subtle hover:bg-ink-850 hover:text-fg",
+                  overDeck === d.id && !active && "ring-1 ring-ring/70",
                 )}
               >
                 <Icon name={d.icon} className="h-3.5 w-3.5 shrink-0" />
@@ -243,7 +243,7 @@ export function BoardView({ workspace, nav }: { workspace: Workspace; nav: NavAp
                 <span
                   className={cn(
                     "rounded px-1 font-mono text-[9.5px]",
-                    active ? "bg-ink-900 text-ink-400" : "bg-ink-800 text-ink-600",
+                    active ? "bg-ink-900 text-fg-subtle" : "bg-ink-800 text-fg-faint",
                   )}
                 >
                   {count}
@@ -255,7 +255,7 @@ export function BoardView({ workspace, nav }: { workspace: Workspace; nav: NavAp
             <button
               onClick={addDeck}
               aria-label={t("board.newDeck")}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-ink-500 transition hover:bg-ink-850 hover:text-ink-100"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-fg-faint transition hover:bg-ink-850 hover:text-fg"
             >
               <Icon name="Plus" className="h-4 w-4" />
             </button>
@@ -265,7 +265,7 @@ export function BoardView({ workspace, nav }: { workspace: Workspace; nav: NavAp
         <Tooltip content={t("board.deckSettings")} side="bottom">
           <button
             onClick={() => deck && setEditDeck(deck)}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-ink-700 bg-ink-850 text-ink-400 transition hover:border-ink-500 hover:text-ink-50"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-ink-700 bg-ink-850 text-fg-subtle transition hover:border-ink-500 hover:text-fg"
           >
             <Icon name="Settings2" className="h-4 w-4" />
           </button>
@@ -275,14 +275,14 @@ export function BoardView({ workspace, nav }: { workspace: Workspace; nav: NavAp
       {/* recessed deck surface */}
       <div className="rounded-2xl border border-ink-700/80 bg-ink-950/70 p-3.5 shadow-[0_1px_0_rgba(255,255,255,0.025)_inset,0_16px_40px_-28px_rgba(0,0,0,0.95)]">
         <div className="mb-3 flex items-center gap-2 px-1">
-          <span className="flex items-center gap-1.5 text-[10.5px] font-medium tracking-[0.09em] text-ink-400 uppercase">
+          <span className="flex items-center gap-1.5 text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">
             <Icon name={deck?.icon ?? "Grid2x2"} className="h-3.5 w-3.5" />
             {deck?.name}
           </span>
-          <span className="rounded bg-ink-800 px-1.5 py-px font-mono text-[10px] text-ink-500">
+          <span className="rounded bg-ink-800 px-1.5 py-px font-mono text-[10px] text-fg-faint">
             {t("status.keys", { count: deckKeys.length })}
           </span>
-          <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-ink-500">
+          <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-fg-faint">
             <Icon name="GripVertical" className="h-3.5 w-3.5" />
             {t("board.dragHint")}
           </span>
@@ -402,20 +402,20 @@ function DeckKey({
         onClick={onRun}
         className={cn(
           "group relative flex h-full w-full flex-col overflow-hidden rounded-[13px] border px-3 py-3 text-left outline-none transition",
-          "active:translate-y-[1px] active:shadow-none focus-visible:ring-2 focus-visible:ring-ink-600/80",
+          "active:translate-y-[1px] active:shadow-none focus-visible:ring-2 focus-visible:ring-ring/80",
           running
-            ? "border-emerald-400/35 bg-emerald-400/10 shadow-[0_0_26px_-12px_rgba(52,211,153,0.55),0_1px_0_rgba(255,255,255,0.05)_inset]"
-            : "border-ink-700/80 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.045),transparent_34%),linear-gradient(145deg,#17171b,#0c0c0e)] shadow-[0_3px_0_#050506,0_8px_18px_-12px_rgba(0,0,0,0.98),0_1px_0_rgba(255,255,255,0.035)_inset] hover:border-ink-600",
+            ? "border-success/35 bg-success/10 shadow-[0_0_26px_-12px_color-mix(in_srgb,var(--status-success)_55%,transparent),0_1px_0_rgba(255,255,255,0.05)_inset]"
+            : "border-ink-700/80 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.045),transparent_34%),linear-gradient(145deg,var(--board-a),var(--board-b))] shadow-[0_3px_0_var(--board-edge),0_8px_18px_-12px_rgba(0,0,0,0.5),0_1px_0_var(--board-inset)] hover:border-ink-600",
         )}
       >
         <span className="flex w-full items-center">
           <span
             className={cn(
               "h-1.5 w-1.5 rounded-full transition",
-              running ? "bg-emerald-400 pulse-ring" : "bg-emerald-400/65",
+              running ? "bg-success pulse-ring" : "bg-success/65",
             )}
           />
-          <span className="ml-auto font-mono text-[9px] text-ink-600">
+          <span className="ml-auto font-mono text-[9px] text-fg-faint">
             {String(index + 1).padStart(2, "0")}
           </span>
         </span>
@@ -424,8 +424,8 @@ function DeckKey({
           className={cn(
             "mt-auto grid h-9 w-9 place-items-center rounded-[10px] border transition",
             running
-              ? "border-emerald-400/35 bg-emerald-400/10 text-emerald-300"
-              : "border-ink-700/80 bg-ink-850/80 text-ink-300 shadow-[0_1px_0_rgba(255,255,255,0.025)_inset] group-hover:border-ink-600 group-hover:text-ink-50",
+              ? "border-success/35 bg-success/10 text-success-fg"
+              : "border-ink-700/80 bg-ink-850/80 text-fg-subtle shadow-[0_1px_0_rgba(255,255,255,0.025)_inset] group-hover:border-ink-600 group-hover:text-fg",
           )}
         >
           <Icon
@@ -434,11 +434,11 @@ function DeckKey({
           />
         </span>
 
-        <span className="mt-2 block w-full truncate text-[12px] font-semibold text-ink-50">{label}</span>
+        <span className="mt-2 block w-full truncate text-[12px] font-semibold text-fg">{label}</span>
         <span
           className={cn(
             "mt-0.5 block w-full truncate text-[10px]",
-            running ? "text-emerald-300/80" : "text-ink-500",
+            running ? "text-success-fg/80" : "text-fg-faint",
           )}
         >
           {running ? t("board.running") : pipelineName}
@@ -454,12 +454,12 @@ function DeckKey({
                 e.stopPropagation();
                 onEdit();
               }}
-              className="grid h-5 w-5 place-items-center rounded text-ink-500 transition hover:bg-ink-700 hover:text-ink-50"
+              className="grid h-5 w-5 place-items-center rounded text-fg-faint transition hover:bg-ink-700 hover:text-fg"
             >
               <Icon name="Pencil" className="h-3 w-3" />
             </span>
           </Tooltip>
-          <span className="grid h-5 w-5 place-items-center rounded text-ink-600">
+          <span className="grid h-5 w-5 place-items-center rounded text-fg-faint">
             <Icon name="GripVertical" className="h-3.5 w-3.5" />
           </span>
         </span>

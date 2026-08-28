@@ -34,6 +34,7 @@ import type {
 import { formatBytes, formatCompact, formatDateTime } from "@/lib/format";
 import type { Workspace } from "@/features/workspace/useWorkspace";
 import { ask } from "@/stores/confirmation";
+import { useThemeStore } from "@/stores/theme";
 import { Card, ViewShell, EmptyState } from "../components/ViewShell";
 import { Button, Toggle } from "../components/ui";
 import { Icon } from "../components/icons";
@@ -225,12 +226,12 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
               onClick={() => setSection(s.id)}
               className={cn(
                 "mb-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-[12.5px] transition",
-                section === s.id ? "bg-ink-750 text-ink-50" : "text-ink-400 hover:bg-ink-850 hover:text-ink-100",
+                section === s.id ? "bg-ink-750 text-fg" : "text-fg-subtle hover:bg-ink-850 hover:text-fg",
               )}
             >
               <Icon name={s.icon} className="h-[15px] w-[15px] shrink-0" />
               <span className="min-w-0 flex-1 truncate">{t(s.labelKey)}</span>
-              {section === s.id && <Icon name="ChevronRight" className="h-3.5 w-3.5 text-ink-500" />}
+              {section === s.id && <Icon name="ChevronRight" className="h-3.5 w-3.5 text-fg-faint" />}
             </button>
           ))}
         </aside>
@@ -302,7 +303,7 @@ export function SectionCard({
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-[12.5px] font-semibold tracking-wide text-ink-100 uppercase">{title}</h3>
+        <h3 className="text-[12.5px] font-semibold tracking-wide text-fg uppercase">{title}</h3>
         {action && <div className="ml-auto">{action}</div>}
       </div>
       {children}
@@ -324,8 +325,8 @@ function ToggleRow({
   return (
     <Card className="flex items-center gap-3 p-3.5">
       <span className="min-w-0 flex-1">
-        <span className="block text-[12.5px] font-medium text-ink-100">{title}</span>
-        <span className="mt-0.5 block text-[11.5px] text-ink-500">{description}</span>
+        <span className="block text-[12.5px] font-medium text-fg">{title}</span>
+        <span className="mt-0.5 block text-[11.5px] text-fg-faint">{description}</span>
       </span>
       <Toggle on={on} onChange={onChange} />
     </Card>
@@ -353,7 +354,7 @@ function NumberInput({
         const n = Number(e.target.value);
         if (!Number.isNaN(n)) onChange(Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min ?? 0, n)));
       }}
-      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
     />
   );
 }
@@ -370,6 +371,8 @@ function GeneralPanel({
   patch: (p: Partial<Settings>) => void;
 }) {
   const { t } = useTranslation();
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
 
   const changeLanguage = async (language: string) => {
     await i18n.changeLanguage(language);
@@ -397,6 +400,19 @@ function GeneralPanel({
               { value: "de", label: t("common.german") },
               { value: "fr", label: t("common.french") },
               { value: "ru", label: t("common.russian") },
+            ]}
+          />
+        </Field>
+      </SectionCard>
+
+      <SectionCard title={t("settings.appearanceTitle")}>
+        <Field label={t("common.theme")} hint={t("settings.themeDescription")}>
+          <Dropdown
+            value={theme}
+            onChange={(v) => setTheme(v as "dark" | "light")}
+            options={[
+              { value: "dark", label: t("common.themeDark") },
+              { value: "light", label: t("common.themeLight") },
             ]}
           />
         </Field>
@@ -507,7 +523,7 @@ function ProviderPanel({
               )}
             </>
           ) : (
-            <p className="col-span-2 self-end rounded-md border border-ink-700 bg-ink-900/60 px-3 py-2 text-[11.5px] leading-relaxed text-ink-400">
+            <p className="col-span-2 self-end rounded-md border border-ink-700 bg-ink-900/60 px-3 py-2 text-[11.5px] leading-relaxed text-fg-subtle">
               {t("provider.llamacppNote")}
             </p>
           )}
@@ -654,7 +670,7 @@ function ModelsPanel({
                 }}
                 className={cn(
                   "rounded-md px-2 py-1.5 text-[12px] font-medium transition",
-                  mode === tabValue ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                  mode === tabValue ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
                 )}
               >
                 {tabValue === "installed" ? `${t("models.installedTab")} (${installed.length})` : t("models.catalogTab")}
@@ -671,7 +687,7 @@ function ModelsPanel({
                   onKeyDown={(e) => e.key === "Enter" && void search(query)}
                   placeholder={t("models.searchPlaceholder")}
                   aria-label={t("models.searchPlaceholder")}
-                  className="flex h-8 w-full items-center gap-2 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-50 placeholder:text-ink-500 focus:border-ink-500"
+                  className="flex h-8 w-full items-center gap-2 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg placeholder:text-fg-faint focus:border-ink-500"
                 />
                 <Dropdown
                   value={sort}
@@ -705,12 +721,12 @@ function ModelsPanel({
                 >
                   <ModelAvatar id={m.id} author={m.author} avatarUrl={m.avatarUrl} className="mt-[1px] h-9 w-9 text-[13px]" />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-semibold text-ink-50">{m.id}</span>
-                    <span className="mt-0.5 block truncate text-[11px] text-ink-500">
+                    <span className="block truncate text-[12.5px] font-semibold text-fg">{m.id}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
                       {m.author} · ↓{formatCompact(m.downloads)} · ♥{formatCompact(m.likes)}
                     </span>
                   </span>
-                  <Icon name="ChevronRight" className="mt-1 h-4 w-4 shrink-0 text-ink-700 group-hover:text-ink-400" />
+                  <Icon name="ChevronRight" className="mt-1 h-4 w-4 shrink-0 text-fg-faint group-hover:text-fg-subtle" />
                 </button>
               ))
             : installed.map((model) => (
@@ -740,14 +756,14 @@ function ModelsPanel({
                     className="mt-[1px] h-9 w-9 text-[13px]"
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-semibold text-ink-50">{model.name}</span>
-                    <span className="mt-0.5 block truncate font-mono text-[10.5px] text-ink-500">{model.path}</span>
-                    <span className="mt-0.5 block text-[10.5px] text-ink-500">
+                    <span className="block truncate text-[12.5px] font-semibold text-fg">{model.name}</span>
+                    <span className="mt-0.5 block truncate font-mono text-[10.5px] text-fg-faint">{model.path}</span>
+                    <span className="mt-0.5 block text-[10.5px] text-fg-faint">
                       {formatBytes(model.size)} · {formatDateTime(model.installedAt)}
                     </span>
                   </span>
                   {draft.llamaRuntime.modelPath === model.path ? (
-                    <Icon name="Check" className="mt-1 h-4 w-4 shrink-0 text-emerald-300" />
+                    <Icon name="Check" className="mt-1 h-4 w-4 shrink-0 text-success-fg" />
                   ) : (
                     <button
                       onClick={(e) => {
@@ -755,7 +771,7 @@ function ModelsPanel({
                         void deleteInstalled(model);
                       }}
                       aria-label={t("common.delete")}
-                      className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-600 opacity-0 transition hover:bg-rose-500/15 hover:text-rose-300 focus-visible:opacity-100 group-hover:opacity-100"
+                      className="grid h-6 w-6 shrink-0 place-items-center rounded text-fg-faint opacity-0 transition hover:bg-danger/15 hover:text-danger-fg focus-visible:opacity-100 group-hover:opacity-100"
                     >
                       <Icon name="Trash2" className="h-3.5 w-3.5" />
                     </button>
@@ -764,8 +780,8 @@ function ModelsPanel({
               ))}
           {((mode === "catalog" && results.length === 0) || (mode === "installed" && installed.length === 0)) && (
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-              <Icon name="Search" className="h-5 w-5 text-ink-600" />
-              <p className="text-[12px] text-ink-500">
+              <Icon name="Search" className="h-5 w-5 text-fg-faint" />
+              <p className="text-[12px] text-fg-faint">
                 {mode === "catalog" ? t("models.searchEmpty") : t("models.noInstalled")}
               </p>
             </div>
@@ -799,11 +815,11 @@ function ModelsPanel({
               <div className="flex items-start gap-3">
                 <ModelAvatar id={detail.id} author={detail.author} avatarUrl={detail.avatarUrl} className="h-12 w-12 rounded-2xl text-[18px]" />
                 <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-[16px] font-semibold tracking-tight text-ink-50">{detail.id}</h2>
-                  <p className="mt-1 truncate font-mono text-[11px] text-ink-500">
+                  <h2 className="truncate text-[16px] font-semibold tracking-tight text-fg">{detail.id}</h2>
+                  <p className="mt-1 truncate font-mono text-[11px] text-fg-faint">
                     {detail.author}/{detail.id.split("/").pop()}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] text-ink-400">
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] text-fg-subtle">
                     <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">↓ {formatCompact(detail.downloads)}</span>
                     <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">♥ {formatCompact(detail.likes)}</span>
                     {detail.lastModified && (
@@ -819,7 +835,7 @@ function ModelsPanel({
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <div className="rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
-                <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-ink-400 uppercase">{t("models.installPackage")}</h3>
+                <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{t("models.installPackage")}</h3>
                 <div className="grid grid-cols-[1fr_130px] gap-2">
                   <Dropdown
                     value={selectedFile}
@@ -849,15 +865,15 @@ function ModelsPanel({
 
               {detail.readme && (
                 <div className="mt-4 rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
-                  <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-ink-400 uppercase">README</h3>
-                  <pre className="max-h-[240px] overflow-auto rounded-lg border border-ink-700 bg-ink-950/50 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-300">
+                  <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-fg-subtle uppercase">README</h3>
+                  <pre className="max-h-[240px] overflow-auto rounded-lg border border-ink-700 bg-ink-950/50 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-fg-subtle">
                     {detail.readme}
                   </pre>
                 </div>
               )}
             </div>
 
-            <div className="flex h-9 shrink-0 items-center border-t border-seam px-4 text-[11px] text-ink-500">
+            <div className="flex h-9 shrink-0 items-center border-t border-seam px-4 text-[11px] text-fg-faint">
               <span className="ml-auto truncate">{draft.contentDirectory}</span>
             </div>
           </>
@@ -884,7 +900,7 @@ function ModelAvatar({
   return (
     <span
       className={cn(
-        "relative grid shrink-0 place-items-center overflow-hidden rounded-lg border border-emerald-400/20 bg-emerald-400/10 font-semibold text-emerald-300",
+        "relative grid shrink-0 place-items-center overflow-hidden rounded-lg border border-success/20 bg-success/10 font-semibold text-success-fg",
         className,
       )}
     >
@@ -938,11 +954,11 @@ function InstalledModelInfo({
             className="h-12 w-12 rounded-2xl text-[18px]"
           />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[16px] font-semibold tracking-tight text-ink-50">{model.name}</h2>
+            <h2 className="truncate text-[16px] font-semibold tracking-tight text-fg">{model.name}</h2>
             {model.repository && (
-              <p className="mt-1 truncate font-mono text-[11px] text-ink-500">{model.repository}</p>
+              <p className="mt-1 truncate font-mono text-[11px] text-fg-faint">{model.repository}</p>
             )}
-            <div className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] text-ink-400">
+            <div className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] text-fg-subtle">
               <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">{formatBytes(model.size)}</span>
               {model.quantization && (
                 <span className="rounded-md border border-ink-700 bg-ink-850 px-2 py-1">{model.quantization}</span>
@@ -957,11 +973,11 @@ function InstalledModelInfo({
           <dl className="space-y-2">
             {rows.map((row) => (
               <div key={row.label} className="grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-2">
-                <dt className="text-[11px] text-ink-500">{row.label}</dt>
+                <dt className="text-[11px] text-fg-faint">{row.label}</dt>
                 <dd
                   title={row.value}
                   className={cn(
-                    "min-w-0 truncate text-[11.5px] text-ink-200",
+                    "min-w-0 truncate text-[11.5px] text-fg-muted",
                     row.mono && "font-mono text-[11px]",
                   )}
                 >
@@ -972,10 +988,10 @@ function InstalledModelInfo({
           </dl>
           {tags.length > 0 && (
             <div className="mt-3 border-t border-seam/70 pt-3">
-              <p className="mb-1.5 text-[11px] text-ink-500">{t("models.detailsTags")}</p>
+              <p className="mb-1.5 text-[11px] text-fg-faint">{t("models.detailsTags")}</p>
               <div className="flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
-                  <span key={tag} className="rounded-md border border-ink-700 bg-ink-850 px-2 py-0.5 text-[10.5px] text-ink-300">
+                  <span key={tag} className="rounded-md border border-ink-700 bg-ink-850 px-2 py-0.5 text-[10.5px] text-fg-subtle">
                     {tag}
                   </span>
                 ))}
@@ -1002,7 +1018,7 @@ function InstalledModelInfo({
           <Button
             variant="ghost"
             icon="Trash2"
-            className="text-rose-300 hover:bg-rose-500/15 hover:text-rose-200"
+            className="text-danger-fg hover:bg-danger/15 hover:text-danger-fg"
             onClick={onDelete}
           >
             {t("common.delete")}
@@ -1010,10 +1026,10 @@ function InstalledModelInfo({
         </div>
       </div>
 
-      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-4 text-[11px] text-ink-500">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-seam px-4 text-[11px] text-fg-faint">
         {active && (
           <span className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
             {t("models.inUse")}
           </span>
         )}
@@ -1027,7 +1043,7 @@ function ProgressBar({ progress }: { progress: InstallProgress }) {
   const pct = Math.max(0, Math.min(100, progress.percentage));
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between text-[10.5px] text-ink-400">
+      <div className="mb-1 flex items-center justify-between text-[10.5px] text-fg-subtle">
         <span>{progress.label}</span>
         <span>{Math.round(pct)}%</span>
       </div>
@@ -1207,8 +1223,8 @@ function RuntimePanel({
             <Button icon="RefreshCw" variant="solid" onClick={() => void refresh()}>
               {t("common.refresh")}
             </Button>
-            <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-ink-400">
-              <span className={cn("h-1.5 w-1.5 rounded-full", status?.running ? "bg-emerald-400 pulse-ring" : "bg-ink-500")} />
+            <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-fg-subtle">
+              <span className={cn("h-1.5 w-1.5 rounded-full", status?.running ? "bg-success pulse-ring" : "bg-ink-500")} />
               {status?.running ? status.endpoint || t("runtime.running") : t("runtime.stopped")}
             </span>
           </div>
@@ -1353,13 +1369,13 @@ function ApiPanel({
             />
           )}
           {exposureWarning && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[11.5px] text-amber-200">
+            <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[11.5px] text-warning-fg">
               <Icon name="AlertTriangle" className="h-3.5 w-3.5 shrink-0" />
               {t("api.tlsWarning")}
             </div>
           )}
-          <div className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-[12px] text-ink-400">
-            <span className={cn("h-2 w-2 rounded-full", status?.running ? "bg-emerald-400" : "bg-ink-500")} />
+          <div className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-[12px] text-fg-subtle">
+            <span className={cn("h-2 w-2 rounded-full", status?.running ? "bg-success" : "bg-ink-500")} />
             {status?.running ? status.endpoint : (status?.message ?? t("api.disabled"))}
           </div>
         </div>
@@ -1368,9 +1384,9 @@ function ApiPanel({
       {token && (
         <Modal title={t("api.tokenTitle")} icon="KeyRound" onClose={() => setToken(null)} size="sm"
           footer={<ModalActions onCancel={() => setToken(null)} onConfirm={() => setToken(null)} confirmLabel={t("common.close")} />}>
-          <p className="mb-2 text-[12px] text-ink-300">{t("api.tokenOnce")}</p>
+          <p className="mb-2 text-[12px] text-fg-subtle">{t("api.tokenOnce")}</p>
           <div className="flex gap-2">
-            <code className="min-w-0 flex-1 overflow-x-auto rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-[11px] break-all whitespace-pre-wrap text-ink-100">
+            <code className="min-w-0 flex-1 overflow-x-auto rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-[11px] break-all whitespace-pre-wrap text-fg">
               {token}
             </code>
             <Button icon="Copy" variant="solid" onClick={() => navigator.clipboard?.writeText(token)}>
@@ -1513,14 +1529,14 @@ function TwitchPanel({
           </Field>
           <div className="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
             <div className="min-w-0">
-              <p className="text-[12.5px] font-medium text-ink-100">
+              <p className="text-[12.5px] font-medium text-fg">
                 {status?.connected ? t("twitch.connected") : t("twitch.disconnected")}
               </p>
-              <p className="truncate text-[11px] text-ink-500">
+              <p className="truncate text-[11px] text-fg-faint">
                 {status?.lastError || t("twitch.eventSubDescription", { count: status?.activeSubscriptions ?? 0 })}
               </p>
             </div>
-            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />}
+            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-success-fg" />}
           </div>
         </div>
       </SectionCard>
@@ -1559,20 +1575,20 @@ function TwitchPanel({
           </Field>
 
           {draft.twitch.identities.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-fg-faint">
               {t("twitch.noIdentities")}
             </p>
           ) : (
             draft.twitch.identities.map((identity) => (
               <div key={identity.id} className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12.5px] font-medium text-ink-100">{identity.label}</p>
-                  <p className="truncate text-[11px] text-ink-500">
+                  <p className="truncate text-[12.5px] font-medium text-fg">{identity.label}</p>
+                  <p className="truncate text-[11px] text-fg-faint">
                     {identity.login} · {identity.scopes.length > 0 ? identity.scopes.join(", ") : t("twitch.noScopes")}
                   </p>
                 </div>
                 {identity.status !== "connected" && (
-                  <span className="shrink-0 rounded bg-amber-400/15 px-2 py-1 text-[10.5px] text-amber-300">
+                  <span className="shrink-0 rounded bg-warning/15 px-2 py-1 text-[10.5px] text-warning-fg">
                     {t("twitch.reconnectRequired")}
                   </span>
                 )}
@@ -1591,15 +1607,15 @@ function TwitchPanel({
       </SectionCard>
 
       <SectionCard title={t("twitch.triggers")}>
-        <p className="mb-3 text-[11.5px] leading-relaxed text-ink-500">{t("twitch.triggersHelp")}</p>
+        <p className="mb-3 text-[11.5px] leading-relaxed text-fg-faint">{t("twitch.triggersHelp")}</p>
         {twitchTriggers.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-fg-faint">
             {t("twitch.noTriggers")}
           </p>
         ) : (
           twitchTriggers.map((binding) => (
             <div key={binding.id} className="flex items-center gap-3 border-b border-seam/70 py-2 last:border-b-0">
-              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-100">{binding.label}</span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-fg">{binding.label}</span>
               {!binding.trusted ? (
                 <Button icon="ShieldCheck" variant="solid" onClick={() => void trustTrigger(binding)}>
                   {t("schedules.trust")}
@@ -1630,11 +1646,11 @@ function TwitchPanel({
           }
         >
           <div className="space-y-3 text-center">
-            <p className="text-[12.5px] text-ink-300">{t("twitch.openVerification", { url: auth.verificationUri })}</p>
-            <code className="block rounded-xl border border-ink-650 bg-ink-950/70 px-4 py-4 font-mono text-[26px] tracking-[0.35em] text-ink-50 select-all">
+            <p className="text-[12.5px] text-fg-subtle">{t("twitch.openVerification", { url: auth.verificationUri })}</p>
+            <code className="block rounded-xl border border-ink-650 bg-ink-950/70 px-4 py-4 font-mono text-[26px] tracking-[0.35em] text-fg select-all">
               {auth.userCode}
             </code>
-            <p className="text-[11px] text-ink-500">{t("twitch.expiresAt", { time: formatDateTime(auth.expiresAt) })}</p>
+            <p className="text-[11px] text-fg-faint">{t("twitch.expiresAt", { time: formatDateTime(auth.expiresAt) })}</p>
           </div>
         </Modal>
       )}
@@ -1655,7 +1671,7 @@ function TwitchPanel({
           }
         >
           <div className="space-y-3">
-            <p className="text-[12px] leading-relaxed text-ink-400">{t("twitch.manualDescription")}</p>
+            <p className="text-[12px] leading-relaxed text-fg-subtle">{t("twitch.manualDescription")}</p>
             <Field label={t("twitch.identityLabel")}>
               <TextInput autoFocus value={manualLabel} onChange={setManualLabel} placeholder={t("twitch.identityLabelPlaceholder")} />
             </Field>
@@ -1665,7 +1681,7 @@ function TwitchPanel({
                 autoComplete="off"
                 value={manualToken}
                 onChange={(e) => setManualToken(e.target.value)}
-                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
               />
             </Field>
           </div>
@@ -1778,17 +1794,17 @@ function DiscordPanel({
         <div className="space-y-3">
           <div className="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
             <div className="min-w-0">
-              <p className="text-[12.5px] font-medium text-ink-100">
+              <p className="text-[12.5px] font-medium text-fg">
                 {status?.connected ? t("discord.connected") : t("discord.disconnected")}
               </p>
-              <p className="truncate text-[11px] text-ink-500">
+              <p className="truncate text-[11px] text-fg-faint">
                 {status?.lastError || t("discord.gatewayDescription", { count: status?.activeSubscriptions ?? 0 })}
               </p>
             </div>
-            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />}
+            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-success-fg" />}
           </div>
           {needsPrivilegedIntents && (
-            <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-[11.5px] leading-relaxed text-amber-200">
+            <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-[11.5px] leading-relaxed text-warning-fg">
               {t("discord.intentsWarning")}
             </p>
           )}
@@ -1816,18 +1832,18 @@ function DiscordPanel({
           </Field>
 
           {draft.discord.identities.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-fg-faint">
               {t("discord.noIdentities")}
             </p>
           ) : (
             draft.discord.identities.map((identity) => (
               <div key={identity.id} className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12.5px] font-medium text-ink-100">{identity.label}</p>
-                  <p className="truncate text-[11px] text-ink-500">@{identity.username}</p>
+                  <p className="truncate text-[12.5px] font-medium text-fg">{identity.label}</p>
+                  <p className="truncate text-[11px] text-fg-faint">@{identity.username}</p>
                 </div>
                 {identity.status !== "connected" && (
-                  <span className="shrink-0 rounded bg-amber-400/15 px-2 py-1 text-[10.5px] text-amber-300">
+                  <span className="shrink-0 rounded bg-warning/15 px-2 py-1 text-[10.5px] text-warning-fg">
                     {t("discord.invalidIdentity")}
                   </span>
                 )}
@@ -1841,15 +1857,15 @@ function DiscordPanel({
       </SectionCard>
 
       <SectionCard title={t("discord.triggers")}>
-        <p className="mb-3 text-[11.5px] leading-relaxed text-ink-500">{t("discord.triggersHelp")}</p>
+        <p className="mb-3 text-[11.5px] leading-relaxed text-fg-faint">{t("discord.triggersHelp")}</p>
         {discordTriggers.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-fg-faint">
             {t("discord.noTriggers")}
           </p>
         ) : (
           discordTriggers.map((binding) => (
             <div key={binding.id} className="flex items-center gap-3 border-b border-seam/70 py-2 last:border-b-0">
-              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-100">{binding.label}</span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-fg">{binding.label}</span>
               {!binding.trusted ? (
                 <Button icon="ShieldCheck" variant="solid" onClick={() => void trustTrigger(binding)}>
                   {t("schedules.trust")}
@@ -1877,7 +1893,7 @@ function DiscordPanel({
           }
         >
           <div className="space-y-3">
-            <p className="text-[12px] leading-relaxed text-ink-400">{t("discord.tokenDescription")}</p>
+            <p className="text-[12px] leading-relaxed text-fg-subtle">{t("discord.tokenDescription")}</p>
             <Field label={t("discord.identityLabel")}>
               <TextInput autoFocus value={addLabel} onChange={setAddLabel} placeholder={t("discord.identityLabelPlaceholder")} />
             </Field>
@@ -1887,10 +1903,10 @@ function DiscordPanel({
                 autoComplete="off"
                 value={addToken}
                 onChange={(e) => setAddToken(e.target.value)}
-                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
               />
             </Field>
-            {addError && <p className="text-[11.5px] text-rose-300">{addError}</p>}
+            {addError && <p className="text-[11.5px] text-danger-fg">{addError}</p>}
           </div>
         </Modal>
       )}
@@ -1986,16 +2002,16 @@ function TelegramPanel({
         <div className="space-y-3">
           <div className="flex items-center justify-between rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
             <div className="min-w-0">
-              <p className="text-[12.5px] font-medium text-ink-100">
+              <p className="text-[12.5px] font-medium text-fg">
                 {status?.connected ? t("telegram.connected") : t("telegram.disconnected")}
               </p>
-              <p className="truncate text-[11px] text-ink-500">
+              <p className="truncate text-[11px] text-fg-faint">
                 {status?.lastError || t("telegram.pollingDescription", { count: status?.activeSubscriptions ?? 0 })}
               </p>
             </div>
-            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-emerald-300" />}
+            {status?.connected && <Icon name="Check" className="h-4 w-4 shrink-0 text-success-fg" />}
           </div>
-          <p className="rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-500">
+          <p className="rounded-lg border border-ink-700 bg-ink-900/40 px-3 py-2.5 text-[11.5px] leading-relaxed text-fg-faint">
             {t("telegram.privacyModeHint")}
           </p>
         </div>
@@ -2022,18 +2038,18 @@ function TelegramPanel({
           </Field>
 
           {draft.telegram.identities.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+            <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-fg-faint">
               {t("telegram.noIdentities")}
             </p>
           ) : (
             draft.telegram.identities.map((identity) => (
               <div key={identity.id} className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12.5px] font-medium text-ink-100">{identity.label}</p>
-                  <p className="truncate text-[11px] text-ink-500">@{identity.username}</p>
+                  <p className="truncate text-[12.5px] font-medium text-fg">{identity.label}</p>
+                  <p className="truncate text-[11px] text-fg-faint">@{identity.username}</p>
                 </div>
                 {identity.status !== "connected" && (
-                  <span className="shrink-0 rounded bg-amber-400/15 px-2 py-1 text-[10.5px] text-amber-300">
+                  <span className="shrink-0 rounded bg-warning/15 px-2 py-1 text-[10.5px] text-warning-fg">
                     {t("telegram.invalidIdentity")}
                   </span>
                 )}
@@ -2047,15 +2063,15 @@ function TelegramPanel({
       </SectionCard>
 
       <SectionCard title={t("telegram.triggers")}>
-        <p className="mb-3 text-[11.5px] leading-relaxed text-ink-500">{t("telegram.triggersHelp")}</p>
+        <p className="mb-3 text-[11.5px] leading-relaxed text-fg-faint">{t("telegram.triggersHelp")}</p>
         {telegramTriggers.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-ink-500">
+          <p className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-[12px] text-fg-faint">
             {t("telegram.noTriggers")}
           </p>
         ) : (
           telegramTriggers.map((binding) => (
             <div key={binding.id} className="flex items-center gap-3 border-b border-seam/70 py-2 last:border-b-0">
-              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink-100">{binding.label}</span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-fg">{binding.label}</span>
               {!binding.trusted ? (
                 <Button icon="ShieldCheck" variant="solid" onClick={() => void trustTrigger(binding)}>
                   {t("schedules.trust")}
@@ -2083,7 +2099,7 @@ function TelegramPanel({
           }
         >
           <div className="space-y-3">
-            <p className="text-[12px] leading-relaxed text-ink-400">{t("telegram.tokenDescription")}</p>
+            <p className="text-[12px] leading-relaxed text-fg-subtle">{t("telegram.tokenDescription")}</p>
             <Field label={t("telegram.identityLabel")}>
               <TextInput autoFocus value={addLabel} onChange={setAddLabel} placeholder={t("telegram.identityLabelPlaceholder")} />
             </Field>
@@ -2093,10 +2109,10 @@ function TelegramPanel({
                 autoComplete="off"
                 value={addToken}
                 onChange={(e) => setAddToken(e.target.value)}
-                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
               />
             </Field>
-            {addError && <p className="text-[11.5px] text-rose-300">{addError}</p>}
+            {addError && <p className="text-[11.5px] text-danger-fg">{addError}</p>}
           </div>
         </Modal>
       )}
@@ -2222,7 +2238,7 @@ function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Se
         }
       >
         {draft.metrics.priceRates.length === 0 ? (
-          <p className="text-[12px] text-ink-500">{t("metrics.noPriceRates")}</p>
+          <p className="text-[12px] text-fg-faint">{t("metrics.noPriceRates")}</p>
         ) : (
           <div className="space-y-2">
             {draft.metrics.priceRates.map((rate, index) => (
@@ -2240,7 +2256,7 @@ function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Se
                   value={rate.inputUsdPerMillion}
                   onChange={(e) => updateRate(index, "inputUsdPerMillion", Number(e.target.value))}
                   aria-label={t("metrics.rateInput")}
-                  className="h-7 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-ink-100 focus:border-ink-500 focus:outline-none"
+                  className="h-7 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-fg focus:border-ink-500 focus:outline-none"
                 />
                 <input
                   type="number"
@@ -2248,7 +2264,7 @@ function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Se
                   value={rate.outputUsdPerMillion}
                   onChange={(e) => updateRate(index, "outputUsdPerMillion", Number(e.target.value))}
                   aria-label={t("metrics.rateOutput")}
-                  className="h-7 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-ink-100 focus:border-ink-500 focus:outline-none"
+                  className="h-7 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-fg focus:border-ink-500 focus:outline-none"
                 />
                 <button
                   onClick={() =>
@@ -2260,7 +2276,7 @@ function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Se
                     })
                   }
                   aria-label={t("common.delete")}
-                  className="grid h-7 place-items-center rounded-md text-ink-500 hover:bg-rose-500/15 hover:text-rose-300"
+                  className="grid h-7 place-items-center rounded-md text-fg-faint hover:bg-danger/15 hover:text-danger-fg"
                 >
                   <Icon name="Trash2" className="h-3.5 w-3.5" />
                 </button>
@@ -2311,18 +2327,18 @@ function ExtensionsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial
             <TextInput mono value={draft.pluginDirectory} onChange={(v) => patch({ pluginDirectory: v })} />
           </Field>
           {!plugins || plugins.length === 0 ? (
-            <p className="rounded-lg border border-ink-700 bg-ink-900/50 px-3 py-3 text-[12px] text-ink-500">
+            <p className="rounded-lg border border-ink-700 bg-ink-900/50 px-3 py-3 text-[12px] text-fg-faint">
               {t("extensions.noneFound")}
             </p>
           ) : (
             plugins.map((plugin) => (
               <div key={plugin.id} className="flex items-center gap-3 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2.5">
-                <span className={cn("h-2 w-2 shrink-0 rounded-full", plugin.healthy ? "bg-emerald-400" : "bg-rose-400")} />
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", plugin.healthy ? "bg-success" : "bg-danger")} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12.5px] font-medium text-ink-100">
-                    {plugin.name} <span className="font-mono text-[10.5px] text-ink-500">v{plugin.version}</span>
+                  <p className="truncate text-[12.5px] font-medium text-fg">
+                    {plugin.name} <span className="font-mono text-[10.5px] text-fg-faint">v{plugin.version}</span>
                   </p>
-                  <p className="truncate text-[11px] text-ink-500">
+                  <p className="truncate text-[11px] text-fg-faint">
                     {plugin.healthy
                       ? t("extensions.nodes", { count: plugin.nodeCount })
                       : (plugin.error ?? t("extensions.unavailable"))}
@@ -2395,7 +2411,7 @@ function SecretsPanel() {
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && void save()}
-                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+                className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
               />
             </Field>
             <Button
@@ -2409,19 +2425,19 @@ function SecretsPanel() {
             </Button>
           </div>
 
-          <p className="text-[11px] leading-relaxed text-ink-500">{t("secrets.vaultNote")}</p>
+          <p className="text-[11px] leading-relaxed text-fg-faint">{t("secrets.vaultNote")}</p>
 
           {secrets.length > 0 && (
             <div className="overflow-hidden rounded-xl border border-ink-700/80">
               {secrets.map((s, i) => (
                 <div key={s.name} className={cn("flex items-center gap-3 px-3 py-2.5", i > 0 && "border-t border-seam")}>
-                  <Icon name="KeyRound" className="h-3.5 w-3.5 shrink-0 text-amber-300/80" />
-                  <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink-100">{s.name}</span>
-                  <span className="text-[11px] text-ink-500">{formatDateTime(s.updatedAt)}</span>
+                  <Icon name="KeyRound" className="h-3.5 w-3.5 shrink-0 text-warning-fg/80" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg">{s.name}</span>
+                  <span className="text-[11px] text-fg-faint">{formatDateTime(s.updatedAt)}</span>
                   <button
                     onClick={() => void remove(s.name)}
                     aria-label={`${t("common.delete")} ${s.name}`}
-                    className="grid h-6 w-6 place-items-center rounded text-ink-600 transition hover:bg-rose-500/15 hover:text-rose-300"
+                    className="grid h-6 w-6 place-items-center rounded text-fg-faint transition hover:bg-danger/15 hover:text-danger-fg"
                   >
                     <Icon name="Trash2" className="h-3.5 w-3.5" />
                   </button>

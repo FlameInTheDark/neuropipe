@@ -4,14 +4,17 @@ import { GROUP_HEADER_H } from "@/features/graph/graph-ops";
 import { Icon } from "./icons";
 import { cn } from "../utils/cn";
 
-/** Accent tokens per group colour. Kept here so the palette lives in one place. */
+/**
+ * Accent tokens per group colour. Kept here so the palette lives in one
+ * place. Values are theme variables (index.css); tints derive via color-mix.
+ */
 const ACCENTS: Record<NodeGroup["color"], { border: string; head: string; body: string; text: string; dot: string }> = {
-  slate:   { border: "#55555f", head: "rgba(85,85,95,0.20)",    body: "rgba(85,85,95,0.07)",    text: "#cbd5e1", dot: "#94a3b8" },
-  violet:  { border: "#7c3aed", head: "rgba(167,139,250,0.20)", body: "rgba(167,139,250,0.07)",  text: "#c4b5fd", dot: "#a78bfa" },
-  emerald: { border: "#059669", head: "rgba(52,211,153,0.18)",  body: "rgba(52,211,153,0.06)",   text: "#6ee7b7", dot: "#34d399" },
-  amber:   { border: "#ea580c", head: "rgba(251,146,60,0.18)",  body: "rgba(251,146,60,0.06)",   text: "#fdba74", dot: "#fb923c" },
-  sky:     { border: "#0284c7", head: "rgba(56,189,248,0.18)",  body: "rgba(56,189,248,0.06)",   text: "#7dd3fc", dot: "#38bdf8" },
-  rose:    { border: "#e11d48", head: "rgba(251,113,133,0.18)", body: "rgba(251,113,133,0.06)",  text: "#fda4af", dot: "#fb7185" },
+  slate:   { border: "var(--hue-slate)", head: "color-mix(in srgb, var(--hue-slate) 20%, transparent)", body: "color-mix(in srgb, var(--hue-slate) 7%, transparent)", text: "var(--hue-slate-text)", dot: "var(--hue-slate)" },
+  violet:  { border: "var(--hue-violet)", head: "color-mix(in srgb, var(--hue-violet) 18%, transparent)", body: "color-mix(in srgb, var(--hue-violet) 7%, transparent)", text: "var(--hue-violet-text)", dot: "var(--hue-violet)" },
+  emerald: { border: "var(--hue-emerald)", head: "color-mix(in srgb, var(--hue-emerald) 18%, transparent)", body: "color-mix(in srgb, var(--hue-emerald) 7%, transparent)", text: "var(--hue-emerald-text)", dot: "var(--hue-emerald)" },
+  amber:   { border: "var(--hue-amber)", head: "color-mix(in srgb, var(--hue-amber) 18%, transparent)", body: "color-mix(in srgb, var(--hue-amber) 7%, transparent)", text: "var(--hue-amber-text)", dot: "var(--hue-amber)" },
+  sky:     { border: "var(--hue-sky)", head: "color-mix(in srgb, var(--hue-sky) 18%, transparent)", body: "color-mix(in srgb, var(--hue-sky) 7%, transparent)", text: "var(--hue-sky-text)", dot: "var(--hue-sky)" },
+  rose:    { border: "var(--hue-rose)", head: "color-mix(in srgb, var(--hue-rose) 18%, transparent)", body: "color-mix(in srgb, var(--hue-rose) 7%, transparent)", text: "var(--hue-rose-text)", dot: "var(--hue-rose)" },
 };
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -130,7 +133,7 @@ export const GroupFrame = memo(function GroupFrame({
                 finish();
               }
             }}
-            className="min-w-0 flex-1 rounded bg-ink-950/60 px-1 text-[12px] font-semibold text-ink-50 outline-none ring-1 ring-ink-500"
+            className="min-w-0 flex-1 rounded bg-ink-950/60 px-1 text-[12px] font-semibold text-fg outline-none ring-1 ring-ring/60"
           />
         ) : (
           <span className="min-w-0 flex-1 truncate text-[12px] font-semibold" style={{ color: accent.text }}>
@@ -138,10 +141,10 @@ export const GroupFrame = memo(function GroupFrame({
           </span>
         )}
 
-        <span className="shrink-0 rounded bg-ink-950/50 px-1.5 font-mono text-[9.5px] text-ink-300">
+        <span className="shrink-0 rounded bg-ink-950/50 px-1.5 font-mono text-[9.5px] text-fg-subtle">
           {memberCount}
         </span>
-        <Icon name="GripVertical" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
+        <Icon name="GripVertical" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
       </div>
 
       {/* invisible edge/corner hover bands - resize by grabbing the border */}

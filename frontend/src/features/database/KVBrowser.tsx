@@ -62,12 +62,12 @@ function formatBytes(bytes: number): string {
 
 const TYPE_STYLES: Record<string, string> = {
   string: "bg-fuchsia-400/15 text-fuchsia-300",
-  hash: "bg-sky-400/15 text-sky-300",
-  list: "bg-amber-400/15 text-amber-300",
-  set: "bg-emerald-400/15 text-emerald-300",
+  hash: "bg-info/15 text-info-fg",
+  list: "bg-warning/15 text-warning-fg",
+  set: "bg-success/15 text-success-fg",
   zset: "bg-violet-400/15 text-violet-300",
-  stream: "bg-rose-400/15 text-rose-300",
-  none: "bg-ink-700/50 text-ink-500",
+  stream: "bg-danger/15 text-danger-fg",
+  none: "bg-ink-700/50 text-fg-faint",
 };
 
 /**
@@ -93,7 +93,7 @@ export function KVBrowser({ database }: { database: Database }) {
               aria-pressed={tab === entry.id}
               className={cn(
                 "flex h-7 items-center gap-1.5 rounded-md px-3 text-[11.5px] transition",
-                tab === entry.id ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                tab === entry.id ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
               )}
             >
               <Icon name={entry.icon} className="h-3 w-3" />
@@ -101,7 +101,7 @@ export function KVBrowser({ database }: { database: Database }) {
             </button>
           ))}
         </div>
-        <span className="ml-auto font-mono text-[10.5px] text-ink-500">
+        <span className="ml-auto font-mono text-[10.5px] text-fg-faint">
           {database.host || database.address}:{database.port || 6379} · db {database.dbIndex ?? 0}
         </span>
       </div>
@@ -225,7 +225,7 @@ function KeysTab({ database }: { database: Database }) {
                   aria-label={entry.label}
                   className={cn(
                     "flex h-6 w-7 items-center justify-center rounded-md transition",
-                    view === entry.id ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                    view === entry.id ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
                   )}
                 >
                   <Icon name={entry.icon} className="h-3.5 w-3.5" />
@@ -240,24 +240,24 @@ function KeysTab({ database }: { database: Database }) {
               placeholder=":"
               maxLength={8}
               aria-label={t("kv.separatorLabel")}
-              className="h-8 w-14 shrink-0 rounded-md border border-ink-700 bg-ink-850 px-2 text-center font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:outline-none"
+              className="h-8 w-14 shrink-0 rounded-md border border-ink-700 bg-ink-850 px-2 text-center font-mono text-[12px] text-fg focus:border-ink-400 focus:outline-none"
             />
           )}
           <Button variant="ghost" icon="RefreshCw" disabled={loading} onClick={() => setReloadToken((token) => token + 1)}>
             {t("common.refresh")}
           </Button>
-          <span className="ml-auto font-mono text-[10.5px] text-ink-500">
+          <span className="ml-auto font-mono text-[10.5px] text-fg-faint">
             {loading ? t("common.loading") : t("kv.keyCount", { count: keys.length })}
           </span>
         </div>
         {error && (
-          <p className="mx-3 rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-2 font-mono text-[10.5px] text-rose-200">
+          <p className="mx-3 rounded-md border border-danger/20 bg-danger/5 px-2.5 py-2 font-mono text-[10.5px] text-danger-fg">
             {error}
           </p>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {keys.length === 0 && !loading && !error ? (
-            <p className="px-3 py-3 text-[12px] text-ink-500">{t("kv.noKeys")}</p>
+            <p className="px-3 py-3 text-[12px] text-fg-faint">{t("kv.noKeys")}</p>
           ) : view === "grouped" ? (
             <KeyTreeRows
               nodes={tree}
@@ -282,9 +282,9 @@ function KeysTab({ database }: { database: Database }) {
                 <span className={cn("shrink-0 rounded px-1.5 py-px font-mono text-[9.5px] uppercase", TYPE_STYLES[key.type] ?? TYPE_STYLES.none)}>
                   {key.type}
                 </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-100">{key.name}</span>
-                <span className="shrink-0 font-mono text-[10px] text-ink-500">{formatTTL(key.ttl, t)}</span>
-                {(key.size ?? 0) > 0 && <span className="shrink-0 font-mono text-[10px] text-ink-600">{formatBytes(key.size ?? 0)}</span>}
+                <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-fg">{key.name}</span>
+                <span className="shrink-0 font-mono text-[10px] text-fg-faint">{formatTTL(key.ttl, t)}</span>
+                {(key.size ?? 0) > 0 && <span className="shrink-0 font-mono text-[10px] text-fg-faint">{formatBytes(key.size ?? 0)}</span>}
               </button>
             ))
           )}
@@ -292,7 +292,7 @@ function KeysTab({ database }: { database: Database }) {
             <button
               onClick={() => void loadMore()}
               disabled={loading}
-              className="w-full border-t border-seam px-3 py-2 text-[11.5px] text-ink-400 transition hover:bg-ink-850 hover:text-ink-100 disabled:opacity-50"
+              className="w-full border-t border-seam px-3 py-2 text-[11.5px] text-fg-subtle transition hover:bg-ink-850 hover:text-fg disabled:opacity-50"
             >
               {loading ? t("common.loading") : t("kv.loadMore")}
             </button>
@@ -335,13 +335,13 @@ function KeyTreeRows({
             >
               <Icon
                 name={expanded[node.path] ? "ChevronDown" : "ChevronRight"}
-                className="h-3 w-3 shrink-0 text-ink-500"
+                className="h-3 w-3 shrink-0 text-fg-faint"
               />
-              <Icon name="FolderOpen" className="h-3.5 w-3.5 shrink-0 text-amber-300/70" />
-              <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-200">
+              <Icon name="FolderOpen" className="h-3.5 w-3.5 shrink-0 text-warning-fg/70" />
+              <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-fg-muted">
                 {node.name || t("kv.emptySegment")}
               </span>
-              <span className="shrink-0 font-mono text-[10px] text-ink-500">{node.count}</span>
+              <span className="shrink-0 font-mono text-[10px] text-fg-faint">{node.count}</span>
             </button>
             {(expanded[node.path] ?? false) && (
               <KeyTreeRows
@@ -374,12 +374,12 @@ function KeyTreeRows({
             >
               {node.key.type}
             </span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-100">
+            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-fg">
               {node.name || t("kv.emptySegment")}
             </span>
-            <span className="shrink-0 font-mono text-[10px] text-ink-500">{formatTTL(node.key.ttl, t)}</span>
+            <span className="shrink-0 font-mono text-[10px] text-fg-faint">{formatTTL(node.key.ttl, t)}</span>
             {(node.key.size ?? 0) > 0 && (
-              <span className="shrink-0 font-mono text-[10px] text-ink-600">{formatBytes(node.key.size ?? 0)}</span>
+              <span className="shrink-0 font-mono text-[10px] text-fg-faint">{formatBytes(node.key.size ?? 0)}</span>
             )}
           </button>
         ),
@@ -395,7 +395,7 @@ function SearchPrefixInput({ value, onChange, placeholder }: { value: string; on
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:outline-none"
+        className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-fg focus:border-ink-400 focus:outline-none"
       />
     </div>
   );
@@ -462,19 +462,19 @@ function ValuePanel({ database, keyName, onDeleted }: { database: Database; keyN
         <span className={cn("shrink-0 rounded px-1.5 py-px font-mono text-[9.5px] uppercase", TYPE_STYLES[value?.type ?? "none"] ?? TYPE_STYLES.none)}>
           {value?.type ?? "…"}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-100" title={keyName}>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-fg" title={keyName}>
           {keyName}
         </span>
         <Button variant="ghost" icon="RefreshCw" disabled={loading} onClick={() => { void load(); }}><span /></Button>
-        <Button variant="ghost" icon="Trash2" className="hover:text-rose-300" onClick={() => { void deleteKey(); }}><span /></Button>
+        <Button variant="ghost" icon="Trash2" className="hover:text-danger-fg" onClick={() => { void deleteKey(); }}><span /></Button>
       </div>
 
       {error ? (
-        <p className="mx-3 rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-2 font-mono text-[10.5px] text-rose-200">{error}</p>
+        <p className="mx-3 rounded-md border border-danger/20 bg-danger/5 px-2.5 py-2 font-mono text-[10.5px] text-danger-fg">{error}</p>
       ) : loading || !value ? (
-        <p className="px-3 py-3 text-[12px] text-ink-500">{t("common.loading")}</p>
+        <p className="px-3 py-3 text-[12px] text-fg-faint">{t("common.loading")}</p>
       ) : value.type === "none" ? (
-        <p className="px-3 py-3 text-[12px] text-ink-500">{t("kv.keyGone")}</p>
+        <p className="px-3 py-3 text-[12px] text-fg-faint">{t("kv.keyGone")}</p>
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
@@ -499,13 +499,13 @@ function ValuePanel({ database, keyName, onDeleted }: { database: Database; keyN
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-mono text-[10.5px] text-ink-500">
+                <span className="font-mono text-[10.5px] text-fg-faint">
                   {t("kv.ttlLabel")}: {formatTTL(value.ttl, t)}
                 </span>
                 <Button variant="ghost" className="h-6 px-1.5 text-[10.5px]" onClick={() => { setTtlDraft(value.ttl > 0 ? String(value.ttl) : ""); setTtlEditing(true); }}>
                   {t("kv.editTtl")}
                 </Button>
-                <span className="text-ink-700">·</span>
+                <span className="text-fg-faint">·</span>
                 <Button variant="ghost" className="h-6 px-1.5 text-[10.5px]" onClick={() => void applyTTL(60)}>
                   60s
                 </Button>
@@ -518,7 +518,7 @@ function ValuePanel({ database, keyName, onDeleted }: { database: Database; keyN
                 <Button variant="ghost" className="h-6 px-1.5 text-[10.5px]" onClick={() => void applyTTL(-1)}>
                   {t("kv.removeTtl")}
                 </Button>
-                {value.truncated && <span className="ml-auto text-[10px] text-amber-300/80">{t("kv.truncated")}</span>}
+                {value.truncated && <span className="ml-auto text-[10px] text-warning-fg/80">{t("kv.truncated")}</span>}
               </div>
             )}
           </div>
@@ -551,7 +551,7 @@ function TypedValue({ value }: { value: KVKeyValue }) {
       }
     })();
     return (
-      <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-[1.6] text-ink-200">
+      <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-[1.6] text-fg-muted">
         {isJson ? JSON.stringify(JSON.parse(text), null, 2) : text}
       </pre>
     );
@@ -562,11 +562,11 @@ function TypedValue({ value }: { value: KVKeyValue }) {
       <div className="divide-y divide-seam/60">
         {entries.map(([field, item]) => (
           <div key={field} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2 py-1">
-            <span className="truncate font-mono text-[11px] text-ink-400" title={field}>{field}</span>
-            <span className="break-all font-mono text-[11px] text-ink-100">{String(item)}</span>
+            <span className="truncate font-mono text-[11px] text-fg-subtle" title={field}>{field}</span>
+            <span className="break-all font-mono text-[11px] text-fg">{String(item)}</span>
           </div>
         ))}
-        {entries.length === 0 && <p className="py-1 text-[11px] text-ink-500">{t("kv.emptyValue")}</p>}
+        {entries.length === 0 && <p className="py-1 text-[11px] text-fg-faint">{t("kv.emptyValue")}</p>}
       </div>
     );
   }
@@ -575,11 +575,11 @@ function TypedValue({ value }: { value: KVKeyValue }) {
       <div className="divide-y divide-seam/60">
         {value.value.map((item, index) => (
           <div key={index} className="flex gap-2 py-1">
-            <span className="w-10 shrink-0 text-right font-mono text-[10px] text-ink-600">{value.type === "list" ? index : "·"}</span>
-            <span className="break-all font-mono text-[11px] text-ink-100">{String(item)}</span>
+            <span className="w-10 shrink-0 text-right font-mono text-[10px] text-fg-faint">{value.type === "list" ? index : "·"}</span>
+            <span className="break-all font-mono text-[11px] text-fg">{String(item)}</span>
           </div>
         ))}
-        {value.value.length === 0 && <p className="py-1 text-[11px] text-ink-500">{t("kv.emptyValue")}</p>}
+        {value.value.length === 0 && <p className="py-1 text-[11px] text-fg-faint">{t("kv.emptyValue")}</p>}
       </div>
     );
   }
@@ -590,8 +590,8 @@ function TypedValue({ value }: { value: KVKeyValue }) {
           const record = entry as { member?: string; score?: number };
           return (
             <div key={index} className="flex items-baseline gap-2 py-1">
-              <span className="w-16 shrink-0 text-right font-mono text-[10.5px] text-amber-300/80">{String(record.score ?? 0)}</span>
-              <span className="break-all font-mono text-[11px] text-ink-100">{String(record.member ?? "")}</span>
+              <span className="w-16 shrink-0 text-right font-mono text-[10.5px] text-warning-fg/80">{String(record.score ?? 0)}</span>
+              <span className="break-all font-mono text-[11px] text-fg">{String(record.member ?? "")}</span>
             </div>
           );
         })}
@@ -605,11 +605,11 @@ function TypedValue({ value }: { value: KVKeyValue }) {
           const record = entry as { id?: string; fields?: Record<string, unknown> };
           return (
             <div key={index} className="rounded-md border border-ink-700/60 bg-ink-850/60 px-2.5 py-1.5">
-              <p className="font-mono text-[10px] text-rose-300/80">{record.id}</p>
+              <p className="font-mono text-[10px] text-danger-fg/80">{record.id}</p>
               <div className="mt-1 space-y-0.5">
                 {Object.entries(record.fields ?? {}).map(([field, item]) => (
-                  <p key={field} className="break-all font-mono text-[10.5px] text-ink-300">
-                    <span className="text-ink-500">{field}: </span>
+                  <p key={field} className="break-all font-mono text-[10.5px] text-fg-subtle">
+                    <span className="text-fg-faint">{field}: </span>
                     {String(item)}
                   </p>
                 ))}
@@ -620,7 +620,7 @@ function TypedValue({ value }: { value: KVKeyValue }) {
       </div>
     );
   }
-  return <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-ink-200">{valuePreview(value.value)}</pre>;
+  return <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-fg-muted">{valuePreview(value.value)}</pre>;
 }
 
 /* ---------------- Console tab ---------------- */
@@ -675,7 +675,7 @@ function ConsoleTab({ database }: { database: Database }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden rounded-xl border border-ink-700/80 bg-ink-900/60">
       <div className="flex items-center gap-2 border-b border-seam px-3 py-2">
-        <Icon name="Terminal" className="h-3.5 w-3.5 text-ink-500" />
+        <Icon name="Terminal" className="h-3.5 w-3.5 text-fg-faint" />
         <input
           value={command}
           onChange={(event) => setCommand(event.target.value)}
@@ -696,10 +696,10 @@ function ConsoleTab({ database }: { database: Database }) {
           }}
           placeholder={t("kv.consolePlaceholder")}
           spellCheck={false}
-          className="h-8 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:outline-none"
+          className="h-8 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-2.5 font-mono text-[12px] text-fg focus:border-ink-400 focus:outline-none"
         />
         {isDangerous && (
-          <span className="shrink-0 rounded bg-rose-500/15 px-1.5 py-px font-mono text-[9.5px] text-rose-300">{t("kv.dangerous")}</span>
+          <span className="shrink-0 rounded bg-danger/15 px-1.5 py-px font-mono text-[9.5px] text-danger-fg">{t("kv.dangerous")}</span>
         )}
         <Button variant="solid" icon="Play" disabled={running || !command.trim()} onClick={submit}>
           {t("kv.run")}
@@ -707,18 +707,18 @@ function ConsoleTab({ database }: { database: Database }) {
       </div>
       <div ref={outputRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
         {error ? (
-          <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-[1.6] text-rose-200">{error}</pre>
+          <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-[1.6] text-danger-fg">{error}</pre>
         ) : result ? (
           <div className="space-y-1">
             {result.isNil ? (
-              <p className="font-mono text-[11px] text-ink-500">{t("kv.nilReply")}</p>
+              <p className="font-mono text-[11px] text-fg-faint">{t("kv.nilReply")}</p>
             ) : (
-              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-[1.6] text-ink-200">{valuePreview(result.value)}</pre>
+              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] leading-[1.6] text-fg-muted">{valuePreview(result.value)}</pre>
             )}
-            {result.truncated && <p className="text-[10px] text-amber-300/80">{t("kv.truncated")}</p>}
+            {result.truncated && <p className="text-[10px] text-warning-fg/80">{t("kv.truncated")}</p>}
           </div>
         ) : (
-          <p className="text-[11.5px] text-ink-500">{t("kv.consoleHint")}</p>
+          <p className="text-[11.5px] text-fg-faint">{t("kv.consoleHint")}</p>
         )}
       </div>
       {confirmDanger && (
@@ -737,7 +737,7 @@ function ConsoleTab({ database }: { database: Database }) {
             />
           }
         >
-          <p className="px-4 text-[12.5px] leading-relaxed text-ink-300">{t("kv.dangerDescription", { command: commandWord })}</p>
+          <p className="px-4 text-[12.5px] leading-relaxed text-fg-subtle">{t("kv.dangerDescription", { command: commandWord })}</p>
         </Modal>
       )}
     </div>
@@ -801,40 +801,40 @@ function InfoTab({ database }: { database: Database }) {
           {t("common.refresh")}
         </Button>
         {info && info.databases.length > 0 && (
-          <span className="ml-auto font-mono text-[10.5px] text-ink-500">
+          <span className="ml-auto font-mono text-[10.5px] text-fg-faint">
             {info.databases.map((db) => `db${db.index}: ${db.keys}`).join(" · ")}
           </span>
         )}
       </div>
       {error ? (
-        <p className="rounded-md border border-rose-500/20 bg-rose-500/5 px-3 py-2 font-mono text-[11px] text-rose-200">{error}</p>
+        <p className="rounded-md border border-danger/20 bg-danger/5 px-3 py-2 font-mono text-[11px] text-danger-fg">{error}</p>
       ) : (
         <div className="grid grid-cols-3 gap-2.5">
           {cards.map(([label, value]) => (
             <div key={label} className="rounded-xl border border-ink-700/80 bg-ink-900/60 p-3">
-              <span className="text-[10px] tracking-wide text-ink-500 uppercase">{label}</span>
-              <p className="mt-1 truncate text-[13px] font-semibold text-ink-50">{value}</p>
+              <span className="text-[10px] tracking-wide text-fg-faint uppercase">{label}</span>
+              <p className="mt-1 truncate text-[13px] font-semibold text-fg">{value}</p>
             </div>
           ))}
         </div>
       )}
 
       <div className="rounded-xl border border-ink-700/80 bg-ink-900/60">
-        <p className="border-b border-seam px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">
+        <p className="border-b border-seam px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">
           {t("kv.triggersTitle")}
         </p>
         {triggers.length === 0 ? (
-          <p className="px-3 py-3 text-[12px] text-ink-500">{t("kv.triggersEmpty")}</p>
+          <p className="px-3 py-3 text-[12px] text-fg-faint">{t("kv.triggersEmpty")}</p>
         ) : (
           triggers.map((binding) => (
             <div key={binding.id} className="flex items-center gap-2.5 border-b border-seam/60 px-3 py-2 last:border-b-0">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[12.5px] text-ink-100">{binding.label}</p>
-                <p className="truncate font-mono text-[10px] text-ink-500">
+                <p className="truncate text-[12.5px] text-fg">{binding.label}</p>
+                <p className="truncate font-mono text-[10px] text-fg-faint">
                   {[binding.config?.channels, binding.config?.patterns].filter(Boolean).join(" · ") || "—"}
                 </p>
               </div>
-              <span className="font-mono text-[10px] text-ink-500">
+              <span className="font-mono text-[10px] text-fg-faint">
                 {binding.enabled ? t("kv.triggerEnabled") : t("kv.triggerDisabled")}
               </span>
               {!binding.trusted && (

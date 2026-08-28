@@ -553,13 +553,16 @@ export function Canvas({
         pan ? "cursor-grabbing" : "cursor-default",
       )}
       style={{
-        backgroundImage: "radial-gradient(circle, #212127 1px, transparent 1px)",
+        backgroundImage: "radial-gradient(circle, var(--canvas-grid) 1px, transparent 1px)",
         backgroundSize: `${26 * view.z}px ${26 * view.z}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}
     >
       {/* vignette */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(0,0,0,0.55))]" />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: "radial-gradient(ellipse at center, transparent 35%, var(--canvas-vignette))" }}
+      />
 
       <div
         className="absolute top-0 left-0 origin-top-left"
@@ -600,12 +603,20 @@ export function Canvas({
                   fill="none"
                   strokeLinecap="round"
                   strokeWidth={hover ? 2.2 : active ? 1.8 : 1.3}
-                  stroke={edgeColor(e.kind, dataType, active, hover)}
                   className={cn(e.kind === "exec" && "edge-dash")}
-                  style={{ transition: "stroke 0.15s" }}
+                  style={{
+                    transition: "stroke 0.15s",
+                    stroke: edgeColor(e.kind, dataType, active, hover),
+                  }}
                 />
                 {e.kind === "data" && (
-                  <circle cx={b.x} cy={b.y} r={2.5} fill={pinPalette(dataType).dot} opacity={active ? 1 : 0.7} />
+                  <circle
+                    cx={b.x}
+                    cy={b.y}
+                    r={2.5}
+                    opacity={active ? 1 : 0.7}
+                    style={{ fill: pinPalette(dataType).dot }}
+                  />
                 )}
               </g>
             );
@@ -614,7 +625,7 @@ export function Canvas({
           {pending && (() => {
             const srcNode = nodes.find((n) => n.id === pending.node);
             const srcPort = srcNode ? (pending.dir === "out" ? srcNode.outputs : srcNode.inputs).find((p) => p.id === pending.port) : undefined;
-            const dragColor = srcPort ? pinPalette(srcPort.dataType).dot : "#ecedf1";
+            const dragColor = srcPort ? pinPalette(srcPort.dataType).dot : "var(--fg)";
             return (
               <path
                 d={
@@ -633,10 +644,10 @@ export function Canvas({
                       )
                 }
                 fill="none"
-                stroke={dragColor}
                 strokeWidth={1.4}
                 strokeDasharray="3 4"
                 opacity={0.85}
+                style={{ stroke: dragColor }}
               />
             );
           })()}
@@ -714,7 +725,7 @@ export function Canvas({
           >
             <div
               style={{ height: HEADER_H }}
-              className="flex items-center gap-1.5 border-b border-dashed border-ink-600/70 px-2.5 text-[11px] font-medium text-ink-200"
+              className="flex items-center gap-1.5 border-b border-dashed border-ink-600/70 px-2.5 text-[11px] font-medium text-fg-muted"
             >
               <Icon name="Plus" className="h-3.5 w-3.5" />
               {t("canvas.dropToPlace")}
@@ -740,8 +751,8 @@ export function Canvas({
                 height: maxY - minY + 20,
               }}
             >
-              <span className="absolute -top-[24px] left-0 flex h-5 items-center gap-1.5 rounded-md border border-ink-600 bg-ink-800/95 px-2 text-[10px] font-medium text-ink-200 shadow-lg shadow-black/30">
-                <Icon name="Boxes" className="h-3 w-3 text-ink-400" />
+              <span className="absolute -top-[24px] left-0 flex h-5 items-center gap-1.5 rounded-md border border-ink-600 bg-ink-800/95 px-2 text-[10px] font-medium text-fg-muted shadow-lg shadow-black/30">
+                <Icon name="Boxes" className="h-3 w-3 text-fg-subtle" />
                 {t("editor.nSelected", { count: selNodes.length })}
               </span>
             </div>
@@ -794,13 +805,13 @@ export function Canvas({
             onClick={() => setLegendOpen((v) => !v)}
             aria-expanded={legendOpen}
             aria-label={t("canvas.toggleLegend")}
-            className="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-ink-700 bg-ink-850/85 px-2 text-[10.5px] font-medium text-ink-100 shadow-[0_10px_30px_-14px_rgba(0,0,0,0.9)] backdrop-blur transition hover:bg-ink-750"
+            className="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-ink-700 bg-ink-850/85 px-2 text-[10.5px] font-medium text-fg shadow-[0_10px_30px_-14px_rgba(0,0,0,0.9)] backdrop-blur transition hover:bg-ink-750"
           >
-            <Icon name="LayoutGrid" className="h-3.5 w-3.5 text-ink-400" />
+            <Icon name="LayoutGrid" className="h-3.5 w-3.5 text-fg-subtle" />
             {t("canvas.flow")}
             <Icon
               name="ChevronDown"
-              className={cn("h-3 w-3 text-ink-500 transition-transform", !legendOpen && "-rotate-90")}
+              className={cn("h-3 w-3 text-fg-faint transition-transform", !legendOpen && "-rotate-90")}
             />
           </button>
         </Tooltip>
@@ -817,7 +828,7 @@ export function Canvas({
                   className="w-full"
                 >
                   <button
-                    className="flex w-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 py-1 text-[10px] text-ink-300 transition hover:bg-ink-750 hover:text-ink-100"
+                    className="flex w-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-1.5 py-1 text-[10px] text-fg-subtle transition hover:bg-ink-750 hover:text-fg"
                   >
                     <span className={lt === "exec" ? "h-[6px] w-[6px] rounded-[1px] shrink-0" : "h-[6px] w-[6px] rounded-full shrink-0"} style={{ background: c.dot }} />
                     {t(`pins.type_${lt}`)}
@@ -849,7 +860,7 @@ export function Canvas({
           <button
             onClick={() => setView((v) => ({ ...v, z: 1 }))}
             aria-label={t("editor.resetZoom")}
-            className="h-7 min-w-[46px] rounded-md px-1 font-mono text-[11px] text-ink-300 transition hover:bg-ink-750 hover:text-ink-50"
+            className="h-7 min-w-[46px] rounded-md px-1 font-mono text-[11px] text-fg-subtle transition hover:bg-ink-750 hover:text-fg"
           >
             {Math.round(view.z * 100)}%
           </button>
@@ -860,8 +871,8 @@ export function Canvas({
         <TB icon="Magnet" label={t("editor.snapToGrid")} active={snap} onClick={() => setSnap(!snap)} />
         <span className="mx-1 h-4 w-px bg-ink-700" />
         {selectedIds.size > 1 && (
-          <span className="flex h-7 items-center gap-1.5 rounded-md bg-ink-700/80 px-2 text-[10.5px] font-medium text-ink-100">
-            <Icon name="Boxes" className="h-3 w-3 text-ink-300" />
+          <span className="flex h-7 items-center gap-1.5 rounded-md bg-ink-700/80 px-2 text-[10.5px] font-medium text-fg">
+            <Icon name="Boxes" className="h-3 w-3 text-fg-subtle" />
             {selectedIds.size}
           </span>
         )}
@@ -914,11 +925,11 @@ function TB({
         disabled={disabled}
         aria-label={label}
         className={cn(
-          "grid h-7 w-7 place-items-center rounded-md text-ink-300 transition",
-          "hover:bg-ink-750 hover:text-ink-50 active:scale-95",
-          active && "bg-ink-700 text-ink-50",
-          disabled && "cursor-not-allowed text-ink-600 hover:bg-transparent hover:text-ink-600",
-          danger && !disabled && "hover:bg-rose-500/15 hover:text-rose-300",
+          "grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition",
+          "hover:bg-ink-750 hover:text-fg active:scale-95",
+          active && "bg-ink-700 text-fg",
+          disabled && "cursor-not-allowed text-fg-faint hover:bg-transparent hover:text-fg-faint",
+          danger && !disabled && "hover:bg-danger/15 hover:text-danger-fg",
         )}
       >
         <Icon name={icon} className="h-[15px] w-[15px]" />

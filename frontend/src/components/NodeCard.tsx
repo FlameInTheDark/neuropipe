@@ -80,21 +80,21 @@ function PinTip({ port }: { port: Port }) {
     <span className="flex flex-col gap-1 py-0.5">
       <span className="flex items-center gap-2">
         <span className="h-2 w-2 rounded-full" style={{ background: pal.dot }} />
-        <span className="font-medium text-ink-50">{port.label}</span>
+        <span className="font-medium text-fg">{port.label}</span>
         <span className="ml-1 rounded bg-ink-800 px-1 py-px font-mono text-[9.5px]" style={{ color: pal.label }}>
           {t(`pins.type_${port.dataType ?? "any"}`)}
         </span>
         {recordName && (
-          <span className="rounded bg-ink-800 px-1 py-px font-mono text-[9.5px] text-ink-300">{recordName}</span>
+          <span className="rounded bg-ink-800 px-1 py-px font-mono text-[9.5px] text-fg-subtle">{recordName}</span>
         )}
       </span>
       {port.spec?.kind === "map" && (
-        <span className="pl-4 font-mono text-[10.5px] text-ink-400">
+        <span className="pl-4 font-mono text-[10.5px] text-fg-subtle">
           {t("pins.mapStructure", { key: specTypeLabel(t, port.spec.key), value: specTypeLabel(t, port.spec.value) })}
         </span>
       )}
       {port.dataType === "array" && port.arrayOf && (
-        <span className="pl-4 text-[10.5px] text-ink-400">
+        <span className="pl-4 text-[10.5px] text-fg-subtle">
           {t("pins.elementType", { type: t(`pins.type_${port.arrayOf}`) })}
         </span>
       )}
@@ -103,8 +103,8 @@ function PinTip({ port }: { port: Port }) {
           {rows.map((f) => (
             <span key={f.key} className="flex items-center gap-1.5 text-[10.5px]">
               <span className="h-1 w-1 rounded-full" style={{ background: pinPalette(f.pinType as Port["dataType"]).dot }} />
-              <span className="font-mono text-ink-200">{f.key}</span>
-              <span className="text-ink-500">
+              <span className="font-mono text-fg-muted">{f.key}</span>
+              <span className="text-fg-faint">
                 {f.typeLabel}
                 {f.detail && <span className="font-mono text-[9.5px]"> {f.detail}</span>}
               </span>
@@ -113,7 +113,7 @@ function PinTip({ port }: { port: Port }) {
         </span>
       )}
       {port.kind === "exec" && (
-        <span className="pl-4 text-[10.5px] text-ink-500">{t("pins.execHelp")}</span>
+        <span className="pl-4 text-[10.5px] text-fg-faint">{t("pins.execHelp")}</span>
       )}
     </span>
   );
@@ -161,8 +161,8 @@ function PortDot({
             isExec ? "h-[8px] w-[8px] rounded-[2px]" : "h-[7px] w-[7px] rounded-full",
           )}
           style={{
-            borderColor: connected ? pal.dot : `${pal.dot}88`,
-            background: connected ? pal.bg : "var(--color-ink-900)",
+            borderColor: connected ? pal.dot : `color-mix(in srgb, ${pal.dot} 53%, transparent)`,
+            background: connected ? pal.bg : "var(--ink-900)",
           }}
         />
       </Tooltip>
@@ -219,23 +219,23 @@ export const NodeCard = memo(function NodeCard({
         <span
           className={cn(
             "grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[5px] border",
-            selected ? "border-ink-500 bg-ink-700 text-ink-50" : "border-ink-700 bg-ink-800 text-ink-300",
+            selected ? "border-ink-500 bg-ink-700 text-fg" : "border-ink-700 bg-ink-800 text-fg-subtle",
           )}
         >
           <Icon name={node.icon} className="h-[11px] w-[11px]" strokeWidth={2} />
         </span>
-        <span className="truncate text-[12.5px] font-medium text-ink-50">{node.title}</span>
+        <span className="truncate text-[12.5px] font-medium text-fg">{node.title}</span>
         <span className="ml-auto flex items-center gap-1.5">
           {node.status === "running" && (
-            <span className="font-mono text-[9px] tracking-wide text-ink-400 uppercase">run</span>
+            <span className="font-mono text-[9px] tracking-wide text-fg-subtle uppercase">run</span>
           )}
           <span
             className={cn(
               "h-[6px] w-[6px] rounded-full",
-              node.status === "done" && "bg-emerald-400/90",
+              node.status === "done" && "bg-success/90",
               node.status === "running" && "bg-ink-50 pulse-ring",
-              node.status === "queued" && "bg-amber-400/70",
-              node.status === "error" && "bg-rose-400",
+              node.status === "queued" && "bg-warning/70",
+              node.status === "error" && "bg-danger",
               node.status === "idle" && "bg-ink-600",
             )}
           />
@@ -245,7 +245,7 @@ export const NodeCard = memo(function NodeCard({
       {/* subtitle */}
       <div
         style={{ height: BODY_TOP }}
-        className="flex items-center gap-1.5 px-2.5 font-mono text-[10px] tracking-tight text-ink-500"
+        className="flex items-center gap-1.5 px-2.5 font-mono text-[10px] tracking-tight text-fg-faint"
       >
         <span className="truncate">{node.type}</span>
       </div>
@@ -271,8 +271,8 @@ export const NodeCard = memo(function NodeCard({
                   <span
                     className={cn(
                       "min-w-0 cursor-default truncate text-[11px] transition-colors",
-                      inp.kind === "exec" ? "font-medium text-ink-200" : "text-ink-400",
-                      "hover:text-ink-50",
+                      inp.kind === "exec" ? "font-medium text-fg-muted" : "text-fg-subtle",
+                      "hover:text-fg",
                     )}
                   >
                     {inp.label}
@@ -287,8 +287,8 @@ export const NodeCard = memo(function NodeCard({
                   <span
                     className={cn(
                       "min-w-0 cursor-default truncate text-right text-[11px] transition-colors",
-                      out.kind === "exec" ? "font-medium text-ink-200" : "text-ink-400",
-                      "hover:text-ink-50",
+                      out.kind === "exec" ? "font-medium text-fg-muted" : "text-fg-subtle",
+                      "hover:text-fg",
                     )}
                   >
                     {out.label}

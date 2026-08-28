@@ -82,12 +82,12 @@ export const RerouteNode = memo(function RerouteNode({
             "pointer-events-none border transition-transform duration-100 group-hover/reroute:scale-125",
             "h-[10px] w-[10px]",
             isExec ? "rounded-[3px]" : "rounded-full",
-            selected && primary && "ring-2 ring-ink-200/75",
-            selected && !primary && "ring-2 ring-ink-400/45",
+            selected && primary && "ring-2 ring-ring/80",
+            selected && !primary && "ring-2 ring-ring/50",
           )}
           style={{
             borderColor: pal.dot,
-            background: fed ? pal.bg : "var(--color-ink-900)",
+            background: fed ? pal.bg : "var(--ink-900)",
           }}
         />
         {pin("in", REROUTE_IN)}

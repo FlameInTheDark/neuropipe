@@ -63,7 +63,7 @@ export function RemoteExecutorsPanel({ workspace }: { workspace: Workspace }) {
           </Button>
         }
       >
-        <p className="mb-3 text-[12px] leading-relaxed text-ink-400">{t("executors.description")}</p>
+        <p className="mb-3 text-[12px] leading-relaxed text-fg-subtle">{t("executors.description")}</p>
         {executors.length === 0 ? (
           <EmptyState icon="Server" title={t("executors.emptyTitle")} hint={t("executors.emptyDescription")} />
         ) : (
@@ -184,25 +184,25 @@ function ExecutorRow({
       <span
         className={cn(
           "h-2 w-2 shrink-0 rounded-full",
-          status.online ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]" : "bg-ink-600",
+          status.online ? "bg-success shadow-[0_0_6px_color-mix(in_srgb,var(--status-success)_70%,transparent)]" : "bg-ink-600",
         )}
         aria-hidden
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="truncate text-[13px] font-medium text-ink-50">{item.name}</span>
+          <span className="truncate text-[13px] font-medium text-fg">{item.name}</span>
           <span
             className={cn(
               "rounded-full border px-1.5 py-px text-[10px]",
               item.llmMode === "local"
                 ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
-                : "border-sky-500/40 bg-sky-500/10 text-sky-300",
+                : "border-info/40 bg-info/10 text-info-fg",
             )}
           >
             {t(item.llmMode === "local" ? "executors.modeLocal" : "executors.modeProxy")}
           </span>
         </span>
-        <span className="mt-[1px] block truncate font-mono text-[11px] text-ink-500">
+        <span className="mt-[1px] block truncate font-mono text-[11px] text-fg-faint">
           {item.address}
           {status.online && status.version
             ? ` · ${t("executors.versionShort", { version: status.version })}${status.platform ? ` · ${status.platform}` : ""}`
@@ -301,7 +301,7 @@ function AddExecutorDialog({
           onChange={setUseTLS}
         />
         {testResult && (
-          <p className={cn("text-[11.5px]", testResult.online ? "text-emerald-300" : "text-rose-300")}>
+          <p className={cn("text-[11.5px]", testResult.online ? "text-success-fg" : "text-danger-fg")}>
             {testResult.online
               ? t("executors.testOk", { version: testResult.version ?? "", platform: testResult.platform ?? "" })
               : t("executors.testFail")}
@@ -413,7 +413,7 @@ function ConfigureExecutorDialog({
         {config.llmMode === "local" && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11.5px] font-medium text-ink-300">{t("executors.providers")}</span>
+              <span className="text-[11.5px] font-medium text-fg-subtle">{t("executors.providers")}</span>
               <Button variant="ghost" icon="Plus" onClick={addProvider}>
                 {t("executors.providerAdd")}
               </Button>
@@ -513,8 +513,8 @@ function TokenOnceModal({
   if (!token) return null;
   return (
     <Modal title={title} onClose={onClose}>
-      <p className="text-[12.5px] leading-relaxed text-ink-300">{description}</p>
-      <code className="mt-3 block break-all rounded-lg border border-seam bg-ink-900 p-2.5 font-mono text-[12px] text-emerald-300">
+      <p className="text-[12.5px] leading-relaxed text-fg-subtle">{description}</p>
+      <code className="mt-3 block break-all rounded-lg border border-seam bg-ink-900 p-2.5 font-mono text-[12px] text-success-fg">
         {token}
       </code>
       <div className="ml-auto flex items-center gap-2">
@@ -547,8 +547,8 @@ function ToggleRowLocal({
   return (
     <div className="flex items-start justify-between gap-3">
       <span className="min-w-0">
-        <span className="block text-[12.5px] text-ink-100">{label}</span>
-        {description && <span className="mt-0.5 block text-[11px] leading-snug text-ink-500">{description}</span>}
+        <span className="block text-[12.5px] text-fg">{label}</span>
+        {description && <span className="mt-0.5 block text-[11px] leading-snug text-fg-faint">{description}</span>}
       </span>
       <Toggle on={on} onChange={onChange} />
     </div>

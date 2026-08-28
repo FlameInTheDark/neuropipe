@@ -24,6 +24,15 @@ function write(key: string, value: unknown) {
   }
 }
 
+/** Module-scope stored-value access (the hooks below wrap these for React). */
+export function readStoredValue<T>(key: string, fallback: T): T {
+  return read(key, fallback);
+}
+
+export function writeStoredValue(key: string, value: unknown): void {
+  write(key, value);
+}
+
 function useStored<T>(key: string, fallback: T): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => read(key, fallback));
   useEffect(() => {

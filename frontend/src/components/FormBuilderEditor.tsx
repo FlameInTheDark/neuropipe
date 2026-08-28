@@ -272,7 +272,7 @@ function FormBuilderModal({
                   onClick={() => setSelectedID(item.id)}
                   className={`group flex flex-col gap-1 rounded-md border p-2 text-left transition ${
                     isSelected
-                      ? "border-ink-400 bg-ink-800/80 ring-1 ring-ink-500"
+                      ? "border-ink-400 bg-ink-800/80 ring-1 ring-ring/60"
                       : "border-ink-700 bg-ink-850/70 hover:border-ink-600"
                   }`}
                   style={{
@@ -281,21 +281,21 @@ function FormBuilderModal({
                   }}
                   aria-label={item.label || item.id}
                 >
-                  <span className="flex items-center gap-1 text-[10px] tracking-wide text-ink-500 uppercase">
+                  <span className="flex items-center gap-1 text-[10px] tracking-wide text-fg-faint uppercase">
                     <Icon name={kindIcon(item.kind)} className="h-3 w-3" />
                     {item.kind}
-                    <Icon name="GripVertical" className="ml-auto h-3 w-3 text-ink-600 opacity-0 transition-opacity group-hover:opacity-100" />
+                    <Icon name="GripVertical" className="ml-auto h-3 w-3 text-fg-faint opacity-0 transition-opacity group-hover:opacity-100" />
                   </span>
-                  <span className="min-w-0 break-words text-xs font-medium text-ink-100">
+                  <span className="min-w-0 break-words text-xs font-medium text-fg">
                     {item.label || item.id}
                   </span>
                   {item.kind === "input" ? (
-                    <span className="text-[10px] text-ink-500">
+                    <span className="text-[10px] text-fg-faint">
                       {item.inputType === "number" ? t("editor.number") : t("editor.text")}
                     </span>
                   ) : null}
                   {item.kind === "dropdown" ? (
-                    <span className="text-[10px] text-ink-500">
+                    <span className="text-[10px] text-fg-faint">
                       {t("formBuilder.options")}: {(item.options ?? []).length}
                     </span>
                   ) : null}
@@ -310,18 +310,18 @@ function FormBuilderModal({
           {selected ? (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-medium text-ink-200">{t("formBuilder.selected")}</span>
+                <span className="text-[11px] font-medium text-fg-muted">{t("formBuilder.selected")}</span>
                 <Button
                   variant="ghost"
                   icon="Trash2"
                   onClick={() => deleteItem(selected.id)}
-                  className="text-ink-500 hover:text-rose-300"
+                  className="text-fg-faint hover:text-danger-fg"
                 >
                   {t("formBuilder.deleteItem")}
                 </Button>
               </div>
               <label className="block">
-                <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("formBuilder.itemLabel")}</span>
+                <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("formBuilder.itemLabel")}</span>
                 <TextInput
                   value={edits[`${selected.id}:label`] ?? selected.label}
                   onChange={(v) => {
@@ -331,7 +331,7 @@ function FormBuilderModal({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("formBuilder.span")}</span>
+                <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("formBuilder.span")}</span>
                 <Dropdown
                   value={String(selected.span)}
                   onChange={(next) => updateItem(selected.id, { span: clampSpan(Number(next)) })}
@@ -339,7 +339,7 @@ function FormBuilderModal({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("formBuilder.rows")}</span>
+                <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("formBuilder.rows")}</span>
                 <TextInput
                   value={edits[`${selected.id}:rowSpan`] ?? String(selected.rowSpan)}
                   onChange={(v) => {
@@ -351,7 +351,7 @@ function FormBuilderModal({
               {selected.kind === "input" ? (
                 <>
                   <label className="block">
-                    <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("formBuilder.inputType")}</span>
+                    <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("formBuilder.inputType")}</span>
                     <Dropdown
                       value={selected.inputType === "number" ? "number" : "text"}
                       onChange={(next) => updateItem(selected.id, { inputType: next === "number" ? "number" : "text" })}
@@ -362,7 +362,7 @@ function FormBuilderModal({
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("formBuilder.placeholder")}</span>
+                    <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("formBuilder.placeholder")}</span>
                     <TextInput
                       value={edits[`${selected.id}:placeholder`] ?? selected.placeholder ?? ""}
                       onChange={(v) => {
@@ -375,7 +375,7 @@ function FormBuilderModal({
               ) : null}
               {selected.kind === "dropdown" ? (
                 <div className="space-y-1.5">
-                  <span className="block text-[10px] font-medium text-ink-500">{t("formBuilder.options")}</span>
+                  <span className="block text-[10px] font-medium text-fg-faint">{t("formBuilder.options")}</span>
                   {(selected.options ?? []).map((option, index) => (
                     <div key={`${selected.id}-${index}`} className="space-y-1 rounded-md border border-ink-700 bg-ink-850/60 p-1.5">
                       <TextInput
@@ -398,7 +398,7 @@ function FormBuilderModal({
                         variant="ghost"
                         icon="Trash2"
                         onClick={() => removeOption(selected.id, index)}
-                        className="h-6 px-2 text-[11px] text-ink-500 hover:text-rose-300"
+                        className="h-6 px-2 text-[11px] text-fg-faint hover:text-danger-fg"
                       >
                         {t("formBuilder.deleteItem")}
                       </Button>
@@ -411,7 +411,7 @@ function FormBuilderModal({
               ) : null}
             </div>
           ) : (
-            <p className="text-[11px] text-ink-500">{t("formBuilder.noSelection")}</p>
+            <p className="text-[11px] text-fg-faint">{t("formBuilder.noSelection")}</p>
           )}
         </aside>
       </div>

@@ -105,11 +105,11 @@ function Bubble({
       ref={ref}
       role="tooltip"
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }}
-      className="tip-in pointer-events-none fixed z-[80] flex items-center gap-2 rounded-md border border-ink-650 bg-ink-800/95 px-2 py-1 text-[11.5px] whitespace-nowrap text-ink-100 shadow-[0_10px_28px_-10px_rgba(0,0,0,0.9)] backdrop-blur"
+      className="tip-in pointer-events-none fixed z-[80] flex items-center gap-2 rounded-md border border-ink-650 bg-ink-800/95 px-2 py-1 text-[11.5px] whitespace-nowrap text-fg shadow-[0_10px_28px_-10px_rgba(0,0,0,0.9)] backdrop-blur"
     >
       {content}
       {hint && (
-        <kbd className="rounded border border-ink-600 bg-ink-850 px-1 font-mono text-[10px] text-ink-400">{hint}</kbd>
+        <kbd className="rounded border border-ink-600 bg-ink-850 px-1 font-mono text-[10px] text-fg-subtle">{hint}</kbd>
       )}
     </div>,
     document.body,

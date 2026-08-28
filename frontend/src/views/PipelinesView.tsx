@@ -112,7 +112,7 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
               { value: "remote", label: t("executors.category") },
             ]}
           />
-          <span className="ml-auto text-[11.5px] text-ink-500">{t("pipelines.clickToOpen")}</span>
+          <span className="ml-auto text-[11.5px] text-fg-faint">{t("pipelines.clickToOpen")}</span>
         </>
       }
     >
@@ -120,7 +120,7 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
         <EmptyState icon="Cable" title={t("pipelines.emptyTitle")} hint={t("pipelines.emptyDescription")} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-ink-700/80">
-          <div className="grid grid-cols-[minmax(0,1fr)_110px_110px_150px_32px] items-center gap-3 border-b border-seam bg-ink-850/70 px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">
+          <div className="grid grid-cols-[minmax(0,1fr)_110px_110px_150px_32px] items-center gap-3 border-b border-seam bg-ink-850/70 px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">
             <span>{t("pipelines.pipeline")}</span>
             <span>{t("pipelines.status")}</span>
             <span className="text-right">{t("pipelines.triggersHeader")}</span>
@@ -138,17 +138,17 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
                 className="group grid w-full grid-cols-[minmax(0,1fr)_110px_110px_150px_32px] items-center gap-3 border-b border-seam/70 px-3 py-2.5 text-left transition last:border-b-0 hover:bg-ink-850"
               >
                 <span className="flex min-w-0 items-center gap-2.5">
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-300 transition group-hover:border-ink-500 group-hover:text-ink-50">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-subtle transition group-hover:border-ink-500 group-hover:text-fg">
                     <Icon name={isRunning ? "Loader2" : p.icon} className={isRunning ? "h-[15px] w-[15px] animate-spin" : "h-[15px] w-[15px]"} />
                   </span>
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5">
-                      <span className="truncate text-[13px] font-medium text-ink-50">{p.name}</span>
+                      <span className="truncate text-[13px] font-medium text-fg">{p.name}</span>
                       {p.status === "published" && (
-                        <span className="font-mono text-[10px] text-ink-500">{p.version}</span>
+                        <span className="font-mono text-[10px] text-fg-faint">{p.version}</span>
                       )}
                       {p.migrationIssue && (
-                        <Icon name="AlertTriangle" className="h-3 w-3 shrink-0 text-amber-300" />
+                        <Icon name="AlertTriangle" className="h-3 w-3 shrink-0 text-warning-fg" />
                       )}
                     </span>
                     <span className="mt-[1px] flex min-w-0 items-center gap-1.5">
@@ -158,17 +158,17 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
                           <span className="truncate">{p.executorName}</span>
                         </span>
                       )}
-                      <span className="truncate text-[11.5px] text-ink-500">{p.desc}</span>
+                      <span className="truncate text-[11.5px] text-fg-faint">{p.desc}</span>
                     </span>
                   </span>
                 </span>
                 <span>
                   {isRunning ? <StatusPill status="running" /> : <StatusPill status={p.status} />}
                 </span>
-                <span className="text-right font-mono text-[11.5px] text-ink-300">
+                <span className="text-right font-mono text-[11.5px] text-fg-subtle">
                   {p.triggers > 0 ? t("pipelines.triggerCount", { count: p.triggers }) : "–"}
                 </span>
-                <span className="truncate text-[11.5px] text-ink-400">{p.updated}</span>
+                <span className="truncate text-[11.5px] text-fg-subtle">{p.updated}</span>
                 <span
                   role="button"
                   tabIndex={-1}
@@ -186,18 +186,18 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
         </div>
       )}
 
-      <p className="mt-3 flex items-center gap-1.5 px-1 text-[11.5px] text-ink-500">
+      <p className="mt-3 flex items-center gap-1.5 px-1 text-[11.5px] text-fg-faint">
         <Icon name="Info" className="h-3.5 w-3.5 shrink-0" />
         {t("pipelines.boardNote")}
       </p>
 
       <Card onClick={() => setNewOpen(true)} hoverable className="mt-4 flex items-center gap-3 p-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-300">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-subtle">
           <Icon name="Plus" className="h-4 w-4" />
         </span>
         <span>
-          <span className="block text-[12.5px] font-medium text-ink-100">{t("pipelines.blankTitle")}</span>
-          <span className="block text-[11px] text-ink-500">{t("pipelines.blankHint")}</span>
+          <span className="block text-[12.5px] font-medium text-fg">{t("pipelines.blankTitle")}</span>
+          <span className="block text-[11px] text-fg-faint">{t("pipelines.blankHint")}</span>
         </span>
       </Card>
 
@@ -218,8 +218,8 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
 
 function cnStop(running: boolean) {
   return running
-    ? "grid h-6 w-6 place-items-center rounded text-rose-300 transition hover:bg-rose-500/15"
-    : "grid h-6 w-6 place-items-center rounded text-ink-600 transition group-hover:text-ink-100";
+    ? "grid h-6 w-6 place-items-center rounded text-danger-fg transition hover:bg-danger/15"
+    : "grid h-6 w-6 place-items-center rounded text-fg-faint transition group-hover:text-fg";
 }
 
 /** Adapts a freshly returned Pipeline into the summary shape for the editor nav. */

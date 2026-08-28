@@ -39,21 +39,21 @@ export function LibraryPanel({
       <PanelHeader
         title={t("library.nodes")}
         icon="Boxes"
-        right={<span className="font-mono text-[10px] text-ink-500">{total}</span>}
+        right={<span className="font-mono text-[10px] text-fg-faint">{total}</span>}
       />
 
       <div className="border-b border-seam p-2">
         <div className="group relative flex h-8 items-center gap-2 rounded-md border border-ink-700/70 bg-ink-850 px-2.5 transition focus-within:border-ink-500 focus-within:bg-ink-800">
-          <Icon name="Search" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
+          <Icon name="Search" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("library.search")}
             aria-label={t("library.search")}
-            className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink-50 placeholder:text-ink-500"
+            className="min-w-0 flex-1 bg-transparent text-[12.5px] text-fg placeholder:text-fg-faint"
           />
           {query && (
-            <button onClick={() => setQuery("")} aria-label={t("common.clear")} className="text-ink-500 hover:text-ink-200">
+            <button onClick={() => setQuery("")} aria-label={t("common.clear")} className="text-fg-faint hover:text-fg-muted">
               <Icon name="X" className="h-3.5 w-3.5" />
             </button>
           )}
@@ -74,14 +74,14 @@ export function LibraryPanel({
                 <Icon
                   name="ChevronRight"
                   className={cn(
-                    "h-3 w-3 text-ink-500 transition-transform",
-                    expanded && "rotate-90 text-ink-300",
+                    "h-3 w-3 text-fg-faint transition-transform",
+                    expanded && "rotate-90 text-fg-subtle",
                   )}
                 />
-                <span className="text-[10.5px] font-medium tracking-[0.09em] text-ink-300 uppercase">
+                <span className="text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">
                   {cat.name}
                 </span>
-                <span className="ml-auto rounded bg-ink-800 px-1.5 font-mono text-[10px] text-ink-500">
+                <span className="ml-auto rounded bg-ink-800 px-1.5 font-mono text-[10px] text-fg-faint">
                   {cat.count}
                 </span>
               </button>
@@ -103,7 +103,7 @@ export function LibraryPanel({
                           ghost.textContent = item.name;
                           ghost.style.cssText =
                             "position:fixed;top:-1000px;left:-1000px;padding:6px 10px;border-radius:8px;" +
-                            "border:1px solid #2b2b32;background:#17171b;color:#ecedf1;" +
+                            "border:1px solid var(--ink-600);background:var(--ink-750);color:var(--fg);" +
                             "font:500 12.5px Inter,sans-serif;white-space:nowrap;";
                           document.body.appendChild(ghost);
                           e.dataTransfer.setDragImage(ghost, 12, 14);
@@ -112,20 +112,20 @@ export function LibraryPanel({
                         onClick={() => onAdd(item, cat.name)}
                         className="group flex w-full cursor-grab items-start gap-2.5 px-2.5 py-1.5 pl-[26px] text-left transition hover:bg-ink-800 active:cursor-grabbing"
                       >
-                        <span className="mt-[1px] grid h-6 w-6 shrink-0 place-items-center rounded-md border border-ink-700 bg-ink-850 text-ink-300 transition group-hover:border-ink-600 group-hover:bg-ink-750 group-hover:text-ink-50">
+                        <span className="mt-[1px] grid h-6 w-6 shrink-0 place-items-center rounded-md border border-ink-700 bg-ink-850 text-fg-subtle transition group-hover:border-ink-600 group-hover:bg-ink-750 group-hover:text-fg">
                           <Icon name={item.icon} className="h-3.5 w-3.5" />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
-                            <span className="truncate text-[12.5px] font-medium text-ink-100">
+                            <span className="truncate text-[12.5px] font-medium text-fg">
                               {item.name}
                             </span>
                             <Icon
                               name="Plus"
-                              className="h-3 w-3 shrink-0 text-ink-500 opacity-0 transition group-hover:opacity-100"
+                              className="h-3 w-3 shrink-0 text-fg-faint opacity-0 transition group-hover:opacity-100"
                             />
                           </span>
-                          <span className="mt-[1px] line-clamp-2 block text-[11.5px] leading-[1.45] text-ink-400">
+                          <span className="mt-[1px] line-clamp-2 block text-[11.5px] leading-[1.45] text-fg-subtle">
                             {item.desc}
                           </span>
                         </span>
@@ -139,7 +139,7 @@ export function LibraryPanel({
         })}
       </div>
 
-      <div className="flex h-8 shrink-0 items-center gap-1.5 border-t border-seam px-2.5 text-[11px] text-ink-500">
+      <div className="flex h-8 shrink-0 items-center gap-1.5 border-t border-seam px-2.5 text-[11px] text-fg-faint">
         <Icon name="MousePointer2" className="h-3 w-3" />
         {t("library.hint")}
       </div>

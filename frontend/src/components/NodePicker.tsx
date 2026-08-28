@@ -148,9 +148,9 @@ export function NodePicker({
     >
       {/* header */}
       <div className="flex items-center gap-2 border-b border-seam px-2.5 py-2">
-        <Icon name="Plus" className="h-3.5 w-3.5 text-ink-400" />
-        <span className="text-[11px] font-medium tracking-[0.08em] text-ink-300 uppercase">{t("library.addNode")}</span>
-        <span className="ml-auto font-mono text-[10px] text-ink-500">
+        <Icon name="Plus" className="h-3.5 w-3.5 text-fg-subtle" />
+        <span className="text-[11px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{t("library.addNode")}</span>
+        <span className="ml-auto font-mono text-[10px] text-fg-faint">
           {Math.round(at.gx)}, {Math.round(at.gy)}
         </span>
       </div>
@@ -158,16 +158,16 @@ export function NodePicker({
       {/* search */}
       <div className="border-b border-seam p-1.5">
         <div className="flex h-7 items-center gap-2 rounded-md border border-ink-700 bg-ink-900 px-2 focus-within:border-ink-500">
-          <Icon name="Search" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
+          <Icon name="Search" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={t("library.search")}
-            className="min-w-0 flex-1 bg-transparent text-[12.5px] text-ink-50 placeholder:text-ink-500"
+            className="min-w-0 flex-1 bg-transparent text-[12.5px] text-fg placeholder:text-fg-faint"
           />
           {q && (
-            <button onClick={() => setQ("")} className="text-ink-500 hover:text-ink-200">
+            <button onClick={() => setQ("")} className="text-fg-faint hover:text-fg-muted">
               <Icon name="X" className="h-3.5 w-3.5" />
             </button>
           )}
@@ -177,7 +177,7 @@ export function NodePicker({
       {/* results */}
       <div ref={listRef} className="max-h-[292px] min-h-[80px] overflow-y-auto py-1">
         {groups.length === 0 && (
-          <p className="px-3 py-6 text-center text-[11.5px] text-ink-500">{t("library.noMatchesFor", { q })}</p>
+          <p className="px-3 py-6 text-center text-[11.5px] text-fg-faint">{t("library.noMatchesFor", { q })}</p>
         )}
 
         {groups.map((g) => {
@@ -190,11 +190,11 @@ export function NodePicker({
               >
                 <Icon
                   name="ChevronRight"
-                  className={cn("h-3 w-3 shrink-0 text-ink-600 transition-transform", isOpen && "rotate-90 text-ink-400")}
+                  className={cn("h-3 w-3 shrink-0 text-fg-faint transition-transform", isOpen && "rotate-90 text-fg-subtle")}
                 />
-                <Icon name={CAT_ICON[g.name] ?? "Boxes"} className="h-3 w-3 shrink-0 text-ink-500" />
-                <span className="text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">{g.name}</span>
-                <span className="ml-auto font-mono text-[10px] text-ink-600">{g.items.length}</span>
+                <Icon name={CAT_ICON[g.name] ?? "Boxes"} className="h-3 w-3 shrink-0 text-fg-faint" />
+                <span className="text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{g.name}</span>
+                <span className="ml-auto font-mono text-[10px] text-fg-faint">{g.items.length}</span>
               </button>
 
               {isOpen &&
@@ -215,14 +215,14 @@ export function NodePicker({
                       <span
                         className={cn(
                           "mt-[1px] grid h-[22px] w-[22px] shrink-0 place-items-center rounded-md border",
-                          i === hi ? "border-ink-500 bg-ink-750 text-ink-50" : "border-ink-700 bg-ink-900 text-ink-300",
+                          i === hi ? "border-ink-500 bg-ink-750 text-fg" : "border-ink-700 bg-ink-900 text-fg-subtle",
                         )}
                       >
                         <Icon name={item.icon} className="h-3 w-3" />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] font-medium text-ink-50">{item.name}</span>
-                        <span className="mt-[1px] line-clamp-1 block text-[11px] text-ink-500">{item.desc}</span>
+                        <span className="block truncate text-[12px] font-medium text-fg">{item.name}</span>
+                        <span className="mt-[1px] line-clamp-1 block text-[11px] text-fg-faint">{item.desc}</span>
                       </span>
                     </button>
                   );
@@ -243,7 +243,7 @@ export function NodePicker({
             onClick={() => { onAddComment({ x: at.gx, y: at.gy }); onClose(); }}
           />
         )}
-        <span className="ml-auto flex items-center gap-1 pr-1 font-mono text-[10px] text-ink-600">
+        <span className="ml-auto flex items-center gap-1 pr-1 font-mono text-[10px] text-fg-faint">
           <kbd className="rounded border border-ink-700 bg-ink-900 px-1">↑↓</kbd>
           <kbd className="rounded border border-ink-700 bg-ink-900 px-1">↵</kbd>
         </span>
@@ -271,7 +271,7 @@ function FootBtn({
         aria-label={label}
         className={cn(
           "grid h-6 w-6 place-items-center rounded transition",
-          active ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:bg-ink-750 hover:text-ink-100",
+          active ? "bg-ink-700 text-fg" : "text-fg-subtle hover:bg-ink-750 hover:text-fg",
         )}
       >
         <Icon name={icon} className="h-3 w-3" />

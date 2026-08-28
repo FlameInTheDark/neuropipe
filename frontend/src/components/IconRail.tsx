@@ -72,7 +72,7 @@ function RailButton({
         onClick={onClick}
         className={cn(
           "group relative flex h-9 w-full shrink-0 items-center rounded-lg transition-colors duration-150",
-          active ? "bg-ink-750 text-ink-50" : "text-ink-400 hover:bg-ink-850 hover:text-ink-100",
+          active ? "bg-ink-750 text-fg" : "text-fg-subtle hover:bg-ink-850 hover:text-fg",
         )}
       >
         {active && <span className="absolute left-0 h-4 w-[2px] rounded-r bg-ink-50" />}
@@ -116,16 +116,16 @@ export function IconRail({
         className="group relative flex h-9 w-full shrink-0 items-center rounded-lg transition-colors duration-150 hover:bg-ink-850"
       >
         <span style={{ width: ICON_BOX }} className="grid shrink-0 place-items-center">
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-ink-50 text-[13px] font-semibold text-ink-950">
+          <span className="grid h-7 w-7 place-items-center rounded-md bg-ink-50 text-[13px] font-semibold text-fg-onEmphasis">
             N
           </span>
         </span>
 
         <Label expanded={expanded}>
-          <span className="truncate text-[13px] font-semibold text-ink-50">Neuropipe</span>
+          <span className="truncate text-[13px] font-semibold text-fg">Neuropipe</span>
           <Icon
             name="PanelLeft"
-            className="mr-2.5 ml-auto h-4 w-4 shrink-0 text-ink-500 transition-colors group-hover:text-ink-200"
+            className="mr-2.5 ml-auto h-4 w-4 shrink-0 text-fg-faint transition-colors group-hover:text-fg-muted"
           />
         </Label>
       </button>

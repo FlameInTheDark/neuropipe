@@ -26,7 +26,7 @@ export function KeyEditor({
       onClose={onCancel}
       footer={
         <>
-          <span className="text-[11px] text-ink-500">{t("board.keyHint")}</span>
+          <span className="text-[11px] text-fg-faint">{t("board.keyHint")}</span>
           <ModalActions
             onCancel={onCancel}
             onConfirm={() => onSave(label.trim())}
@@ -39,7 +39,7 @@ export function KeyEditor({
       <Field label={t("board.keyLabel")}>
         <TextInput autoFocus value={label} onChange={setLabel} placeholder={t("board.keyPlaceholder")} />
       </Field>
-      <p className="text-[11px] leading-relaxed text-ink-500">{t("board.keyBackendNote")}</p>
+      <p className="text-[11px] leading-relaxed text-fg-faint">{t("board.keyBackendNote")}</p>
     </Modal>
   );
 }
@@ -74,8 +74,8 @@ export function DeckEditor({
             className={cn(
               "h-7 rounded-md border px-3 text-[11.5px] transition",
               canDelete
-                ? "border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
-                : "cursor-not-allowed border-ink-700 bg-ink-850 text-ink-600",
+                ? "border-danger/30 bg-danger/10 text-danger-fg hover:bg-danger/20"
+                : "cursor-not-allowed border-ink-700 bg-ink-850 text-fg-faint",
             )}
           >
             {t("board.deleteDeck")}
@@ -90,7 +90,7 @@ export function DeckEditor({
       <Field label={t("board.deckIcon")}>
         <IconPickerGrid value={draft.icon} onChange={(icon) => setDraft((d) => ({ ...d, icon }))} />
       </Field>
-      <p className="text-[11px] leading-relaxed text-ink-500">{t("board.deckLocalNote")}</p>
+      <p className="text-[11px] leading-relaxed text-fg-faint">{t("board.deckLocalNote")}</p>
     </Modal>
   );
 }

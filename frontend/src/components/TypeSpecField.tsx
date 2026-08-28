@@ -132,30 +132,30 @@ export function TypeSpecField({
       />
       {nested && spec.kind === "list" && (
         <>
-          <span aria-hidden className={cn("leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&lt;</span>
+          <span aria-hidden className={cn("leading-none text-fg-faint", compact ? "font-mono text-[9px]" : "text-[11px]")}>&lt;</span>
           <TypeSpecField
             value={spec.element ?? { kind: "any" }}
             onChange={(element) => onChange({ ...spec, element })}
             depth={depth + 1}
             compact={compact}
           />
-          <span aria-hidden className={cn("self-end leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&gt;</span>
+          <span aria-hidden className={cn("self-end leading-none text-fg-faint", compact ? "font-mono text-[9px]" : "text-[11px]")}>&gt;</span>
         </>
       )}
       {nested && spec.kind === "map" && (
         <>
-          <span aria-hidden className={cn("leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&lt;{t("typeField.textKey")},</span>
+          <span aria-hidden className={cn("leading-none text-fg-faint", compact ? "font-mono text-[9px]" : "text-[11px]")}>&lt;{t("typeField.textKey")},</span>
           <TypeSpecField
             value={spec.value ?? { kind: "any" }}
             onChange={(value) => onChange({ ...spec, value })}
             depth={depth + 1}
             compact={compact}
           />
-          <span aria-hidden className={cn("self-end leading-none text-ink-600", compact ? "font-mono text-[9px]" : "text-[11px]")}>&gt;</span>
+          <span aria-hidden className={cn("self-end leading-none text-fg-faint", compact ? "font-mono text-[9px]" : "text-[11px]")}>&gt;</span>
         </>
       )}
       {(!nested || spec.kind === "record") && spec.kind === "record" && (
-        <span aria-hidden className="font-mono text-[9px] leading-none text-ink-600">{"{}"}</span>
+        <span aria-hidden className="font-mono text-[9px] leading-none text-fg-faint">{"{}"}</span>
       )}
     </div>
   );

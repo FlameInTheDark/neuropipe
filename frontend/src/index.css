@@ -1,30 +1,330 @@
 @import "tailwindcss";
-@import "highlight.js/styles/github-dark.css";
+
+/* ---------------------------------------------------------------------------
+ * Neuropipe dual-theme color system (Linear-calibrated).
+ *
+ * Layer 1 (bottom): raw per-theme values on :root / [data-theme="light"].
+ *   Dark surfaces anchor to Linear's production ramp; the darkness floor is
+ *   Linear-strict: nothing is ever darker than #08090a.
+ * Layer 2: @theme inline bridges every token to Tailwind utilities, so the
+ *   existing bg-ink-* / border-ink-* / text-* classes resolve the vars at
+ *   runtime and flip with [data-theme]. Raw --* vars (NOT --color-*) are the
+ *   canonical reference for hand-written CSS and JS inline styles, because
+ *   @theme inline does not emit --color-* custom properties.
+ * ------------------------------------------------------------------------- */
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* graphite scale */
-  --color-ink-1000: #050506;
-  --color-ink-950: #08080a;
-  --color-ink-900: #0c0c0e;
-  --color-ink-850: #101012;
-  --color-ink-800: #141417;
-  --color-ink-750: #17171b;
-  --color-ink-700: #1c1c21;
-  --color-ink-650: #232329;
-  --color-ink-600: #2b2b32;
-  --color-ink-500: #3a3a43;
-  --color-ink-400: #55555f;
-  --color-ink-300: #7c7c88;
-  --color-ink-200: #a1a1ad;
-  --color-ink-100: #c9c9d2;
-  --color-ink-50: #ecedf1;
-
-  --color-seam: #1a1a1f;
-
   --radius-panel: 10px;
+}
+
+@theme inline {
+  /* neutral ramp — role-stable steps, per-theme values (see theme blocks) */
+  --color-ink-1000: var(--ink-1000);
+  --color-ink-950: var(--ink-950);
+  --color-ink-900: var(--ink-900);
+  --color-ink-850: var(--ink-850);
+  --color-ink-800: var(--ink-800);
+  --color-ink-750: var(--ink-750);
+  --color-ink-700: var(--ink-700);
+  --color-ink-650: var(--ink-650);
+  --color-ink-600: var(--ink-600);
+  --color-ink-500: var(--ink-500);
+  --color-ink-400: var(--ink-400);
+  --color-ink-300: var(--ink-300);
+  --color-ink-200: var(--ink-200);
+  --color-ink-100: var(--ink-100);
+  --color-ink-50: var(--ink-50);
+  --color-ink-25: var(--ink-25);
+
+  /* hairline separator */
+  --color-seam: var(--seam);
+
+  /* foreground tokens — text never rides the neutral ramp */
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-onEmphasis: var(--fg-onEmphasis);
+
+  /* focus / selection ring (monochrome accent stays; ring is dedicated) */
+  --color-ring: var(--ring);
+
+  /* status — Linear production hexes; -fg variants are text-safe */
+  --color-success: var(--status-success);
+  --color-success-fg: var(--status-success-fg);
+  --color-warning: var(--status-warning);
+  --color-warning-fg: var(--status-warning-fg);
+  --color-danger: var(--status-danger);
+  --color-danger-fg: var(--status-danger-fg);
+  --color-info: var(--status-info);
+  --color-info-fg: var(--status-info-fg);
+  --color-teal: var(--status-teal);
+  --color-teal-fg: var(--status-teal-fg);
+  --color-orange: var(--status-orange);
+  --color-orange-fg: var(--status-orange-fg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Theme: DARK (default) — Linear strict
+ * floor #08090a · panels #0f1011 · borders #23252a/#34343a · text #f7f8f8…
+ * ------------------------------------------------------------------------- */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* neutral ramp */
+  --ink-1000: #08090a; /* app body — the darkness floor */
+  --ink-950: #0b0c0d; /* wells, pipeline canvas */
+  --ink-900: #0f1011; /* panels, overlays */
+  --ink-850: #141516; /* cards, inputs */
+  --ink-800: #17181a; /* input focus bg, hover fills */
+  --ink-750: #191a1b; /* hover */
+  --ink-700: #1c1c1f; /* borders, solid buttons */
+  --ink-650: #232326; /* overlay borders, scrollbar thumb */
+  --ink-600: #28282c; /* borders, scrollbar */
+  --ink-500: #34343a; /* strong borders, faint dots */
+  --ink-400: #3e3e44; /* input focus borders */
+  --ink-300: #62666d; /* subtle rings / icons */
+  --ink-200: #8a8f98; /* selection rings */
+  --ink-100: #c6cbd4; /* progress fills, running dots */
+  --ink-50: #f7f8f8; /* emphasis: primary buttons, running dots, toggle-on */
+  --ink-25: #ffffff; /* emphasis hover */
+
+  --seam: #1d1e20;
+
+  /* foreground */
+  --fg: #f7f8f8;
+  --fg-muted: #d0d6e0;
+  --fg-subtle: #8a8f98;
+  --fg-faint: #62666d;
+  --fg-onEmphasis: #08090a;
+
+  /* ring */
+  --ring: #8a8f98;
+
+  /* status (Linear hexes; -fg = identical in dark, all pass AA on panels) */
+  --status-success: #27a644;
+  --status-success-fg: #27a644;
+  --status-warning: #f0bf00;
+  --status-warning-fg: #f0bf00;
+  --status-danger: #eb5757;
+  --status-danger-fg: #eb5757;
+  --status-info: #4ea7fc;
+  --status-info-fg: #4ea7fc;
+  --status-teal: #00b8cc;
+  --status-teal-fg: #00b8cc;
+  --status-orange: #fc7840;
+  --status-orange-fg: #fc7840;
+
+  /* selection + canvas chrome */
+  --selection-bg: rgba(255, 255, 255, 0.15);
+  --canvas-grid: #212127;
+  --canvas-vignette: rgba(0, 0, 0, 0.55);
+  --board-a: #17171b;
+  --board-b: #0c0c0e;
+  --board-edge: #050506;
+  --board-inset: rgba(255, 255, 255, 0.035);
+
+  /* pin data-type language (dot = base, strong = hover/label, deep = edge) */
+  --pin-exec: #c9c9d2;
+  --pin-exec-strong: #ecedf1;
+  --pin-exec-deep: #7c7c88;
+  --pin-tool: #818cf8;
+  --pin-tool-strong: #a5b4fc;
+  --pin-tool-deep: #4f46e5;
+  --pin-text: #f472b6;
+  --pin-text-strong: #f9a8d4;
+  --pin-text-deep: #db2777;
+  --pin-number: #38bdf8;
+  --pin-number-strong: #7dd3fc;
+  --pin-number-deep: #0284c7;
+  --pin-boolean: #f87171;
+  --pin-boolean-strong: #fca5a5;
+  --pin-boolean-deep: #dc2626;
+  --pin-array: #a78bfa;
+  --pin-array-strong: #c4b5fd;
+  --pin-array-deep: #7c3aed;
+  --pin-map: #fb923c;
+  --pin-map-strong: #fdba74;
+  --pin-map-deep: #ea580c;
+  --pin-object: #34d399;
+  --pin-object-strong: #6ee7b7;
+  --pin-object-deep: #059669;
+  --pin-any: #94a3b8;
+  --pin-any-strong: #cbd5e1;
+  --pin-any-deep: #64748b;
+
+  /* decorative hues — comment cards & group frames */
+  --hue-slate: #55555f;
+  --hue-slate-text: #c9c9d2;
+  --hue-slate-deep: #3a3a43;
+  --hue-slate-card: rgba(20, 20, 23, 0.85);
+  --hue-violet: #7c3aed;
+  --hue-violet-text: #c4b5fd;
+  --hue-violet-deep: #6d28d9;
+  --hue-emerald: #059669;
+  --hue-emerald-text: #a7f3d0;
+  --hue-emerald-deep: #047857;
+  --hue-amber: #ea580c;
+  --hue-amber-text: #fdba74;
+  --hue-amber-deep: #b45309;
+  --hue-sky: #0284c7;
+  --hue-sky-text: #7dd3fc;
+  --hue-sky-deep: #0369a1;
+  --hue-rose: #e11d48;
+  --hue-rose-text: #fda4af;
+  --hue-rose-deep: #be123c;
+
+  /* code highlighting (drives hljs + Monaco; mirrors pin-type hues) */
+  --code-bg: #0c0c0e;
+  --code-fg: #c9c9d2;
+  --code-comment: #55555f;
+  --code-keyword: #c4b5fd;
+  --code-string: #f9a8d4;
+  --code-number: #7dd3fc;
+  --code-function: #6ee7b7;
+  --code-type: #6ee7b7;
+  --code-attr: #fdba74;
+  --code-literal: #7dd3fc;
+  --code-operator: #94a3b8;
+  --code-punctuation: #7c7c88;
+  --code-tag: #f87171;
+  --code-add: #34d399;
+  --code-del: #fb7185;
+  --code-line-highlight: #ffffff06;
+  --code-selection: #ffffff18;
+}
+
+/* ---------------------------------------------------------------------------
+ * Theme: LIGHT — Linear light ramp mirrored onto the same roles
+ * ------------------------------------------------------------------------- */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* neutral ramp (emphasis tokens invert: 50/25 become near-black) */
+  --ink-1000: #f4f4f5;
+  --ink-950: #f0f0f0;
+  --ink-900: #ffffff;
+  --ink-850: #f8f8f8;
+  --ink-800: #f4f4f4;
+  --ink-750: #f0f0f0;
+  --ink-700: #eeedef;
+  --ink-650: #e9e8ea;
+  --ink-600: #e4e2e4;
+  --ink-500: #dcdbdd;
+  --ink-400: #c9c9cd;
+  --ink-300: #86848d;
+  --ink-200: #6f6e77;
+  --ink-100: #3c4149;
+  --ink-50: #282a30;
+  --ink-25: #16171c;
+
+  --seam: #e9e8ea;
+
+  /* foreground */
+  --fg: #282a30;
+  --fg-muted: #3c4149;
+  --fg-subtle: #6f6e77;
+  --fg-faint: #86848d;
+  --fg-onEmphasis: #ffffff;
+
+  /* ring */
+  --ring: #6f6e77;
+
+  /* status solids stay Linear-exact; -fg darkens for AA text on white */
+  --status-success: #27a644;
+  --status-success-fg: #1a7f37;
+  --status-warning: #f0bf00;
+  --status-warning-fg: #806600;
+  --status-danger: #eb5757;
+  --status-danger-fg: #cc3a3a;
+  --status-info: #4ea7fc;
+  --status-info-fg: #1173d4;
+  --status-teal: #00b8cc;
+  --status-teal-fg: #0e7490;
+  --status-orange: #fc7840;
+  --status-orange-fg: #c25418;
+
+  /* selection + canvas chrome */
+  --selection-bg: rgba(0, 0, 0, 0.1);
+  --canvas-grid: #e0e0e6;
+  --canvas-vignette: rgba(0, 0, 0, 0.08);
+  --board-a: #ffffff;
+  --board-b: #f8f8f8;
+  --board-edge: #d6d6db;
+  --board-inset: rgba(255, 255, 255, 0.8);
+
+  /* pin data-type language — dots deepen, edges lighten */
+  --pin-exec: #565961;
+  --pin-exec-strong: #3c4149;
+  --pin-exec-deep: #8a8f98;
+  --pin-tool: #4f46e5;
+  --pin-tool-strong: #4338ca;
+  --pin-tool-deep: #818cf8;
+  --pin-text: #db2777;
+  --pin-text-strong: #be185d;
+  --pin-text-deep: #f472b6;
+  --pin-number: #0284c7;
+  --pin-number-strong: #0369a1;
+  --pin-number-deep: #38bdf8;
+  --pin-boolean: #dc2626;
+  --pin-boolean-strong: #b91c1c;
+  --pin-boolean-deep: #f87171;
+  --pin-array: #7c3aed;
+  --pin-array-strong: #6d28d9;
+  --pin-array-deep: #a78bfa;
+  --pin-map: #ea580c;
+  --pin-map-strong: #c2410c;
+  --pin-map-deep: #fb923c;
+  --pin-object: #059669;
+  --pin-object-strong: #047857;
+  --pin-object-deep: #34d399;
+  --pin-any: #64748b;
+  --pin-any-strong: #475569;
+  --pin-any-deep: #94a3b8;
+
+  /* decorative hues — deepen for light canvases */
+  --hue-slate: #6f6e77;
+  --hue-slate-text: #3c4149;
+  --hue-slate-deep: #dcdbdd;
+  --hue-slate-card: rgba(255, 255, 255, 0.92);
+  --hue-violet: #7c3aed;
+  --hue-violet-text: #6d28d9;
+  --hue-violet-deep: #5b21b6;
+  --hue-emerald: #059669;
+  --hue-emerald-text: #047857;
+  --hue-emerald-deep: #065f46;
+  --hue-amber: #ea580c;
+  --hue-amber-text: #b45309;
+  --hue-amber-deep: #92400e;
+  --hue-sky: #0284c7;
+  --hue-sky-text: #0369a1;
+  --hue-sky-deep: #075985;
+  --hue-rose: #e11d48;
+  --hue-rose-text: #be123c;
+  --hue-rose-deep: #9f1239;
+
+  /* code highlighting */
+  --code-bg: #f8f8f8;
+  --code-fg: #282a30;
+  --code-comment: #6f6e77;
+  --code-keyword: #6d28d9;
+  --code-string: #b83280;
+  --code-number: #0369a1;
+  --code-function: #047857;
+  --code-type: #0e7490;
+  --code-attr: #b45309;
+  --code-literal: #0369a1;
+  --code-operator: #64748b;
+  --code-punctuation: #6f6e77;
+  --code-tag: #c02d2d;
+  --code-add: #1a7f37;
+  --code-del: #cc3a3a;
+  --code-line-highlight: #00000006;
+  --code-selection: #00000018;
 }
 
 @layer base {
@@ -36,8 +336,8 @@
 
   body {
     margin: 0;
-    background: var(--color-ink-1000);
-    color: var(--color-ink-100);
+    background: var(--ink-1000);
+    color: var(--fg);
     font-family: var(--font-sans);
     font-feature-settings: "cv02", "cv03", "cv04", "ss01";
     -webkit-font-smoothing: antialiased;
@@ -46,7 +346,7 @@
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-ink-600) transparent;
+    scrollbar-color: var(--ink-600) transparent;
   }
 
   ::-webkit-scrollbar {
@@ -57,13 +357,13 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-ink-650);
+    background: var(--ink-650);
     border: 2.5px solid transparent;
     background-clip: content-box;
     border-radius: 99px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-ink-500);
+    background: var(--ink-500);
     background-clip: content-box;
   }
 
@@ -82,12 +382,86 @@
   }
 
   ::selection {
-    background: #ffffff26;
+    background: var(--selection-bg);
   }
 }
 
 @utility seam-x {
-  box-shadow: inset 0 1px 0 0 var(--color-seam);
+  box-shadow: inset 0 1px 0 0 var(--seam);
+}
+
+/* ---------------------------------------------------------------------------
+ * highlight.js — themed token colors (single palette with Monaco, mirrors
+ * the pin data-type hue language; replaces the github-dark.css import)
+ * ------------------------------------------------------------------------- */
+.hljs {
+  color: var(--code-fg);
+  background: transparent;
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--code-comment);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-meta-keyword,
+.hljs-doctag,
+.hljs-template-tag {
+  color: var(--code-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-meta-string {
+  color: var(--code-string);
+}
+.hljs-number,
+.hljs-literal {
+  color: var(--code-number);
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_ {
+  color: var(--code-function);
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title {
+  color: var(--code-type);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params {
+  color: var(--code-attr);
+}
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-operator {
+  color: var(--code-operator);
+}
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-tag,
+.hljs-name {
+  color: var(--code-tag);
+}
+.hljs-meta {
+  color: var(--code-punctuation);
+}
+.hljs-addition {
+  color: var(--code-add);
+}
+.hljs-deletion {
+  color: var(--code-del);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
 }
 
 /* animated dashes on execution edges */
@@ -166,12 +540,12 @@
 }
 @keyframes pulse-ring {
   0% {
-    box-shadow: 0 0 0 0 rgb(52 211 153 / 0.35);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-success) 35%, transparent);
   }
   70% {
-    box-shadow: 0 0 0 5px rgb(52 211 153 / 0);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--status-success) 0%, transparent);
   }
   100% {
-    box-shadow: 0 0 0 0 rgb(52 211 153 / 0);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-success) 0%, transparent);
   }
 }

@@ -149,11 +149,11 @@ export function DocsView({
           <div className="mt-3 space-y-3">
             {searchResults ? (
               <>
-                <p className="px-1.5 pb-1 text-[10px] font-medium tracking-[0.09em] text-ink-500 uppercase">
+                <p className="px-1.5 pb-1 text-[10px] font-medium tracking-[0.09em] text-fg-faint uppercase">
                   {t("common.search")}
                 </p>
                 {searchResults.length === 0 && (
-                  <p className="px-1.5 py-2 text-[11.5px] text-ink-500">{t("library.noMatches")}</p>
+                  <p className="px-1.5 py-2 text-[11.5px] text-fg-faint">{t("library.noMatches")}</p>
                 )}
                 {searchResults.map((hit) => (
                   <button
@@ -167,8 +167,8 @@ export function DocsView({
                       selectedId === hit.document.id ? "bg-ink-750" : "hover:bg-ink-850",
                     )}
                   >
-                    <span className="block truncate text-[12px] text-ink-100">{hit.document.title}</span>
-                    <span className="mt-[2px] line-clamp-2 block text-[10.5px] leading-snug text-ink-500">
+                    <span className="block truncate text-[12px] text-fg">{hit.document.title}</span>
+                    <span className="mt-[2px] line-clamp-2 block text-[10.5px] leading-snug text-fg-faint">
                       {hit.excerpt}
                     </span>
                   </button>
@@ -186,11 +186,11 @@ export function DocsView({
                       <Icon
                         name="ChevronRight"
                         className={cn(
-                          "h-2.5 w-2.5 shrink-0 text-ink-600 transition-transform",
+                          "h-2.5 w-2.5 shrink-0 text-fg-faint transition-transform",
                           !isCollapsed && "rotate-90",
                         )}
                       />
-                      <span className="text-[10px] font-medium tracking-[0.09em] text-ink-500 uppercase">
+                      <span className="text-[10px] font-medium tracking-[0.09em] text-fg-faint uppercase">
                         {group.label}
                       </span>
                     </button>
@@ -202,8 +202,8 @@ export function DocsView({
                           className={cn(
                             "block w-full truncate rounded-md px-2 py-[5px] pl-5 text-left text-[12px] transition",
                             selectedId === doc.id
-                              ? "bg-ink-750 text-ink-50"
-                              : "text-ink-400 hover:bg-ink-850 hover:text-ink-100",
+                              ? "bg-ink-750 text-fg"
+                              : "text-fg-subtle hover:bg-ink-850 hover:text-fg",
                           )}
                         >
                           {doc.title}
@@ -219,8 +219,8 @@ export function DocsView({
         <article ref={articleRef} className="fade-in min-w-0 flex-1 overflow-y-auto px-7 py-6">
           {document ? (
             <div className="mx-auto max-w-[640px] pb-16">
-              <p className="font-mono text-[11px] text-ink-500">{document.category.join(" / ")}</p>
-              <h1 className="mt-2 text-[22px] font-semibold tracking-tight text-ink-50">{document.title}</h1>
+              <p className="font-mono text-[11px] text-fg-faint">{document.category.join(" / ")}</p>
+              <h1 className="mt-2 text-[22px] font-semibold tracking-tight text-fg">{document.title}</h1>
 
               {/* doc content is authored markdown shipped with the app */}
               <MarkdownBody markdown={document.markdown} />
@@ -231,7 +231,7 @@ export function DocsView({
         </article>
 
         <aside className="hidden w-[190px] shrink-0 overflow-y-auto border-l border-seam p-3.5 xl:block">
-          <p className="mb-2 text-[10px] font-medium tracking-[0.09em] text-ink-500 uppercase">{t("docs.onThisPage")}</p>
+          <p className="mb-2 text-[10px] font-medium tracking-[0.09em] text-fg-faint uppercase">{t("docs.onThisPage")}</p>
           {outline.map((item) => (
             <a
               key={item.id}
@@ -241,7 +241,7 @@ export function DocsView({
                 articleRef.current?.querySelector(`#${CSS.escape(item.id)}`)?.scrollIntoView({ block: "start" });
               }}
               className={cn(
-                "block py-[3px] text-[11.5px] text-ink-400 transition hover:text-ink-50",
+                "block py-[3px] text-[11.5px] text-fg-subtle transition hover:text-fg",
                 item.level === 3 && "pl-3",
               )}
             >
@@ -302,7 +302,7 @@ function childText(children: unknown): string {
 
 function MarkdownBody({ markdown }: { markdown: string }) {
   return (
-    <div className="mt-4 space-y-3 text-[13px] leading-relaxed text-ink-200 [&_a]:text-sky-300 [&_blockquote]:border-l-2 [&_blockquote]:border-ink-600 [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-ink-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:text-[17px] [&_h1]:font-semibold [&_h1]:text-ink-50 [&_h2]:mt-5 [&_h2]:border-b [&_h2]:border-seam [&_h2]:pb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:text-ink-50 [&_h3]:mt-4 [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:text-ink-100 [&_li]:ml-4 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-ink-700 [&_pre]:bg-ink-950/60 [&_pre]:p-3 [&_table]:w-full [&_td]:border-t [&_td]:border-seam [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left">
+    <div className="mt-4 space-y-3 text-[13px] leading-relaxed text-fg-muted [&_a]:text-info-fg [&_blockquote]:border-l-2 [&_blockquote]:border-ink-600 [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-ink-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_h1]:text-[17px] [&_h1]:font-semibold [&_h1]:text-fg [&_h2]:mt-5 [&_h2]:border-b [&_h2]:border-seam [&_h2]:pb-1 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:text-fg [&_h3]:mt-4 [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:text-fg [&_li]:ml-4 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-ink-700 [&_pre]:bg-ink-950/60 [&_pre]:p-3 [&_table]:w-full [&_td]:border-t [&_td]:border-seam [&_td]:px-2 [&_td]:py-1 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}

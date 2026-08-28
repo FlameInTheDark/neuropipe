@@ -13,41 +13,61 @@ import type { EditorApi } from "@/features/graph/PipelineEditor";
 import { ASSIGNABLE_PIN_TYPES, pinColor } from "../lib/pins";
 import { Toggle } from "./ui";
 import { control } from "./primitives/styles";
+import { useTheme, useThemeStore, type Theme } from "../stores/theme";
 import { SQL_PIN_ID, buildSqlPayload, parseSqlParams, type SqlParamRow } from "@/lib/sql-params";
 import { TypeSpecField, specTopToken, tokenToPinDataType } from "./TypeSpecField";
 
-/* ---- monaco dark theme ---- */
-loader.init().then((monaco) => {
-  monaco.editor.defineTheme("neuropipe", {
-    base: "vs-dark",
+/* ---- monaco themes (single source of truth: the --code-* vars in index.css) ---- */
+
+export function monacoThemeName(theme: Theme): string {
+  return theme === "light" ? "neuropipe-light" : "neuropipe";
+}
+
+function defineMonacoTheme(monaco: typeof import("monaco-editor")): void {
+  const style = getComputedStyle(document.documentElement);
+  const raw = (name: string) => style.getPropertyValue(name).trim();
+  const hex = (name: string) => raw(name).replace(/^#/, "");
+  const light = useThemeStore.getState().theme === "light";
+  monaco.editor.defineTheme(monacoThemeName(light ? "light" : "dark"), {
+    base: light ? "vs" : "vs-dark",
     inherit: true,
     rules: [
-      { token: "comment", foreground: "55555f", fontStyle: "italic" },
-      { token: "keyword", foreground: "c4b5fd" },
-      { token: "string", foreground: "f9a8d4" },
-      { token: "number", foreground: "7dd3fc" },
-      { token: "type", foreground: "6ee7b7" },
-      { token: "identifier", foreground: "c9c9d2" },
-      { token: "delimiter", foreground: "7c7c88" },
-      { token: "operator", foreground: "94a3b8" },
+      { token: "comment", foreground: hex("--code-comment"), fontStyle: "italic" },
+      { token: "keyword", foreground: hex("--code-keyword") },
+      { token: "string", foreground: hex("--code-string") },
+      { token: "number", foreground: hex("--code-number") },
+      { token: "type", foreground: hex("--code-type") },
+      { token: "identifier", foreground: hex("--code-fg") },
+      { token: "delimiter", foreground: hex("--code-punctuation") },
+      { token: "operator", foreground: hex("--code-operator") },
     ],
     colors: {
-      "editor.background": "#0c0c0e",
-      "editor.foreground": "#c9c9d2",
-      "editor.lineHighlightBackground": "#ffffff06",
-      "editor.selectionBackground": "#ffffff18",
-      "editorLineNumber.foreground": "#3a3a43",
-      "editorLineNumber.activeForeground": "#7c7c88",
-      "editorCursor.foreground": "#ecedf1",
-      "editorGutter.background": "#0c0c0e",
-      "editorWidget.background": "#141417",
-      "editorWidget.border": "#1c1c21",
-      "input.background": "#101012",
-      "input.border": "#1c1c21",
-      focusBorder: "#3a3a43",
-      "list.activeSelectionBackground": "#1c1c21",
-      "list.hoverBackground": "#17171b",
+      "editor.background": raw("--code-bg"),
+      "editor.foreground": raw("--code-fg"),
+      "editor.lineHighlightBackground": raw("--code-line-highlight"),
+      "editor.selectionBackground": raw("--code-selection"),
+      "editorLineNumber.foreground": raw("--fg-faint"),
+      "editorLineNumber.activeForeground": raw("--code-punctuation"),
+      "editorCursor.foreground": raw("--fg"),
+      "editorGutter.background": raw("--code-bg"),
+      "editorWidget.background": raw("--ink-850"),
+      "editorWidget.border": raw("--ink-700"),
+      "input.background": raw("--ink-950"),
+      "input.border": raw("--ink-700"),
+      focusBorder: raw("--ink-400"),
+      "list.activeSelectionBackground": raw("--ink-700"),
+      "list.hoverBackground": raw("--ink-750"),
     },
+  });
+}
+
+loader.init().then((monaco) => {
+  defineMonacoTheme(monaco);
+  monaco.editor.setTheme(monacoThemeName(useThemeStore.getState().theme));
+  /* re-define + switch when the app theme flips */
+  useThemeStore.subscribe(() => {
+    defineMonacoTheme(monaco);
+    monaco.editor.setTheme(monacoThemeName(useThemeStore.getState().theme));
   });
 });
 
@@ -86,6 +106,7 @@ export function CodeEditorModal({
   onChangeSqlParameters?: (next: unknown) => void;
 }) {
   const { t } = useTranslation();
+  const theme = useTheme();
   const [draft, setDraft] = useState(code);
   const [selDB, setSelDB] = useState(database || databases[0]?.value || "");
   /** display name for the selected database id (ids are opaque uuids) */
@@ -206,15 +227,15 @@ export function CodeEditorModal({
       >
         {/* header */}
         <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-seam px-4">
-          <Icon name={kind === "js" ? "Braces" : "Database"} className="h-4 w-4 text-ink-400" />
-          <h2 className="truncate text-[13px] font-semibold text-ink-50">{title}</h2>
+          <Icon name={kind === "js" ? "Braces" : "Database"} className="h-4 w-4 text-fg-subtle" />
+          <h2 className="truncate text-[13px] font-semibold text-fg">{title}</h2>
           {dirty && (
-            <span className="flex items-center gap-1.5 text-[11px] text-amber-400/90">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+            <span className="flex items-center gap-1.5 text-[11px] text-warning-fg/90">
+              <span className="h-1.5 w-1.5 rounded-full bg-warning" />
               {t("common.unsaved")}
             </span>
           )}
-          <span className="ml-1 rounded bg-ink-800 px-1.5 py-px text-[10px] font-medium text-ink-400 uppercase">
+          <span className="ml-1 rounded bg-ink-800 px-1.5 py-px text-[10px] font-medium text-fg-subtle uppercase">
             {kind === "js" ? "JavaScript" : "SQL"}
           </span>
 
@@ -222,7 +243,7 @@ export function CodeEditorModal({
             <Tooltip content={t("codeAssistant.title")} side="bottom">
               <button
                 onClick={() => setAssistantOpen(true)}
-                className="grid h-7 w-7 place-items-center rounded-md text-ink-400 transition hover:bg-ink-800 hover:text-ink-50"
+                className="grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-800 hover:text-fg"
               >
                 <Icon name="Sparkles" className="h-3.5 w-3.5" />
               </button>
@@ -252,7 +273,7 @@ export function CodeEditorModal({
               <Tooltip content={t("sql.run")} hint="⌘↵" side="bottom">
                 <button
                   onClick={() => void runDebug()}
-                  className="ml-1 grid h-7 w-7 place-items-center rounded-md text-ink-400 transition hover:bg-ink-800 hover:text-ink-50"
+                  className="ml-1 grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-800 hover:text-fg"
                 >
                   <Icon name={running ? "Loader2" : "Play"} className={cn("h-3.5 w-3.5", running && "animate-spin")} />
                 </button>
@@ -262,7 +283,7 @@ export function CodeEditorModal({
             <span className="mx-1 h-4 w-px bg-ink-700" />
 
             <Tooltip content={t("common.close")} hint="Esc" side="bottom">
-              <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-md text-ink-400 transition hover:bg-ink-800 hover:text-ink-50">
+              <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-800 hover:text-fg">
                 <Icon name="X" className="h-4 w-4" />
               </button>
             </Tooltip>
@@ -271,18 +292,21 @@ export function CodeEditorModal({
 
         {/* error bar */}
         {error && (
-          <div className="flex h-8 shrink-0 items-center gap-2 border-b border-seam bg-rose-500/10 px-4 text-[11.5px] text-rose-200">
+          <div className="flex h-8 shrink-0 items-center gap-2 border-b border-seam bg-danger/10 px-4 text-[11.5px] text-danger-fg">
             <Icon name="AlertTriangle" className="h-3.5 w-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">{error}</span>
-            <button onClick={() => setError(null)} className="text-rose-300 hover:text-white">
+            <button
+              onClick={() => setError(null)}
+              className="grid h-5 w-5 shrink-0 place-items-center rounded text-danger-fg/80 transition hover:bg-danger/15 hover:text-danger-fg"
+            >
               <Icon name="X" className="h-3 w-3" />
             </button>
           </div>
         )}
 
         {/* hint bar */}
-        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-seam px-4 text-[11px] text-ink-500">
-          <Icon name="Info" className="h-3.5 w-3.5 shrink-0 text-ink-600" />
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-seam px-4 text-[11px] text-fg-faint">
+          <Icon name="Info" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
           {kind === "js"
             ? t("javascript.editorHint")
             : t("sql.pinOverrideHint")}
@@ -294,7 +318,7 @@ export function CodeEditorModal({
             {/* monaco editor */}
             <div className="min-w-0 flex-1">
               <Editor
-                theme="neuropipe"
+                theme={monacoThemeName(theme)}
                 language={kind === "js" ? "javascript" : "sql"}
                 value={draft}
                 onChange={(v) => setDraft(v ?? "")}
@@ -356,7 +380,7 @@ export function CodeEditorModal({
         </div>
 
         {/* footer */}
-        <div className="flex h-9 shrink-0 items-center gap-3 border-t border-seam px-4 text-[10.5px] text-ink-500">
+        <div className="flex h-9 shrink-0 items-center gap-3 border-t border-seam px-4 text-[10.5px] text-fg-faint">
           <span className="font-mono">{stats.lines} lines</span>
           <span className="h-3 w-px bg-ink-700" />
           <span className="font-mono">{stats.chars.toLocaleString()} chars</span>
@@ -364,8 +388,8 @@ export function CodeEditorModal({
           <span className="font-mono uppercase">{kind === "js" ? "JavaScript" : `SQL · ${dbLabel}`}</span>
 
           <div className="ml-auto flex items-center gap-2">
-            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-ink-500">⌘S</kbd>
-            <button onClick={onClose} className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-ink-200 transition hover:bg-ink-750">
+            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-fg-faint">⌘S</kbd>
+            <button onClick={onClose} className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-fg-muted transition hover:bg-ink-750">
               {t("common.cancel")}
             </button>
             <button
@@ -374,8 +398,8 @@ export function CodeEditorModal({
               className={cn(
                 "h-7 rounded-md px-3 text-[11.5px] font-medium transition",
                 dirty && !validating
-                  ? "bg-ink-50 text-ink-950 hover:bg-white"
-                  : "cursor-not-allowed bg-ink-800 text-ink-500",
+                  ? "bg-ink-50 text-fg-onEmphasis hover:bg-ink-25"
+                  : "cursor-not-allowed bg-ink-800 text-fg-faint",
               )}
             >
               {validating ? t("common.saving") : t("javascript.save")}
@@ -411,7 +435,7 @@ function TabBtn({ id, icon, label, active, onClick }: { id: string; icon: string
       onClick={onClick}
       className={cn(
         "flex h-[22px] items-center gap-1.5 rounded px-2 text-[11px] transition",
-        active ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+        active ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
       )}
     >
       <Icon name={icon} className="h-3 w-3" />
@@ -500,12 +524,12 @@ function PinPanel({
       {/* inputs */}
       <div>
         <div className="mb-1.5 flex items-center gap-1.5">
-          <Icon name="LogIn" className="h-3.5 w-3.5 text-ink-500" />
-          <span className="text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">{t("javascript.inputs")}</span>
-          <span className="ml-auto font-mono text-[10px] text-ink-600">{dataIns.length}</span>
+          <Icon name="LogIn" className="h-3.5 w-3.5 text-fg-faint" />
+          <span className="text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{t("javascript.inputs")}</span>
+          <span className="ml-auto font-mono text-[10px] text-fg-faint">{dataIns.length}</span>
           {onPortsChange && kind === "js" && (
             <Tooltip content={t("javascript.add")} side="top">
-              <button onClick={() => addPin("in")} aria-label={t("javascript.add")} className="grid h-5 w-5 place-items-center rounded text-ink-500 hover:bg-ink-750 hover:text-ink-100">
+              <button onClick={() => addPin("in")} aria-label={t("javascript.add")} className="grid h-5 w-5 place-items-center rounded text-fg-faint hover:bg-ink-750 hover:text-fg">
                 <Icon name="Plus" className="h-3 w-3" />
               </button>
             </Tooltip>
@@ -519,7 +543,7 @@ function PinPanel({
         {kind === "sql" ? (
           <>
             {sqlParamRows.length === 0 && (
-              <p className="px-1 text-[11px] text-ink-600">{t("sql.noParameters")}</p>
+              <p className="px-1 text-[11px] text-fg-faint">{t("sql.noParameters")}</p>
             )}
             {sqlParamRows.map((row, i) => (
               <SqlParamPinRow
@@ -532,7 +556,7 @@ function PinPanel({
             ))}
             <button
               onClick={() => commitParams([...sqlParamRows, { name: `param_${sqlParamRows.length + 1}`, label: "", kind: "text", required: false }])}
-              className="mt-2 flex h-6 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11px] text-ink-200 hover:bg-ink-750"
+              className="mt-2 flex h-6 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11px] text-fg-muted hover:bg-ink-750"
             >
               <Icon name="Plus" className="h-3 w-3" />
               {t("sql.addParameter")}
@@ -540,7 +564,7 @@ function PinPanel({
           </>
         ) : (
           <>
-            {dataIns.length === 0 && <p className="px-1 text-[11px] text-ink-600">{t("editor.noDataInputs")}</p>}
+            {dataIns.length === 0 && <p className="px-1 text-[11px] text-fg-faint">{t("editor.noDataInputs")}</p>}
             {dataIns.map((p) => (
               <EditablePin
                 key={p.id}
@@ -558,12 +582,12 @@ function PinPanel({
       {/* outputs */}
       <div>
         <div className="mb-1.5 flex items-center gap-1.5">
-          <Icon name="LogOut" className="h-3.5 w-3.5 text-ink-500" />
-          <span className="text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">{t("javascript.outputs")}</span>
-          <span className="ml-auto font-mono text-[10px] text-ink-600">{dataOuts.length}</span>
+          <Icon name="LogOut" className="h-3.5 w-3.5 text-fg-faint" />
+          <span className="text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{t("javascript.outputs")}</span>
+          <span className="ml-auto font-mono text-[10px] text-fg-faint">{dataOuts.length}</span>
           {kind === "js" && onPortsChange && (
             <Tooltip content={t("javascript.add")} side="top">
-              <button onClick={() => addPin("out")} aria-label={t("javascript.add")} className="grid h-5 w-5 place-items-center rounded text-ink-500 hover:bg-ink-750 hover:text-ink-100">
+              <button onClick={() => addPin("out")} aria-label={t("javascript.add")} className="grid h-5 w-5 place-items-center rounded text-fg-faint hover:bg-ink-750 hover:text-fg">
                 <Icon name="Plus" className="h-3 w-3" />
               </button>
             </Tooltip>
@@ -572,7 +596,7 @@ function PinPanel({
 
         {execOut && <LockedPin port={execOut} />}
 
-        {dataOuts.length === 0 && <p className="px-1 text-[11px] text-ink-600">{t("editor.noDataOutputs")}</p>}
+        {dataOuts.length === 0 && <p className="px-1 text-[11px] text-fg-faint">{t("editor.noDataOutputs")}</p>}
         {dataOuts.map((p) =>
           kind === "js" ? (
             <EditablePin
@@ -618,7 +642,7 @@ function SqlParamPinRow({
           <button
             onClick={() => onInsert?.()}
             aria-label={t("sql.insertPlaceholderHint")}
-            className="min-w-0 flex-1 truncate text-left font-mono text-[11px] text-ink-100 hover:text-ink-50"
+            className="min-w-0 flex-1 truncate text-left font-mono text-[11px] text-fg hover:text-fg"
           >
             {row.name}
           </button>
@@ -630,8 +654,8 @@ function SqlParamPinRow({
             aria-label={t("common.edit")}
             aria-expanded={editing}
             className={cn(
-              "grid h-4 w-4 shrink-0 place-items-center rounded text-ink-700 transition hover:text-ink-100",
-              editing && "bg-ink-750 text-ink-100",
+              "grid h-4 w-4 shrink-0 place-items-center rounded text-fg-faint transition hover:text-fg",
+              editing && "bg-ink-750 text-fg",
             )}
           >
             <Icon name="Pencil" className="h-3 w-3" />
@@ -648,7 +672,7 @@ function SqlParamPinRow({
           <button
             onClick={onRemove}
             aria-label={t("common.delete")}
-            className="grid h-4 w-4 shrink-0 place-items-center rounded text-ink-700 opacity-0 transition group-hover:opacity-100 hover:text-rose-300"
+            className="grid h-4 w-4 shrink-0 place-items-center rounded text-fg-faint opacity-0 transition group-hover:opacity-100 hover:text-danger-fg"
           >
             <Icon name="X" className="h-3 w-3" />
           </button>
@@ -661,15 +685,15 @@ function SqlParamPinRow({
             value={row.name}
             placeholder={t("sql.parameterName")}
             onChange={(e) => onPatch({ name: e.target.value })}
-            className="h-5 w-full rounded border border-ink-700 bg-ink-900 px-1.5 font-mono text-[11px] text-ink-100"
+            className="h-5 w-full rounded border border-ink-700 bg-ink-900 px-1.5 font-mono text-[11px] text-fg"
           />
           <input
             value={row.label}
             placeholder={t("sql.parameterLabel")}
             onChange={(e) => onPatch({ label: e.target.value })}
-            className="h-5 w-full rounded border border-ink-700 bg-ink-900 px-1.5 text-[11px] text-ink-200"
+            className="h-5 w-full rounded border border-ink-700 bg-ink-900 px-1.5 text-[11px] text-fg-muted"
           />
-          <span className="flex items-center gap-1.5 text-[10px] text-ink-400">
+          <span className="flex items-center gap-1.5 text-[10px] text-fg-subtle">
             {t("sql.required")}
             <Toggle on={row.required} onChange={(v) => onPatch({ required: v })} />
           </span>
@@ -683,17 +707,17 @@ function LockedPin({ port, children, hint }: { port: Port; children?: React.Reac
   return (
     <div className="mb-1 flex flex-wrap items-center gap-1.5 rounded px-1.5 py-[3px]">
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: pinColor(port.dataType) }} />
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-200">{port.label || port.id}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-muted">{port.label || port.id}</span>
       {hint ? (
         <Tooltip content={hint} side="top">
-          <Icon name="Lock" className="h-3 w-3 shrink-0 cursor-help text-ink-500" />
+          <Icon name="Lock" className="h-3 w-3 shrink-0 cursor-help text-fg-faint" />
         </Tooltip>
       ) : (
-        <Icon name="Lock" className="h-3 w-3 shrink-0 text-ink-700" />
+        <Icon name="Lock" className="h-3 w-3 shrink-0 text-fg-faint" />
       )}
-      <span className="rounded bg-ink-800 px-1 font-mono text-[9px] text-ink-500">{port.dataType ?? "any"}</span>
+      <span className="rounded bg-ink-800 px-1 font-mono text-[9px] text-fg-faint">{port.dataType ?? "any"}</span>
       {children && (
-        <span className="w-full shrink-0 basis-full pl-4 text-[10px] leading-snug text-ink-600">{children}</span>
+        <span className="w-full shrink-0 basis-full pl-4 text-[10px] leading-snug text-fg-faint">{children}</span>
       )}
     </div>
   );
@@ -745,14 +769,14 @@ function EditablePin({
               setEditing(false);
             }
           }}
-          className="min-w-0 flex-1 rounded bg-ink-850 px-1 py-[1px] font-mono text-[11px] text-ink-50 outline-none ring-1 ring-ink-500"
+          className="min-w-0 flex-1 rounded bg-ink-850 px-1 py-[1px] font-mono text-[11px] text-fg outline-none ring-1 ring-ring/60"
         />
       ) : (
         <button
           onClick={() => (onInsert ? onInsert() : setEditing(true))}
           onDoubleClick={() => setEditing(true)}
           aria-label={onInsert ? `:${port.label}` : t("library.renameHint")}
-          className="min-w-0 flex-1 truncate text-left font-mono text-[11px] text-ink-100 hover:text-ink-50"
+          className="min-w-0 flex-1 truncate text-left font-mono text-[11px] text-fg hover:text-fg"
         >
           {port.label}
         </button>
@@ -770,7 +794,7 @@ function EditablePin({
         <button
           onClick={onRemove}
           aria-label={t("common.delete")}
-          className="grid h-4 w-4 shrink-0 place-items-center rounded text-ink-700 opacity-0 transition group-hover:opacity-100 hover:text-rose-300"
+          className="grid h-4 w-4 shrink-0 place-items-center rounded text-fg-faint opacity-0 transition group-hover:opacity-100 hover:text-danger-fg"
         >
           <Icon name="X" className="h-3 w-3" />
         </button>
@@ -812,23 +836,23 @@ function SchemaPanel({ db, name, api }: { db: string; name: string; api: Pick<Ed
   return (
     <div className="p-3">
       <div className="mb-2 flex items-center gap-1.5">
-        <Icon name="Database" className="h-3.5 w-3.5 text-ink-500" />
-        <span className="text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">{name}</span>
-        <span className="ml-auto font-mono text-[10px] text-ink-600">{tables.length}</span>
+        <Icon name="Database" className="h-3.5 w-3.5 text-fg-faint" />
+        <span className="text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{name}</span>
+        <span className="ml-auto font-mono text-[10px] text-fg-faint">{tables.length}</span>
         <Tooltip content={t("sql.refreshSchema")} side="top">
           <button
             onClick={() => {
               void api.inspectDatabase(db).then((s) => setTables(s.tables ?? [])).catch(() => setFailed(true));
             }}
             aria-label={t("sql.refreshSchema")}
-            className="grid h-5 w-5 place-items-center rounded text-ink-500 hover:bg-ink-750 hover:text-ink-100"
+            className="grid h-5 w-5 place-items-center rounded text-fg-faint hover:bg-ink-750 hover:text-fg"
           >
             <Icon name="RefreshCw" className="h-3 w-3" />
           </button>
         </Tooltip>
       </div>
 
-      {failed && <p className="px-1 text-[10.5px] text-rose-300">{t("sql.schemaFailed")}</p>}
+      {failed && <p className="px-1 text-[10.5px] text-danger-fg">{t("sql.schemaFailed")}</p>}
 
       {tables.map((tbl) => {
         const open = expanded[tbl.name] ?? false;
@@ -838,20 +862,20 @@ function SchemaPanel({ db, name, api }: { db: string; name: string; api: Pick<Ed
               onClick={() => setExpanded((e) => ({ ...e, [tbl.name]: !e[tbl.name] }))}
               className="flex w-full items-center gap-1.5 rounded px-1 py-[3px] text-left transition hover:bg-ink-850"
             >
-              <Icon name="ChevronRight" className={cn("h-3 w-3 text-ink-600 transition-transform", open && "rotate-90 text-ink-400")} />
-              <Icon name="Table2" className="h-3 w-3 text-ink-500" />
-              <span className="font-mono text-[11px] text-ink-100">{tbl.name}</span>
-              <span className="ml-auto font-mono text-[9px] text-ink-600">{tbl.columns.length}</span>
+              <Icon name="ChevronRight" className={cn("h-3 w-3 text-fg-faint transition-transform", open && "rotate-90 text-fg-subtle")} />
+              <Icon name="Table2" className="h-3 w-3 text-fg-faint" />
+              <span className="font-mono text-[11px] text-fg">{tbl.name}</span>
+              <span className="ml-auto font-mono text-[9px] text-fg-faint">{tbl.columns.length}</span>
             </button>
 
             {open && (
               <div className="ml-[18px] border-l border-ink-800 pl-2">
                 {tbl.columns.map((col) => (
                   <div key={col.name} className="flex w-full items-center gap-1.5 rounded px-1 py-[2px]">
-                    {col.primaryKey && <Icon name="KeyRound" className="h-2.5 w-2.5 shrink-0 text-amber-400/70" />}
+                    {col.primaryKey && <Icon name="KeyRound" className="h-2.5 w-2.5 shrink-0 text-warning-fg/70" />}
                     {!col.primaryKey && <span className="h-2.5 w-2.5 shrink-0" />}
-                    <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-ink-300">{col.name}</span>
-                    <span className="shrink-0 font-mono text-[9px] text-ink-600">{col.dataType}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-fg-subtle">{col.name}</span>
+                    <span className="shrink-0 font-mono text-[9px] text-fg-faint">{col.dataType}</span>
                   </div>
                 ))}
               </div>
@@ -886,16 +910,16 @@ function ResultsPanel({
   return (
     <div className="shrink-0 border-t border-seam bg-ink-900">
       <button onClick={onToggle} className="flex h-8 w-full items-center gap-2 px-4 text-left transition hover:bg-ink-850/60">
-        <Icon name="ChevronRight" className={cn("h-3 w-3 text-ink-500 transition-transform", open && "rotate-90")} />
+        <Icon name="ChevronRight" className={cn("h-3 w-3 text-fg-faint transition-transform", open && "rotate-90")} />
         <Icon
           name={running ? "Loader2" : hasError ? "AlertTriangle" : "Table2"}
-          className={cn("h-3.5 w-3.5", running && "animate-spin text-ink-400", hasError ? "text-rose-400" : "text-ink-500")}
+          className={cn("h-3.5 w-3.5", running && "animate-spin text-fg-subtle", hasError ? "text-danger-fg" : "text-fg-faint")}
         />
-        <span className="text-[11px] font-medium text-ink-200">
+        <span className="text-[11px] font-medium text-fg-muted">
           {running ? t("codeAssistant.thinking") : t("sql.run")}
         </span>
         {!running && result && !hasError && (
-          <span className="text-[10.5px] text-ink-500">
+          <span className="text-[10.5px] text-fg-faint">
             {result.rowsAffected > 0
               ? t("sql.rowsAffected", { count: result.rowsAffected })
               : `${result.rows.length}${result.truncated ? "+" : ""}`}
@@ -907,7 +931,7 @@ function ResultsPanel({
               e.stopPropagation();
               onClose();
             }}
-            className="ml-auto grid h-5 w-5 place-items-center rounded text-ink-500 hover:bg-ink-750 hover:text-ink-100"
+            className="ml-auto grid h-5 w-5 place-items-center rounded text-fg-faint hover:bg-ink-750 hover:text-fg"
           >
             <Icon name="X" className="h-3 w-3" />
           </button>
@@ -917,13 +941,13 @@ function ResultsPanel({
       {open && result && !hasError && (
         <div className="max-h-[220px] overflow-auto border-t border-seam">
           {result.rowsAffected > 0 && result.columns.length === 0 ? (
-            <p className="px-4 py-2 text-[11.5px] text-ink-400">{t("sql.rowsAffected", { count: result.rowsAffected })}</p>
+            <p className="px-4 py-2 text-[11.5px] text-fg-subtle">{t("sql.rowsAffected", { count: result.rowsAffected })}</p>
           ) : (
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-seam">
                   {result.columns.map((c) => (
-                    <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-ink-300">
+                    <th key={c} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10.5px] font-medium text-fg-subtle">
                       {c}
                     </th>
                   ))}
@@ -933,7 +957,7 @@ function ResultsPanel({
                 {result.rows.map((row, i) => (
                   <tr key={i} className="border-b border-seam/60 last:border-b-0 hover:bg-ink-850/60">
                     {result.columns.map((c) => (
-                      <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-ink-200">
+                      <td key={c} className="max-w-[280px] truncate whitespace-nowrap px-3 py-1 font-mono text-[10.5px] text-fg-muted">
                         {format_cell(row[c])}
                       </td>
                     ))}
@@ -941,7 +965,7 @@ function ResultsPanel({
                 ))}
                 {result.rows.length === 0 && (
                   <tr>
-                    <td colSpan={Math.max(result.columns.length, 1)} className="px-3 py-2 text-[11.5px] text-ink-500">
+                    <td colSpan={Math.max(result.columns.length, 1)} className="px-3 py-2 text-[11.5px] text-fg-faint">
                       {t("sql.noResult")}
                     </td>
                   </tr>
@@ -1017,9 +1041,9 @@ function AssistantModal({
       >
         <div className="flex items-center gap-2">
           <Icon name="Sparkles" className="h-4 w-4 text-violet-300" />
-          <h3 className="text-[13px] font-semibold text-ink-50">{t("codeAssistant.title")}</h3>
+          <h3 className="text-[13px] font-semibold text-fg">{t("codeAssistant.title")}</h3>
         </div>
-        <p className="text-[12px] leading-relaxed text-ink-400">{t("codeAssistant.description")}</p>
+        <p className="text-[12px] leading-relaxed text-fg-subtle">{t("codeAssistant.description")}</p>
         <textarea
           rows={4}
           autoFocus
@@ -1031,9 +1055,9 @@ function AssistantModal({
           placeholder={t("codeAssistant.placeholder")}
           className={control.textarea}
         />
-        {error && <p className="text-[11.5px] text-rose-300">{error}</p>}
+        {error && <p className="text-[11.5px] text-danger-fg">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-ink-200 transition hover:bg-ink-750">
+          <button onClick={onClose} className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-fg-muted transition hover:bg-ink-750">
             {t("common.cancel")}
           </button>
           <button
@@ -1042,8 +1066,8 @@ function AssistantModal({
             className={cn(
               "h-7 rounded-md px-3 text-[11.5px] font-medium transition",
               busy || !prompt.trim()
-                ? "cursor-not-allowed bg-ink-800 text-ink-500"
-                : "bg-ink-50 text-ink-950 hover:bg-white",
+                ? "cursor-not-allowed bg-ink-800 text-fg-faint"
+                : "bg-ink-50 text-fg-onEmphasis hover:bg-ink-25",
             )}
           >
             {busy ? t("codeAssistant.thinking") : t("codeAssistant.generate")}

@@ -71,7 +71,7 @@ export function CommandPalette({
         className="pop-in w-[540px] max-w-[92vw] overflow-hidden rounded-xl border border-ink-650 bg-ink-900 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.9)]"
       >
         <div className="flex h-11 items-center gap-2.5 border-b border-seam px-3.5">
-          <Icon name="Search" className="h-4 w-4 text-ink-500" />
+          <Icon name="Search" className="h-4 w-4 text-fg-faint" />
           <input
             ref={inputRef}
             value={q}
@@ -80,15 +80,15 @@ export function CommandPalette({
               setI(0);
             }}
             placeholder={t("palette.search")}
-            className="flex-1 bg-transparent text-[13.5px] text-ink-50 placeholder:text-ink-500"
+            className="flex-1 bg-transparent text-[13.5px] text-fg placeholder:text-fg-faint"
           />
-          <kbd className="rounded border border-ink-700 bg-ink-850 px-1.5 py-0.5 font-mono text-[10px] text-ink-500">
+          <kbd className="rounded border border-ink-700 bg-ink-850 px-1.5 py-0.5 font-mono text-[10px] text-fg-faint">
             esc
           </kbd>
         </div>
         <ul ref={listRef} className="max-h-[320px] overflow-y-auto p-1.5">
           {results.length === 0 && (
-            <li className="px-3 py-6 text-center text-[12.5px] text-ink-500">{t("palette.noMatches")}</li>
+            <li className="px-3 py-6 text-center text-[12.5px] text-fg-faint">{t("palette.noMatches")}</li>
           )}
           {results.map((c, idx) => (
             <li key={c.id}>
@@ -100,19 +100,19 @@ export function CommandPalette({
                 }}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition",
-                  idx === i ? "bg-ink-750 text-ink-50" : "text-ink-200 hover:bg-ink-850",
+                  idx === i ? "bg-ink-750 text-fg" : "text-fg-muted hover:bg-ink-850",
                 )}
               >
                 <span className="grid h-6 w-6 place-items-center rounded-md border border-ink-700 bg-ink-850">
                   <Icon name={c.icon} className="h-3.5 w-3.5" />
                 </span>
                 <span className="text-[13px]">{c.label}</span>
-                <span className="ml-auto text-[11px] text-ink-500">{c.hint ?? c.group}</span>
+                <span className="ml-auto text-[11px] text-fg-faint">{c.hint ?? c.group}</span>
               </button>
             </li>
           ))}
         </ul>
-        <div className="flex items-center gap-3 border-t border-seam px-3 py-1.5 text-[10.5px] text-ink-500">
+        <div className="flex items-center gap-3 border-t border-seam px-3 py-1.5 text-[10.5px] text-fg-faint">
           <span className="flex items-center gap-1">
             <kbd className="rounded border border-ink-700 bg-ink-850 px-1 font-mono">↑↓</kbd>
             {t("palette.navigate")}

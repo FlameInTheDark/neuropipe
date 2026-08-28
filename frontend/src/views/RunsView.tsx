@@ -124,7 +124,7 @@ export function RunsView({ workspace, nav }: { workspace: Workspace; nav: NavApi
       <div className="flex h-full min-h-0">
         <div className="min-w-0 flex-1 overflow-y-auto">
           {loading && runs.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[12px] text-ink-500">{t("common.loading")}</p>
+            <p className="px-4 py-8 text-center text-[12px] text-fg-faint">{t("common.loading")}</p>
           ) : list.length === 0 ? (
             <EmptyState icon="History" title={t("runs.emptyTitle")} hint={t("runs.emptyDescription")} />
           ) : (
@@ -139,29 +139,29 @@ export function RunsView({ workspace, nav }: { workspace: Workspace; nav: NavApi
                 )}
               >
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-[12.5px] font-medium text-ink-100">{r.pipelineName}</span>
+                  <span className="truncate text-[12.5px] font-medium text-fg">{r.pipelineName}</span>
                   <StatusPill status={r.execution.status} />
-                  <span className="ml-auto font-mono text-[10.5px] text-ink-500">
+                  <span className="ml-auto font-mono text-[10.5px] text-fg-faint">
                     {formatDateTime(r.execution.startedAt)}
                   </span>
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="font-mono text-[10.5px] text-ink-500">{r.execution.id}</span>
-                  <span className="text-[10.5px] text-ink-600">·</span>
-                  <span className="truncate text-[10.5px] text-ink-500">{r.triggerLabel}</span>
+                  <span className="font-mono text-[10.5px] text-fg-faint">{r.execution.id}</span>
+                  <span className="text-[10.5px] text-fg-faint">·</span>
+                  <span className="truncate text-[10.5px] text-fg-faint">{r.triggerLabel}</span>
                   {r.execution.executorId && (
                     <span className="inline-flex shrink-0 items-center gap-1 rounded border border-violet-500/30 bg-violet-500/10 px-1 py-px text-[9.5px] font-medium text-violet-300">
                       {t("executors.category")}
                     </span>
                   )}
-                  <span className="ml-auto font-mono text-[10.5px] text-ink-400">{formatDuration(r.ms)}</span>
+                  <span className="ml-auto font-mono text-[10.5px] text-fg-subtle">{formatDuration(r.ms)}</span>
                 </div>
                 <div className="mt-1.5 h-[3px] overflow-hidden rounded-full bg-ink-800">
                   <div
                     className={cn(
                       "h-full rounded-full",
                       r.execution.status === "failed"
-                        ? "bg-rose-400/70"
+                        ? "bg-danger/70"
                         : r.execution.status === "running"
                           ? "bg-ink-100"
                           : "bg-ink-500",
@@ -178,8 +178,8 @@ export function RunsView({ workspace, nav }: { workspace: Workspace; nav: NavApi
           {active ? (
             <div className="fade-in space-y-3">
               <div>
-                <p className="text-[13px] font-semibold text-ink-50">{active.pipelineName}</p>
-                <p className="mt-0.5 font-mono text-[10.5px] text-ink-500">{active.execution.id}</p>
+                <p className="text-[13px] font-semibold text-fg">{active.pipelineName}</p>
+                <p className="mt-0.5 font-mono text-[10.5px] text-fg-faint">{active.execution.id}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -190,28 +190,28 @@ export function RunsView({ workspace, nav }: { workspace: Workspace; nav: NavApi
                   [t("runs.nodes"), String(active.execution.nodeRuns?.length ?? 0)],
                 ].map(([k, v]) => (
                   <div key={k} className="rounded-lg border border-ink-700/80 bg-ink-850/60 px-2.5 py-2">
-                    <p className="text-[10px] tracking-wide text-ink-500 uppercase">{k}</p>
-                    <p className="mt-0.5 truncate text-[12px] capitalize text-ink-100">{v}</p>
+                    <p className="text-[10px] tracking-wide text-fg-faint uppercase">{k}</p>
+                    <p className="mt-0.5 truncate text-[12px] capitalize text-fg">{v}</p>
                   </div>
                 ))}
               </div>
 
               {active.execution.error && (
-                <pre className="max-h-[120px] overflow-auto whitespace-pre-wrap rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-2 font-mono text-[10.5px] text-rose-200">
+                <pre className="max-h-[120px] overflow-auto whitespace-pre-wrap rounded-md border border-danger/20 bg-danger/5 px-2.5 py-2 font-mono text-[10.5px] text-danger-fg">
                   {active.execution.error}
                 </pre>
               )}
 
               <div>
-                <p className="mb-1.5 text-[10.5px] font-medium tracking-[0.09em] text-ink-400 uppercase">
+                <p className="mb-1.5 text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">
                   {t("runs.timeline")}
                 </p>
                 <div className="overflow-hidden rounded-lg border border-ink-700/80">
                   {(active.execution.nodeRuns ?? []).map((step) => (
                     <div key={`${step.nodeId}-${step.startedAt}`} className="flex items-center gap-2 border-b border-seam bg-ink-850/60 px-2.5 py-1.5 last:border-b-0">
                       <DotFor status={step.status} />
-                      <span className="truncate font-mono text-[10.5px] text-ink-200">{step.nodeType || step.nodeId}</span>
-                      <span className="ml-auto font-mono text-[10px] text-ink-500">
+                      <span className="truncate font-mono text-[10.5px] text-fg-muted">{step.nodeType || step.nodeId}</span>
+                      <span className="ml-auto font-mono text-[10px] text-fg-faint">
                         {formatDuration(Math.max(0, Date.parse(step.finishedAt) - Date.parse(step.startedAt)))}
                       </span>
                     </div>
@@ -242,11 +242,11 @@ function DotFor({ status }: { status: string }) {
     <span
       className={cn(
         "h-1.5 w-1.5 shrink-0 rounded-full",
-        status === "completed" && "bg-emerald-400",
+        status === "completed" && "bg-success",
         status === "running" && "bg-ink-100 pulse-ring",
-        status === "failed" && "bg-rose-400",
+        status === "failed" && "bg-danger",
         status === "skipped" && "bg-ink-600",
-        status === "pending" && "bg-amber-400/70",
+        status === "pending" && "bg-warning/70",
         status === "cancelled" && "bg-ink-500",
       )}
     />

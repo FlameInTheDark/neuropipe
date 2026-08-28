@@ -25,8 +25,8 @@ function Item({
       onClick={onClick}
       aria-label={title}
       className={cn(
-        "flex h-full items-center gap-1.5 px-2 text-[11px] text-ink-400 transition hover:bg-ink-850 hover:text-ink-100",
-        !onClick && "cursor-default hover:bg-transparent hover:text-ink-400",
+        "flex h-full items-center gap-1.5 px-2 text-[11px] text-fg-subtle transition hover:bg-ink-850 hover:text-fg",
+        !onClick && "cursor-default hover:bg-transparent hover:text-fg-subtle",
         className,
       )}
     >
@@ -78,7 +78,7 @@ export function StatusBar({
           <Item
             icon={running ? "Loader2" : "Check"}
             spin={running}
-            className={running ? "text-ink-100" : "text-emerald-300/80"}
+            className={running ? "text-fg" : "text-success-fg/80"}
           >
             {running ? t("editor.executingDraft") : t("editor.graphValid")}
           </Item>
@@ -89,12 +89,12 @@ export function StatusBar({
             <>
               <span className="h-3 w-px bg-ink-750" />
               <Item icon="Crosshair">
-                <span className="font-mono text-ink-200">{selected}</span>
+                <span className="font-mono text-fg-muted">{selected}</span>
               </Item>
             </>
           )}
           <div className="ml-auto flex h-full items-center">
-            <Item icon="Magnet" className={snap ? "text-ink-100" : undefined}>
+            <Item icon="Magnet" className={snap ? "text-fg" : undefined}>
               {snap ? t("status.snapOn") : t("status.snapOff")}
             </Item>
             <Item icon="Maximize2" onClick={onFit} title={t("editor.fitGraph")}>
@@ -111,7 +111,7 @@ export function StatusBar({
         </>
       ) : (
         <>
-          <Item icon="Zap" className="text-emerald-300/80">
+          <Item icon="Zap" className="text-success-fg/80">
             {t("status.runtimeReady")}
           </Item>
           <span className="h-3 w-px bg-ink-750" />
@@ -125,7 +125,7 @@ export function StatusBar({
                 <button
                   onClick={() => void desktop.openUpdateRelease().catch(() => undefined)}
                   aria-label={t("titlebar.updateAvailable", { version: update.version ?? "" })}
-                  className="flex h-full items-center gap-1.5 px-2 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-400/10 hover:text-emerald-200"
+                  className="flex h-full items-center gap-1.5 px-2 text-[11px] font-medium text-success-fg transition hover:bg-success/10 hover:text-success-fg"
                 >
                   <Icon name="Download" className="h-3 w-3" />
                   {t("status.updateAvailable")}

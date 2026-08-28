@@ -36,7 +36,7 @@ export function SegmentedControl<T extends string>({
             className={cn(
               "flex shrink-0 items-center gap-1.5 rounded transition",
               size === "sm" ? "h-[22px] px-2 text-[11px]" : "h-6 px-2.5 text-[11.5px]",
-              active ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+              active ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
             )}
           >
             {s.icon && <Icon name={s.icon} className="h-3 w-3 shrink-0" />}

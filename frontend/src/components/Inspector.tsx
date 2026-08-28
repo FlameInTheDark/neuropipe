@@ -27,9 +27,9 @@ import { cn } from "../utils/cn";
 
 function Label({ text, required }: { text: string; required?: boolean }) {
   return (
-    <span className="flex items-center gap-1 text-[11.5px] font-medium text-ink-300">
+    <span className="flex items-center gap-1 text-[11.5px] font-medium text-fg-subtle">
       {text}
-      {required && <span className="text-ink-500">*</span>}
+      {required && <span className="text-fg-faint">*</span>}
     </span>
   );
 }
@@ -56,9 +56,9 @@ function Section({
       >
         <Icon
           name="ChevronRight"
-          className={cn("h-3 w-3 text-ink-500 transition-transform", open && "rotate-90 text-ink-300")}
+          className={cn("h-3 w-3 text-fg-faint transition-transform", open && "rotate-90 text-fg-subtle")}
         />
-        <span className="text-[10.5px] font-medium tracking-[0.09em] text-ink-300 uppercase">{title}</span>
+        <span className="text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">{title}</span>
         <span className="ml-auto flex items-center gap-1">{right}</span>
       </button>
       {open && <div className="px-3 pt-0.5 pb-3">{children}</div>}
@@ -105,7 +105,7 @@ export function Inspector({
             onClick={() => setTab(id)}
             className={cn(
               "flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium transition",
-              tab === id ? "bg-ink-750 text-ink-50" : "text-ink-400 hover:bg-ink-850 hover:text-ink-200",
+              tab === id ? "bg-ink-750 text-fg" : "text-fg-subtle hover:bg-ink-850 hover:text-fg-muted",
             )}
           >
             <Icon name={icon} className="h-3.5 w-3.5" />
@@ -114,7 +114,7 @@ export function Inspector({
         ))}
         <Tooltip content={t("docs.open")} side="bottom">
           <button
-            className="ml-auto grid h-7 w-7 place-items-center rounded-md text-ink-400 transition hover:bg-ink-850 hover:text-ink-100"
+            className="ml-auto grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-850 hover:text-fg"
             aria-label={t("docs.open")}
             onClick={() => api.openDocs(node?.type)}
           >
@@ -223,15 +223,15 @@ function FunctionPortsEditor({
                 className={cn(
                   "flex flex-col items-start gap-1 rounded-md border p-2 text-left transition",
                   active
-                    ? "border-ink-400 bg-ink-750/80 text-ink-50"
-                    : "border-ink-700 bg-ink-850 text-ink-300 hover:border-ink-500 hover:bg-ink-750 hover:text-ink-100",
+                    ? "border-ink-400 bg-ink-750/80 text-fg"
+                    : "border-ink-700 bg-ink-850 text-fg-subtle hover:border-ink-500 hover:bg-ink-750 hover:text-fg",
                 )}
               >
                 <span className="flex items-center gap-1.5">
                   <Icon name={meta.icon} className="h-3 w-3" />
                   <span className="text-[12px] font-medium">{t(meta.labelKey)}</span>
                 </span>
-                <span className="line-clamp-2 text-[10.5px] leading-tight text-ink-500">{t(meta.descKey)}</span>
+                <span className="line-clamp-2 text-[10.5px] leading-tight text-fg-faint">{t(meta.descKey)}</span>
               </button>
             );
           })}
@@ -241,9 +241,9 @@ function FunctionPortsEditor({
       {kind === "tool" && (
         <Section
           title={t(isEntry ? "editor.toolInputsTitle" : "editor.toolOutputsTitle")}
-          right={<span className="font-mono text-[10px] text-ink-500">{editable.length}</span>}
+          right={<span className="font-mono text-[10px] text-fg-faint">{editable.length}</span>}
         >
-          <p className="mb-2 text-[11.5px] leading-relaxed text-ink-500">
+          <p className="mb-2 text-[11.5px] leading-relaxed text-fg-faint">
             {t(isEntry ? "editor.toolInputsHint" : "editor.toolOutputsHint")}
           </p>
           <div className="space-y-2">
@@ -254,10 +254,10 @@ function FunctionPortsEditor({
                     value={p.label}
                     onChange={(e) => rename(p.id, e.target.value)}
                     placeholder={t("sql.parameterName")}
-                    className="h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 font-mono text-[12px] text-ink-100"
+                    className="h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 font-mono text-[12px] text-fg"
                   />
                   {isEntry && (
-                    <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-ink-400">
+                    <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-fg-subtle">
                       {t("sql.required")}
                       <Toggle on={p.required ?? false} onChange={(v) => setRequired(p.id, v)} />
                     </span>
@@ -265,7 +265,7 @@ function FunctionPortsEditor({
                   <button
                     onClick={() => remove(p.id)}
                     aria-label={t("common.delete")}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-500 hover:bg-rose-500/15 hover:text-rose-300"
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-faint hover:bg-danger/15 hover:text-danger-fg"
                   >
                     <Icon name="Trash2" className="h-3.5 w-3.5" />
                   </button>
@@ -285,14 +285,14 @@ function FunctionPortsEditor({
               </div>
             ))}
             {editable.length === 0 && (
-              <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-ink-500">
+              <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-fg-faint">
                 {t(isEntry ? "editor.noInputPins" : "editor.noOutputPins")}
               </p>
             )}
           </div>
           <button
             onClick={add}
-            className="mt-2 flex h-7 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11.5px] text-ink-200 hover:bg-ink-750"
+            className="mt-2 flex h-7 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11.5px] text-fg-muted hover:bg-ink-750"
           >
             <Icon name="Plus" className="h-3.5 w-3.5" />
             {t(isEntry ? "editor.addInputPin" : "editor.addOutputPin")}
@@ -303,7 +303,7 @@ function FunctionPortsEditor({
       {kind !== "tool" && (
         <Section
           title={isEntry ? t("editor.inputPins") : t("editor.outputPins")}
-          right={<span className="font-mono text-[10px] text-ink-500">{editable.length}</span>}
+          right={<span className="font-mono text-[10px] text-fg-faint">{editable.length}</span>}
         >
           <div className="space-y-2">
             {editable.map((p) => (
@@ -312,12 +312,12 @@ function FunctionPortsEditor({
                   <input
                     value={p.label}
                     onChange={(e) => rename(p.id, e.target.value)}
-                    className="h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-ink-100"
+                    className="h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-2 text-[12px] text-fg"
                   />
                   <button
                     onClick={() => remove(p.id)}
                     aria-label={t("common.delete")}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-500 hover:bg-rose-500/15 hover:text-rose-300"
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-faint hover:bg-danger/15 hover:text-danger-fg"
                   >
                     <Icon name="Trash2" className="h-3.5 w-3.5" />
                   </button>
@@ -329,14 +329,14 @@ function FunctionPortsEditor({
               </div>
             ))}
             {editable.length === 0 && (
-              <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-ink-500">
+              <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-fg-faint">
                 {t(isEntry ? "editor.noInputPins" : "editor.noOutputPins")}
               </p>
             )}
           </div>
           <button
             onClick={add}
-            className="mt-2 flex h-7 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11.5px] text-ink-200 hover:bg-ink-750"
+            className="mt-2 flex h-7 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11.5px] text-fg-muted hover:bg-ink-750"
           >
             <Icon name="Plus" className="h-3.5 w-3.5" />
             {t(isEntry ? "editor.addInputPin" : "editor.addOutputPin")}
@@ -489,26 +489,26 @@ function InspectBody({
 
       {/* identity */}
       <div className="flex items-start gap-2.5 border-b border-seam px-3 py-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-100">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg">
           <Icon name={node.icon} className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-[14px] font-semibold text-ink-50">{node.title}</h2>
+            <h2 className="truncate text-[14px] font-semibold text-fg">{node.title}</h2>
             {node.group && <Badge tone="muted">{node.group}</Badge>}
           </div>
-          <p className="mt-0.5 font-mono text-[10.5px] text-ink-500">{node.type}</p>
+          <p className="mt-0.5 font-mono text-[10.5px] text-fg-faint">{node.type}</p>
         </div>
       </div>
 
       {node.summary && (
-        <p className="border-b border-seam px-3 py-2.5 text-[12px] leading-relaxed text-ink-400">{node.summary}</p>
+        <p className="border-b border-seam px-3 py-2.5 text-[12px] leading-relaxed text-fg-subtle">{node.summary}</p>
       )}
 
       {node.lastRun && (
         <div className="border-b border-seam px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-[10.5px] font-medium tracking-[0.09em] text-ink-300 uppercase">
+            <span className="text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">
               {t("editorActions.latestResult")}
             </span>
             <Badge tone={statusTone} className="ml-auto">
@@ -516,7 +516,7 @@ function InspectBody({
             </Badge>
           </div>
           {node.lastRun.error && (
-            <pre className="mt-1.5 max-h-[120px] overflow-auto whitespace-pre-wrap rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-2 font-mono text-[10.5px] leading-[1.6] text-rose-200">
+            <pre className="mt-1.5 max-h-[120px] overflow-auto whitespace-pre-wrap rounded-md border border-danger/20 bg-danger/5 px-2.5 py-2 font-mono text-[10.5px] leading-[1.6] text-danger-fg">
               {node.lastRun.error}
             </pre>
           )}
@@ -532,7 +532,7 @@ function InspectBody({
         />
       )}
 
-      <Section title={t("editor.parameters")} right={<span className="font-mono text-[10px] text-ink-500">{visibleCount(node)}</span>}>
+      <Section title={t("editor.parameters")} right={<span className="font-mono text-[10px] text-fg-faint">{visibleCount(node)}</span>}>
           <div className="space-y-2.5">
             {visibleFieldsOf(node).map((f) => (
               <InspectorField
@@ -570,8 +570,8 @@ function InspectBody({
                   i > 0 && "border-t border-seam",
                 )}
               >
-                <span className="font-mono text-[11px] text-ink-100">{o.key}</span>
-                <span className="text-[10.5px] text-ink-500">{o.type}</span>
+                <span className="font-mono text-[11px] text-fg">{o.key}</span>
+                <span className="text-[10.5px] text-fg-faint">{o.type}</span>
               </div>
             ))}
           </div>
@@ -585,10 +585,10 @@ function InspectBody({
             [t("editor.output"), node.outputs],
           ].map(([label, ports]) => (
             <div key={label as string}>
-              <p className="mb-1 text-[10.5px] tracking-wide text-ink-500 uppercase">{label as string}</p>
+              <p className="mb-1 text-[10.5px] tracking-wide text-fg-faint uppercase">{label as string}</p>
               <ul className="space-y-1">
                 {(ports as GraphNode["inputs"]).map((p) => (
-                  <li key={p.id} className="flex items-center gap-1.5 text-[11.5px] text-ink-300">
+                  <li key={p.id} className="flex items-center gap-1.5 text-[11.5px] text-fg-subtle">
                     <span
                       className={cn(
                         "h-[6px] w-[6px] shrink-0 border border-ink-500",
@@ -772,7 +772,7 @@ function InspectorField({
       <div className="flex items-center justify-between rounded-md border border-ink-700/70 bg-ink-850 px-2.5 py-[7px]">
         <span className="flex flex-col">
           <Label text={field.label} required={field.required} />
-          <span className="text-[11px] text-ink-500">
+          <span className="text-[11px] text-fg-faint">
             {raw ? t("editor.enabled") : t("editor.disabled")}
           </span>
         </span>
@@ -810,7 +810,7 @@ function InspectorField({
           onChange={(nv) => onChange(fieldKey, nv)}
         />
         {field.key === "pipelineId" && (
-          <span className="mt-1 block text-[10.5px] text-ink-500">{t("editor.pipelinePinOverride")}</span>
+          <span className="mt-1 block text-[10.5px] text-fg-faint">{t("editor.pipelinePinOverride")}</span>
         )}
       </label>
     );
@@ -827,7 +827,7 @@ function InspectorField({
               e.preventDefault();
               onCode();
             }}
-            className="flex items-center gap-1 rounded px-1 py-0.5 text-ink-500 transition hover:bg-ink-750 hover:text-ink-200"
+            className="flex items-center gap-1 rounded px-1 py-0.5 text-fg-faint transition hover:bg-ink-750 hover:text-fg-muted"
           >
             <Icon name="Braces" className="h-3 w-3" />
             <span className="text-[10px]">{t("textEditor.expand")}</span>
@@ -855,7 +855,7 @@ function InspectorField({
               e.preventDefault();
               onExpand(fieldKey, field.label);
             }}
-            className="flex items-center gap-1 rounded px-1 py-0.5 text-ink-500 transition hover:bg-ink-750 hover:text-ink-200"
+            className="flex items-center gap-1 rounded px-1 py-0.5 text-fg-faint transition hover:bg-ink-750 hover:text-fg-muted"
           >
             <Icon name="Expand" className="h-3 w-3" />
             <span className="text-[10px]">{t("textEditor.expand")}</span>
@@ -886,7 +886,7 @@ function InspectorField({
             }}
             className={cn(inputCls, "resize-y leading-relaxed", field.type === "json" && "font-mono text-[11.5px]")}
           />
-          {jsonError && <span className="mt-1 block text-[11px] text-rose-300">{t("variables.defaultInvalidJson")}</span>}
+          {jsonError && <span className="mt-1 block text-[11px] text-danger-fg">{t("variables.defaultInvalidJson")}</span>}
         </>
       ) : field.type === "number" ? (
         <input
@@ -995,7 +995,7 @@ function NamedFieldsEditor({
               value={e.label}
               placeholder={t("editor.fieldName")}
               onChange={(ev) => patch(i, { label: ev.target.value })}
-              className="h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 text-[12px] text-ink-100"
+              className="h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 text-[12px] text-fg"
             />
             <Dropdown
               compact
@@ -1007,7 +1007,7 @@ function NamedFieldsEditor({
             <button
               onClick={() => commit(entries.filter((_, j) => j !== i))}
               aria-label={t("common.delete")}
-              className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-500 hover:bg-rose-500/15 hover:text-rose-300"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-faint hover:bg-danger/15 hover:text-danger-fg"
             >
               <Icon name="Trash2" className="h-3.5 w-3.5" />
             </button>
@@ -1016,18 +1016,18 @@ function NamedFieldsEditor({
             value={secondKey === "path" ? e.path : e.key}
             placeholder={secondLabel}
             onChange={(ev) => patch(i, secondKey === "path" ? { path: ev.target.value } : { key: ev.target.value })}
-            className="h-6 w-full rounded-md border border-ink-700 bg-ink-900 px-2 font-mono text-[11px] text-ink-300"
+            className="h-6 w-full rounded-md border border-ink-700 bg-ink-900 px-2 font-mono text-[11px] text-fg-subtle"
           />
         </div>
       ))}
       {entries.length === 0 && (
-        <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-ink-500">
+        <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-fg-faint">
           {t("editor.noFields")}
         </p>
       )}
       <button
         onClick={() => commit([...entries, { id: `field_${entries.length + 1}`, label: "", path: "", key: "", dataType: "text" }])}
-        className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11.5px] text-ink-200 hover:bg-ink-750"
+        className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11.5px] text-fg-muted hover:bg-ink-750"
       >
         <Icon name="Plus" className="h-3.5 w-3.5" />
         {t("editor.addField")}
@@ -1078,12 +1078,12 @@ function LogBody({
   const timed = log.filter((l) => l.startedAt && l.finishedAt);
 
   const statusColor = (s: string) =>
-    s === "completed" ? "#34d399" : s === "failed" ? "#fb7185" : s === "running" ? "#7dd3fc" : "#55555f";
+    s === "completed" ? "var(--status-success)" : s === "failed" ? "var(--status-danger)" : s === "running" ? "var(--status-info)" : "var(--fg-faint)";
 
   return (
     <div className="fade-in flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex shrink-0 items-center gap-2 border-b border-seam px-3 py-2">
-        <Icon name="Clock" className="h-3.5 w-3.5 text-ink-500" />
+        <Icon name="Clock" className="h-3.5 w-3.5 text-fg-faint" />
         <Dropdown
           compact
           value={selectedExecution}
@@ -1102,7 +1102,7 @@ function LogBody({
         const totalMs = timed.reduce((s, l) => s + l.ms, 0);
         return (
         <div className="shrink-0 border-b border-seam px-3 pb-2 pt-2.5">
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.09em] text-ink-500">{t("editor.timeline")}</p>
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.09em] text-fg-faint">{t("editor.timeline")}</p>
           <div className="relative flex h-7 w-full gap-px overflow-hidden rounded-md bg-ink-950/60">
             {(() => {
               /* sequential waterfall: segments in execution order, width
@@ -1148,7 +1148,7 @@ function LogBody({
               });
             })()}
           </div>
-          <div className="mt-0.5 flex justify-between font-mono text-[9px] text-ink-600">
+          <div className="mt-0.5 flex justify-between font-mono text-[9px] text-fg-faint">
             <span>0ms</span>
             <span>{totalMs > 0 && totalMs < 1 ? "<1ms" : formatDuration(totalMs)}</span>
           </div>
@@ -1159,7 +1159,7 @@ function LogBody({
       {/* log entries */}
       <ul className="min-h-0 flex-1">
         {log.length === 0 && (
-          <p className="px-3 py-6 text-center text-[12px] leading-relaxed text-ink-500">{t("editor.runToInspect")}</p>
+          <p className="px-3 py-6 text-center text-[12px] leading-relaxed text-fg-faint">{t("editor.runToInspect")}</p>
         )}
         {log.map((l) => {
           const isHovered = hoveredEntryId === l.id;
@@ -1187,7 +1187,7 @@ function LogBody({
                   <div className="flex items-center gap-2">
                     <Icon
                       name="ChevronRight"
-                      className={cn("h-3 w-3 shrink-0 text-ink-600 transition-transform", isExpanded && "rotate-90")}
+                      className={cn("h-3 w-3 shrink-0 text-fg-faint transition-transform", isExpanded && "rotate-90")}
                     />
                     <Dot
                       tone={
@@ -1197,14 +1197,14 @@ function LogBody({
                         : "idle"
                       }
                     />
-                    <span className="truncate text-[12.5px] font-medium text-ink-100">{l.node}</span>
+                    <span className="truncate text-[12.5px] font-medium text-fg">{l.node}</span>
                     <span
                       className={cn(
                         "ml-auto font-mono text-[10.5px]",
-                        l.status === "completed" && "text-emerald-300/80",
-                        l.status === "running" && "text-ink-100",
-                        l.status === "skipped" && "text-ink-500",
-                        l.status === "failed" && "text-rose-300",
+                        l.status === "completed" && "text-success-fg/80",
+                        l.status === "running" && "text-fg",
+                        l.status === "skipped" && "text-fg-faint",
+                        l.status === "failed" && "text-danger-fg",
                       )}
                     >
                       {l.ms}ms
@@ -1215,7 +1215,7 @@ function LogBody({
                   <Tooltip content={t("jsonViewer.inspect")} side="left" delay={200}>
                     <button
                       onClick={() => setViewerEntry(l)}
-                      className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-ink-600 opacity-0 transition hover:bg-ink-750 hover:text-ink-50 focus-visible:opacity-100 group-hover:opacity-100"
+                      className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-faint opacity-0 transition hover:bg-ink-750 hover:text-fg focus-visible:opacity-100 group-hover:opacity-100"
                     >
                       <Icon name="Braces" className="h-3.5 w-3.5" />
                     </button>
@@ -1223,7 +1223,7 @@ function LogBody({
                 )}
               </div>
               {l.error && (
-                <pre className="mt-1.5 max-h-[90px] overflow-auto whitespace-pre-wrap rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1.5 font-mono text-[10px] text-rose-200">
+                <pre className="mt-1.5 max-h-[90px] overflow-auto whitespace-pre-wrap rounded-md border border-danger/20 bg-danger/5 px-2 py-1.5 font-mono text-[10px] text-danger-fg">
                   {l.error}
                 </pre>
               )}
@@ -1233,7 +1233,7 @@ function LogBody({
                   {hasData && (
                     <button
                       onClick={() => setViewerEntry(l)}
-                      className="flex h-6 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 text-[10.5px] font-medium text-ink-300 transition hover:border-ink-600 hover:bg-ink-750 hover:text-ink-100"
+                      className="flex h-6 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 text-[10.5px] font-medium text-fg-subtle transition hover:border-ink-600 hover:bg-ink-750 hover:text-fg"
                     >
                       <Icon name="Braces" className="h-3 w-3" />
                       {t("jsonViewer.inspect")}
@@ -1241,22 +1241,22 @@ function LogBody({
                   )}
                   {l.input !== undefined && l.input !== null && (
                     <div>
-                      <p className="mb-0.5 text-[10px] font-medium uppercase tracking-[0.09em] text-ink-500">{t("editor.entryInput")}</p>
-                      <pre className="max-h-[180px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-[10.5px] leading-[1.6] text-ink-300">
+                      <p className="mb-0.5 text-[10px] font-medium uppercase tracking-[0.09em] text-fg-faint">{t("editor.entryInput")}</p>
+                      <pre className="max-h-[180px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-[10.5px] leading-[1.6] text-fg-subtle">
                         {formatJson(l.input)}
                       </pre>
                     </div>
                   )}
                   {l.output !== undefined && l.output !== null && (
                     <div>
-                      <p className="mb-0.5 text-[10px] font-medium uppercase tracking-[0.09em] text-ink-500">{t("editor.entryOutput")}</p>
-                      <pre className="max-h-[180px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-[10.5px] leading-[1.6] text-ink-300">
+                      <p className="mb-0.5 text-[10px] font-medium uppercase tracking-[0.09em] text-fg-faint">{t("editor.entryOutput")}</p>
+                      <pre className="max-h-[180px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-[10.5px] leading-[1.6] text-fg-subtle">
                         {formatJson(l.output)}
                       </pre>
                     </div>
                   )}
                   {!hasData && (
-                    <p className="text-[11px] italic text-ink-600">{t("editor.noEntryData")}</p>
+                    <p className="text-[11px] italic text-fg-faint">{t("editor.noEntryData")}</p>
                   )}
                 </div>
               )}

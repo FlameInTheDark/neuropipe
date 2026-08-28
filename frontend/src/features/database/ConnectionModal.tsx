@@ -217,7 +217,7 @@ export function ConnectionModal({
       <div className="space-y-5 p-4">
         {/* engine picker */}
         <section>
-          <p className="mb-2 text-[10.5px] font-medium tracking-[0.09em] text-ink-400 uppercase">{t("dbnew.engine")}</p>
+          <p className="mb-2 text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">{t("dbnew.engine")}</p>
           <div className={cn("grid gap-2", existing ? "grid-cols-1" : "grid-cols-3")}>
             {DB_ENGINES.map((e) => {
               const active = e.id === driver;
@@ -239,17 +239,17 @@ export function ConnectionModal({
                   <span
                     className={cn(
                       "grid h-8 w-8 shrink-0 place-items-center rounded-lg border",
-                      active ? "border-ink-500 bg-ink-750 text-ink-50" : "border-ink-700 bg-ink-900 text-ink-300",
+                      active ? "border-ink-500 bg-ink-750 text-fg" : "border-ink-700 bg-ink-900 text-fg-subtle",
                     )}
                   >
                     <Icon name={e.icon} className="h-4 w-4" />
                   </span>
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5">
-                      <span className="text-[12.5px] font-medium text-ink-50">{e.name}</span>
-                      {active && <Icon name="Check" className="h-3.5 w-3.5 text-emerald-300" />}
+                      <span className="text-[12.5px] font-medium text-fg">{e.name}</span>
+                      {active && <Icon name="Check" className="h-3.5 w-3.5 text-success-fg" />}
                     </span>
-                    <span className="mt-0.5 line-clamp-2 block text-[10.5px] leading-snug text-ink-500">
+                    <span className="mt-0.5 line-clamp-2 block text-[10.5px] leading-snug text-fg-faint">
                       {t(e.blurbKey)}
                     </span>
                   </span>
@@ -262,7 +262,7 @@ export function ConnectionModal({
         {/* connection details */}
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-[10.5px] font-medium tracking-[0.09em] text-ink-400 uppercase">{t("dbnew.connection")}</p>
+            <p className="text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">{t("dbnew.connection")}</p>
             {!existing && (
               <SegmentedControl
                 value={mode}
@@ -287,7 +287,7 @@ export function ConnectionModal({
           {mode === "file" ? (
             <>
               {!existing && (
-                <label className="flex items-center gap-2 text-[12px] text-ink-300">
+                <label className="flex items-center gap-2 text-[12px] text-fg-subtle">
                   <input
                     type="checkbox"
                     checked={createNewFile}
@@ -304,7 +304,7 @@ export function ConnectionModal({
                   <TextInput value={values.path ?? ""} onChange={(v) => set("path", v)} placeholder={t("databases.pathPlaceholder")} mono />
                   <button
                     onClick={() => void pickFile()}
-                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[11.5px] text-fg-muted transition hover:bg-ink-750"
                   >
                     <Icon name="HardDrive" className="h-3.5 w-3.5" />
                     {t("databases.chooseFile")}
@@ -324,7 +324,7 @@ export function ConnectionModal({
                   />
                   <button
                     onClick={() => void pickDirectory()}
-                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+                    className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[11.5px] text-fg-muted transition hover:bg-ink-750"
                   >
                     <Icon name="HardDrive" className="h-3.5 w-3.5" />
                     {t("databases.chooseDirectory")}
@@ -341,7 +341,7 @@ export function ConnectionModal({
                         value={values[f.key] ?? ""}
                         placeholder={existing?.passwordRef ? t("databases.passwordPlaceholder") : undefined}
                         onChange={(e) => set(f.key, e.target.value)}
-                        className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+                        className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
                       />
                     ) : (
                       <TextInput
@@ -370,13 +370,13 @@ export function ConnectionModal({
                       value={values[f.key] ?? ""}
                       placeholder={existing?.passwordRef ? t("databases.passwordPlaceholder") : undefined}
                       onChange={(e) => set(f.key, e.target.value)}
-                      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+                      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
                     />
                   ) : f.key === "sslmode" ? (
                     <select
                       value={values[f.key] ?? f.default ?? "prefer"}
                       onChange={(e) => set(f.key, e.target.value)}
-                      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2 text-[12.5px] capitalize text-ink-100 focus:border-ink-400 focus:outline-none"
+                      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2 text-[12.5px] capitalize text-fg focus:border-ink-400 focus:outline-none"
                     >
                       {["disable", "prefer", "require", "verify-ca", "verify-full"].map((m) => (
                         <option key={m} value={m}>
@@ -396,7 +396,7 @@ export function ConnectionModal({
                 </Field>
               ))}
               {driver === "redis" && (
-                <label className="col-span-2 flex items-center gap-2 text-[12px] text-ink-300">
+                <label className="col-span-2 flex items-center gap-2 text-[12px] text-fg-subtle">
                   <input
                     type="checkbox"
                     checked={useTLS}
@@ -414,15 +414,15 @@ export function ConnectionModal({
 
         {/* connection string preview */}
         <section>
-          <p className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-medium tracking-[0.09em] text-ink-400 uppercase">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-medium tracking-[0.09em] text-fg-subtle uppercase">
             {t("dbnew.preview")}
             <Tooltip content={t("dbnew.previewHint")} side="top">
-              <Icon name="Info" className="h-3 w-3 cursor-help text-ink-600" />
+              <Icon name="Info" className="h-3 w-3 cursor-help text-fg-faint" />
             </Tooltip>
           </p>
           <div className="flex items-center gap-2 rounded-lg border border-ink-700/80 bg-ink-950/60 px-3 py-2">
-            <Icon name="Cable" className="h-3.5 w-3.5 shrink-0 text-ink-500" />
-            <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-300">{preview}</code>
+            <Icon name="Cable" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+            <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg-subtle">{preview}</code>
           </div>
         </section>
       </div>
@@ -442,10 +442,10 @@ function TestIndicator({
 }) {
   const { t } = useTranslation();
   const map = {
-    idle: { icon: "Zap", text: t("databases.testConnection"), cls: "text-ink-200 hover:bg-ink-750" },
-    testing: { icon: "Loader2", text: t("dbnew.testTesting"), cls: "text-ink-300" },
-    ok: { icon: "Check", text: t("databases.connectionOk"), cls: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" },
-    fail: { icon: "AlertTriangle", text: t("dbnew.testFailed"), cls: "border-rose-500/30 bg-rose-500/10 text-rose-300" },
+    idle: { icon: "Zap", text: t("databases.testConnection"), cls: "text-fg-muted hover:bg-ink-750" },
+    testing: { icon: "Loader2", text: t("dbnew.testTesting"), cls: "text-fg-subtle" },
+    ok: { icon: "Check", text: t("databases.connectionOk"), cls: "border-success/30 bg-success/10 text-success-fg" },
+    fail: { icon: "AlertTriangle", text: t("dbnew.testFailed"), cls: "border-danger/30 bg-danger/10 text-danger-fg" },
   }[state];
 
   return (

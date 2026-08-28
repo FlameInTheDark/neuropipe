@@ -124,7 +124,7 @@ export function SchemaEditor({
   return (
     <div className="space-y-3 rounded-md border border-ink-700 bg-ink-900/30 p-3">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium text-ink-300">{t("editor.responseShape")}</span>
+        <span className="text-xs font-medium text-fg-subtle">{t("editor.responseShape")}</span>
         <Dropdown
           className="w-36 shrink-0"
           value={schema.type}
@@ -135,25 +135,25 @@ export function SchemaEditor({
       {schema.type === "object" ? (
         <>
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-ink-200">{t("editor.fields")}</span>
-            <span className="text-[10px] text-ink-600">{schema.properties.length}</span>
+            <span className="text-xs font-medium text-fg-muted">{t("editor.fields")}</span>
+            <span className="text-[10px] text-fg-faint">{schema.properties.length}</span>
           </div>
           {schema.properties.map((property, index) => (
             <article key={`${property.name}-${index}`} className="rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-600">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-faint">
                   {t("editorExtra.field")} {index + 1}
                 </span>
                 <Button
                   variant="ghost"
                   icon="Trash2"
                   onClick={() => update({ properties: schema.properties.filter((_, current) => current !== index) })}
-                  className="h-6 px-2 text-ink-500 hover:text-rose-300"
+                  className="h-6 px-2 text-fg-faint hover:text-danger-fg"
                 >
                   {t("common.delete")}
                 </Button>
               </div>
-              <label className="block text-[11px] font-medium text-ink-300">
+              <label className="block text-[11px] font-medium text-fg-subtle">
                 {t("editorExtra.fieldName")}
                 <TextInput
                   value={property.name}
@@ -161,17 +161,17 @@ export function SchemaEditor({
                   placeholder={t("editorExtra.exampleFieldName")}
                 />
               </label>
-              <label className="mt-2 block text-[11px] font-medium text-ink-300">
-                {t("editor.guidance")} <span className="font-normal text-ink-600">({t("editor.optional")})</span>
+              <label className="mt-2 block text-[11px] font-medium text-fg-subtle">
+                {t("editor.guidance")} <span className="font-normal text-fg-faint">({t("editor.optional")})</span>
                 <textarea
                   value={property.description}
                   onChange={(event) => updateProperty(index, { description: event.target.value })}
                   placeholder={t("editor.fieldGuidancePlaceholder")}
-                  className="mt-1 min-h-16 w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2.5 py-2 text-xs leading-5 text-ink-100 outline-none placeholder:text-ink-600 transition focus:border-ink-500"
+                  className="mt-1 min-h-16 w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2.5 py-2 text-xs leading-5 text-fg outline-none placeholder:text-fg-faint transition focus:border-ink-500"
                 />
               </label>
               <div className="mt-2 flex items-end justify-between gap-3">
-                <label className="min-w-0 flex-1 text-[11px] font-medium text-ink-300">
+                <label className="min-w-0 flex-1 text-[11px] font-medium text-fg-subtle">
                   {t("editor.valueType")}
                   <Dropdown
                     value={property.type}
@@ -180,7 +180,7 @@ export function SchemaEditor({
                   />
                 </label>
                 <div className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-ink-700 bg-ink-900/50 px-2">
-                  <span className="text-[11px] text-ink-300">{t("editor.required")}</span>
+                  <span className="text-[11px] text-fg-subtle">{t("editor.required")}</span>
                   <Toggle on={property.required} onChange={(required) => updateProperty(index, { required })} />
                 </div>
               </div>
@@ -206,7 +206,7 @@ export function SchemaEditor({
           </Button>
         </>
       ) : (
-        <p className="rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-[11px] leading-4 text-ink-500">
+        <p className="rounded-md border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-[11px] leading-4 text-fg-faint">
           {t("editor.schemaScalarHint", { type: t(schemaTypes.find((s) => s.value === schema.type)?.labelKey ?? "editor.text") })}
         </p>
       )}
@@ -255,26 +255,26 @@ export function RouteOptionsEditor({
 
   return (
     <div className="space-y-3 rounded-md border border-ink-700 bg-ink-900/30 p-3">
-      <p className="text-[11px] leading-4 text-ink-500">{t("editorExtra.optionHelp")}</p>
+      <p className="text-[11px] leading-4 text-fg-faint">{t("editorExtra.optionHelp")}</p>
       {options.map((option, index) => (
         <article key={`${option.id}-${index}`} className="rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-600">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-faint">
                 {t("editorExtra.option")} {index + 1}
               </span>
-              <p className="mt-0.5 text-[10px] text-ink-600">{t("editorExtra.optionCreatesOutput")}</p>
+              <p className="mt-0.5 text-[10px] text-fg-faint">{t("editorExtra.optionCreatesOutput")}</p>
             </div>
             <Button
               variant="ghost"
               icon="Trash2"
               onClick={() => onChange(options.filter((_, current) => current !== index))}
-              className="h-6 px-2 text-ink-500 hover:text-rose-300"
+              className="h-6 px-2 text-fg-faint hover:text-danger-fg"
             >
               {t("common.delete")}
             </Button>
           </div>
-          <label className="block text-[11px] font-medium text-ink-300">
+          <label className="block text-[11px] font-medium text-fg-subtle">
             {t("editor.outputId")}
             <TextInput
               value={option.id}
@@ -282,7 +282,7 @@ export function RouteOptionsEditor({
               placeholder={t("editorExtra.exampleOptionID")}
             />
           </label>
-          <label className="mt-2 block text-[11px] font-medium text-ink-300">
+          <label className="mt-2 block text-[11px] font-medium text-fg-subtle">
             {t("editor.displayName")}
             <TextInput
               value={option.label}
@@ -290,19 +290,19 @@ export function RouteOptionsEditor({
               placeholder={t("editorExtra.exampleOptionName")}
             />
           </label>
-          <label className="mt-2 block text-[11px] font-medium text-ink-300">
-            {t("editor.guidance")} <span className="font-normal text-ink-600">({t("editor.optional")})</span>
+          <label className="mt-2 block text-[11px] font-medium text-fg-subtle">
+            {t("editor.guidance")} <span className="font-normal text-fg-faint">({t("editor.optional")})</span>
             <textarea
               value={option.description}
               onChange={(event) => update(index, { description: event.target.value })}
               placeholder={t("editor.guidancePlaceholder")}
-              className="mt-1 min-h-16 w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2.5 py-2 text-xs leading-5 text-ink-100 outline-none placeholder:text-ink-600 transition focus:border-ink-500"
+              className="mt-1 min-h-16 w-full resize-y rounded-md border border-ink-700 bg-ink-950 px-2.5 py-2 text-xs leading-5 text-fg outline-none placeholder:text-fg-faint transition focus:border-ink-500"
             />
           </label>
         </article>
       ))}
       {duplicateIDs.length > 0 ? (
-        <p className="text-[11px] text-rose-300">{t("editor.optionIdsUnique")}</p>
+        <p className="text-[11px] text-danger-fg">{t("editor.optionIdsUnique")}</p>
       ) : null}
       <Button
         variant="ghost"
@@ -425,7 +425,7 @@ export function SwitchCasesEditor({
   return (
     <div className="space-y-2.5 rounded-md border border-ink-700 bg-ink-900/30 p-2.5">
       <label className="block">
-        <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("switchCases.comparator")}</span>
+        <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("switchCases.comparator")}</span>
         <Dropdown
           value={configuration.comparator}
           onChange={(next) => {
@@ -438,7 +438,7 @@ export function SwitchCasesEditor({
       {configuration.cases.map((item, index) => (
         <article key={item.id} className="rounded-md border border-ink-700 bg-ink-950/60 p-2">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-medium text-ink-200">{t("switchCases.case", { index: index + 1 })}</span>
+            <span className="text-[11px] font-medium text-fg-muted">{t("switchCases.case", { index: index + 1 })}</span>
             <div className="flex items-center gap-0.5">
               <Button
                 variant="ghost"
@@ -461,7 +461,7 @@ export function SwitchCasesEditor({
                 icon="Trash2"
                 disabled={configuration.cases.length <= 1}
                 onClick={() => void removeCase(index)}
-                className="text-ink-500 hover:text-rose-300"
+                className="text-fg-faint hover:text-danger-fg"
               >
                 {""}
               </Button>
@@ -469,7 +469,7 @@ export function SwitchCasesEditor({
           </div>
           <div className="grid grid-cols-1 gap-2">
             <label className="block">
-              <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("switchCases.value")}</span>
+              <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("switchCases.value")}</span>
               {item.valueType === "boolean" ? (
                 <Dropdown
                   value={String(item.value)}
@@ -492,7 +492,7 @@ export function SwitchCasesEditor({
             </label>
             {allowedTypes.length > 1 ? (
               <label className="block">
-                <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("editor.valueType")}</span>
+                <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("editor.valueType")}</span>
                 <Dropdown
                   value={item.valueType}
                   onChange={(next) => {
@@ -504,7 +504,7 @@ export function SwitchCasesEditor({
               </label>
             ) : null}
             <label className="block">
-              <span className="mb-1 block text-[10px] font-medium text-ink-500">{t("editor.pinName")}</span>
+              <span className="mb-1 block text-[10px] font-medium text-fg-faint">{t("editor.pinName")}</span>
               <TextInput
                 value={item.label}
                 onChange={(v) => updateCase(index, { label: v })}

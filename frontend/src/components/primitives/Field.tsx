@@ -22,14 +22,14 @@ export function Field({
   return (
     <label className={cn("block", className)}>
       <span className="mb-1 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1 text-[11.5px] font-medium text-ink-300">
+        <span className="flex items-center gap-1 text-[11.5px] font-medium text-fg-subtle">
           {label}
-          {required && <span className="text-ink-500">*</span>}
+          {required && <span className="text-fg-faint">*</span>}
         </span>
         {action}
       </span>
       {children}
-      {hint && <span className="mt-1 block text-[11px] text-ink-500">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-fg-faint">{hint}</span>}
     </label>
   );
 }
@@ -108,7 +108,7 @@ export function SelectInput<T extends string>({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as T)}
-      className={cn(control.inputSm, "px-1.5 text-[11px] text-ink-200", className)}
+      className={cn(control.inputSm, "px-1.5 text-[11px] text-fg-muted", className)}
     >
       {options.map((o) => (
         <option key={o} value={o}>

@@ -142,7 +142,7 @@ export function MetricsView() {
               onClick={() => setRange(r.id)}
               className={cn(
                 "rounded px-2 py-[3px] text-[11.5px] transition",
-                range === r.id ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                range === r.id ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
               )}
             >
               {t(`metricsUI.range_${r.id}`)}
@@ -154,13 +154,13 @@ export function MetricsView() {
       <div className="grid grid-cols-4 gap-3">
         {kpis.map((c) => (
           <Card key={c.label} className="p-3.5">
-            <p className="text-[10.5px] tracking-wide text-ink-500 uppercase">{c.label}</p>
-            <p className="mt-1 text-[20px] font-semibold tracking-tight text-ink-50">{c.value}</p>
+            <p className="text-[10.5px] tracking-wide text-fg-faint uppercase">{c.label}</p>
+            <p className="mt-1 text-[20px] font-semibold tracking-tight text-fg">{c.value}</p>
             {c.available && (
               <p
                 className={cn(
                   "mt-1 flex items-center gap-1 text-[11px]",
-                  c.ok ? "text-emerald-300/80" : "text-amber-300/80",
+                  c.ok ? "text-success-fg/80" : "text-warning-fg/80",
                 )}
               >
                 <Icon name={c.delta >= 0 ? "TrendingUp" : "History"} className="h-3 w-3" />
@@ -174,15 +174,15 @@ export function MetricsView() {
       {/* run health */}
       <Card className="mt-3 p-4">
         <div className="mb-3 flex items-center gap-3">
-          <h3 className="text-[12.5px] font-medium text-ink-100">{t("metricsUI.runHealth")}</h3>
-          <span className="ml-auto flex items-center gap-3 text-[10.5px] text-ink-500">
-            <Legend color="#34d399" label={t("metricsUI.completed")} />
-            <Legend color="#fb7185" label={t("metricsUI.failed")} />
-            <Legend color="#a1a1aa" label={t("metricsUI.skipped")} />
+          <h3 className="text-[12.5px] font-medium text-fg">{t("metricsUI.runHealth")}</h3>
+          <span className="ml-auto flex items-center gap-3 text-[10.5px] text-fg-faint">
+            <Legend color="var(--status-success)" label={t("metricsUI.completed")} />
+            <Legend color="var(--status-danger)" label={t("metricsUI.failed")} />
+            <Legend color="var(--ink-300)" label={t("metricsUI.skipped")} />
           </span>
         </div>
         {overview.runSeries.length === 0 ? (
-          <p className="py-6 text-center text-[12px] text-ink-500">{t("metricsUI.healthEmpty")}</p>
+          <p className="py-6 text-center text-[12px] text-fg-faint">{t("metricsUI.healthEmpty")}</p>
         ) : (
           <>
             <div className="flex h-[132px] items-end gap-[3px]">
@@ -203,17 +203,17 @@ export function MetricsView() {
                       style={{ height: `${Math.max(3, (total / maxRuns) * 120)}px` }}
                     >
                       {point.completed > 0 && (
-                        <div className="w-full rounded-t-[2px] bg-emerald-400/70" style={{ flexGrow: point.completed }} />
+                        <div className="w-full rounded-t-[2px] bg-success/70" style={{ flexGrow: point.completed }} />
                       )}
                       {point.failed > 0 && (
-                        <div className="w-full bg-rose-400/80" style={{ height: `${Math.max(2, (point.failed / total) * ((total / maxRuns) * 120))}px` }} />
+                        <div className="w-full bg-danger/80" style={{ height: `${Math.max(2, (point.failed / total) * ((total / maxRuns) * 120))}px` }} />
                       )}
                     </div>
                   </Tooltip>
                 );
               })}
             </div>
-            <div className="mt-1.5 flex justify-between font-mono text-[10px] text-ink-600">
+            <div className="mt-1.5 flex justify-between font-mono text-[10px] text-fg-faint">
               <span>{timeLabel(overview.runSeries[0]?.at)}</span>
               <span>{timeLabel(overview.runSeries[Math.floor(overview.runSeries.length / 2)]?.at)}</span>
               <span>{timeLabel(overview.runSeries[overview.runSeries.length - 1]?.at)}</span>
@@ -225,22 +225,22 @@ export function MetricsView() {
       {/* pipeline health */}
       <Card className="mt-3 overflow-hidden">
         <div className="border-b border-seam px-3.5 py-2.5">
-          <h3 className="text-[12.5px] font-medium text-ink-100">{t("metricsUI.pipelineHealth")}</h3>
+          <h3 className="text-[12.5px] font-medium text-fg">{t("metricsUI.pipelineHealth")}</h3>
         </div>
         {top.length === 0 && (
-          <p className="px-3.5 py-4 text-[12px] text-ink-500">{t("metricsUI.healthEmpty")}</p>
+          <p className="px-3.5 py-4 text-[12px] text-fg-faint">{t("metricsUI.healthEmpty")}</p>
         )}
         {top.map((row, i) => (
           <div key={row.pipelineId} className={cn("flex items-center gap-3 px-3.5 py-2", i > 0 && "border-t border-seam/70")}>
-            <span className="w-[170px] shrink-0 truncate text-[12px] text-ink-100">{row.name}</span>
+            <span className="w-[170px] shrink-0 truncate text-[12px] text-fg">{row.name}</span>
             <div className="h-[5px] flex-1 overflow-hidden rounded-full bg-ink-800">
               <div
-                className={cn("h-full rounded-full", row.failed > 0 ? "bg-gradient-to-r from-emerald-400/70 to-rose-400/70" : "bg-emerald-400/60")}
+                className={cn("h-full rounded-full", row.failed > 0 ? "bg-gradient-to-r from-success/70 to-danger/70" : "bg-success/60")}
                 style={{ width: `${(row.runs / topMax) * 100}%` }}
               />
             </div>
-            <span className="w-14 shrink-0 text-right font-mono text-[11px] text-ink-300">{formatCompact(row.runs)}</span>
-            <span className="w-16 shrink-0 text-right font-mono text-[11px] text-rose-300/80">
+            <span className="w-14 shrink-0 text-right font-mono text-[11px] text-fg-subtle">{formatCompact(row.runs)}</span>
+            <span className="w-16 shrink-0 text-right font-mono text-[11px] text-danger-fg/80">
               {row.failed > 0 ? `${formatCompact(row.failed)} ${t("metricsUI.failed")}` : ""}
             </span>
           </div>
@@ -258,7 +258,7 @@ export function MetricsView() {
         />
       </div>
 
-      <p className="mt-3 px-1 text-[11px] leading-relaxed text-ink-600">{t("metrics.privacyNote")}</p>
+      <p className="mt-3 px-1 text-[11px] leading-relaxed text-fg-faint">{t("metrics.privacyNote")}</p>
     </ViewShell>
   );
 }
@@ -301,15 +301,15 @@ function BreakdownTable({
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-seam px-3.5 py-2.5">
-        <h3 className="text-[12.5px] font-medium text-ink-100">{title}</h3>
+        <h3 className="text-[12.5px] font-medium text-fg">{title}</h3>
       </div>
-      {rows.length === 0 && <p className="px-3.5 py-3 text-[12px] text-ink-500">{emptyText}</p>}
+      {rows.length === 0 && <p className="px-3.5 py-3 text-[12px] text-fg-faint">{emptyText}</p>}
       {rows.slice(0, 6).map((row, i) => (
         <div key={row.id} className={cn("flex items-center gap-3 px-3.5 py-2", i > 0 && "border-t border-seam/70")}>
-          <span className="min-w-0 flex-1 truncate text-[12px] text-ink-200">{row.label}</span>
-          <span className="font-mono text-[11px] text-ink-300">{formatCompact(row.value)}</span>
+          <span className="min-w-0 flex-1 truncate text-[12px] text-fg-muted">{row.label}</span>
+          <span className="font-mono text-[11px] text-fg-subtle">{formatCompact(row.value)}</span>
           {duration !== undefined && (
-            <span className="font-mono text-[10.5px] text-ink-500">
+            <span className="font-mono text-[10.5px] text-fg-faint">
               {duration ? (row.secondaryFormatted ?? "") : ""}
             </span>
           )}

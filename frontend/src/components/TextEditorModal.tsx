@@ -97,11 +97,11 @@ export function TextEditorModal({
       >
         {/* ── header ── */}
         <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-seam px-4">
-          <Icon name="FileText" className="h-4 w-4 text-ink-400" />
-          <h2 className="truncate text-[13px] font-semibold text-ink-50">{title}</h2>
+          <Icon name="FileText" className="h-4 w-4 text-fg-subtle" />
+          <h2 className="truncate text-[13px] font-semibold text-fg">{title}</h2>
           {dirty && (
-            <span className="flex items-center gap-1.5 text-[11px] text-ink-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400/80" />
+            <span className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
+              <span className="h-1.5 w-1.5 rounded-full bg-warning/80" />
               Modified
             </span>
           )}
@@ -114,7 +114,7 @@ export function TextEditorModal({
                   onClick={() => setTab(tb)}
                   className={cn(
                     "flex h-[22px] items-center gap-1.5 rounded px-2 text-[11px] capitalize transition",
-                    tab === tb ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                    tab === tb ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
                   )}
                 >
                   <Icon
@@ -131,7 +131,7 @@ export function TextEditorModal({
             <Tooltip content={t("common.close")} hint="Esc" side="bottom">
               <button
                 onClick={onClose}
-                className="grid h-7 w-7 place-items-center rounded-md text-ink-400 transition hover:bg-ink-800 hover:text-ink-50"
+                className="grid h-7 w-7 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-800 hover:text-fg"
               >
                 <Icon name="X" className="h-4 w-4" />
               </button>
@@ -163,7 +163,7 @@ export function TextEditorModal({
                 onClick={() => setWordWrap(!wordWrap)}
                 className={cn(
                   "grid h-6 w-6 place-items-center rounded-md transition",
-                  wordWrap ? "bg-ink-750 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                  wordWrap ? "bg-ink-750 text-fg" : "text-fg-subtle hover:text-fg",
                 )}
               >
                 <Icon name="Maximize2" className="h-3.5 w-3.5" />
@@ -173,14 +173,14 @@ export function TextEditorModal({
             <div className="ml-1 flex items-center gap-0.5">
               <button
                 onClick={() => setFontSize((s) => Math.max(10, s - 1))}
-                className="grid h-6 w-6 place-items-center rounded text-ink-400 hover:text-ink-100"
+                className="grid h-6 w-6 place-items-center rounded text-fg-subtle hover:text-fg"
               >
                 <Icon name="Minus" className="h-3 w-3" />
               </button>
-              <span className="w-6 text-center font-mono text-[10px] text-ink-300">{fontSize}</span>
+              <span className="w-6 text-center font-mono text-[10px] text-fg-subtle">{fontSize}</span>
               <button
                 onClick={() => setFontSize((s) => Math.min(20, s + 1))}
-                className="grid h-6 w-6 place-items-center rounded text-ink-400 hover:text-ink-100"
+                className="grid h-6 w-6 place-items-center rounded text-fg-subtle hover:text-fg"
               >
                 <Icon name="Plus" className="h-3 w-3" />
               </button>
@@ -225,7 +225,7 @@ export function TextEditorModal({
         </div>
 
         {/* ── footer ── */}
-        <div className="flex h-10 shrink-0 items-center gap-3 border-t border-seam px-4 text-[11px] text-ink-500">
+        <div className="flex h-10 shrink-0 items-center gap-3 border-t border-seam px-4 text-[11px] text-fg-faint">
           <span>{stats.lines.toLocaleString()} lines</span>
           <span className="h-3 w-px bg-ink-700" />
           <span>{t("textEditor.words", { count: stats.words.toLocaleString() })}</span>
@@ -235,12 +235,12 @@ export function TextEditorModal({
           <span>{t("textEditor.readTime", { count: stats.readMin })}</span>
 
           <div className="ml-auto flex items-center gap-2">
-            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-ink-500">⌘S</kbd>
-            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-ink-500">{t("textEditor.escClose")}</kbd>
+            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-fg-faint">⌘S</kbd>
+            <kbd className="rounded border border-ink-700 bg-ink-850 px-1 py-px font-mono text-[10px] text-fg-faint">{t("textEditor.escClose")}</kbd>
 
             <button
               onClick={onClose}
-              className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[12px] text-ink-200 transition hover:bg-ink-750"
+              className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[12px] text-fg-muted transition hover:bg-ink-750"
             >
               {t("common.cancel")}
             </button>
@@ -250,8 +250,8 @@ export function TextEditorModal({
               className={cn(
                 "h-7 rounded-md px-3 text-[12px] font-medium transition",
                 dirty
-                  ? "bg-ink-50 text-ink-950 hover:bg-white"
-                  : "cursor-not-allowed bg-ink-800 text-ink-500",
+                  ? "bg-ink-50 text-fg-onEmphasis hover:bg-ink-25"
+                  : "cursor-not-allowed bg-ink-800 text-fg-faint",
               )}
             >
               {t(`javascript.save`)}
@@ -288,7 +288,7 @@ const Editor = ({
     spellCheck={false}
     style={{ fontSize, tabSize: 2 }}
     className={cn(
-      "h-full w-full resize-none bg-transparent p-5 font-mono leading-[1.65] text-ink-50 placeholder:text-ink-600 focus:outline-none",
+      "h-full w-full resize-none bg-transparent p-5 font-mono leading-[1.65] text-fg placeholder:text-fg-faint focus:outline-none",
       wordWrap ? "whitespace-pre-wrap break-words" : "whitespace-pre overflow-x-auto",
     )}
   />
@@ -310,7 +310,7 @@ function TBtn({
     <Tooltip content={label} hint={hint} side="bottom" delay={200}>
       <button
         onClick={onClick}
-        className="grid h-6 w-6 place-items-center rounded-md text-ink-400 transition hover:bg-ink-750 hover:text-ink-50 active:scale-95"
+        className="grid h-6 w-6 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-750 hover:text-fg active:scale-95"
       >
         <Icon name={icon} className="h-3.5 w-3.5" />
       </button>

@@ -77,14 +77,14 @@ function ThreadRow({
       <span
         className={cn(
           "mt-[1px] grid h-6 w-6 shrink-0 place-items-center rounded-md border",
-          pipeline ? "border-violet-500/40 bg-violet-500/10 text-violet-300" : "border-ink-700 bg-ink-850 text-ink-400",
+          pipeline ? "border-violet-500/40 bg-violet-500/10 text-violet-300" : "border-ink-700 bg-ink-850 text-fg-subtle",
         )}
       >
         <Icon name={pipeline ? "Cable" : "Bot"} className="h-3 w-3" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12.5px] leading-tight font-medium text-ink-100">{title}</span>
-        <span className="mt-[3px] block truncate text-[11px] leading-tight text-ink-500">{subtitle}</span>
+        <span className="block truncate text-[12.5px] leading-tight font-medium text-fg">{title}</span>
+        <span className="mt-[3px] block truncate text-[11px] leading-tight text-fg-faint">{subtitle}</span>
       </span>
     </button>
   );
@@ -99,30 +99,30 @@ function ActivityDisclosure({ run, events }: { run: ChatRun; events: ChatRunEven
   return (
     <div className="rounded-xl border border-ink-700/70 bg-ink-850/60">
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-        <Icon name="ChevronRight" className={cn("h-3 w-3 text-ink-500 transition-transform", open && "rotate-90")} />
-        <Icon name="Activity" className={cn("h-3.5 w-3.5", active ? "animate-pulse text-sky-300" : "text-ink-400")} />
-        <span className="min-w-0 flex-1 truncate text-[12px] text-ink-300">
+        <Icon name="ChevronRight" className={cn("h-3 w-3 text-fg-faint transition-transform", open && "rotate-90")} />
+        <Icon name="Activity" className={cn("h-3.5 w-3.5", active ? "animate-pulse text-info-fg" : "text-fg-subtle")} />
+        <span className="min-w-0 flex-1 truncate text-[12px] text-fg-subtle">
           {run.statusText || t("chat.waiting")}
         </span>
         {active && (
-          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-300" />
+          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-info" />
         )}
       </button>
       {open && (
         <ul className="border-t border-seam px-3 py-2">
-          {events.length === 0 && <li className="py-1 text-[11px] text-ink-500">{t("chat.noActivity")}</li>}
+          {events.length === 0 && <li className="py-1 text-[11px] text-fg-faint">{t("chat.noActivity")}</li>}
           {events.map((ev) => (
             <li key={ev.id} className="flex items-start gap-2 py-1">
               <span
                 className={cn(
                   "mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full",
-                  ev.status === "failed" ? "bg-rose-400" : ev.status === "completed" ? "bg-emerald-400/80" : "bg-ink-500",
+                  ev.status === "failed" ? "bg-danger" : ev.status === "completed" ? "bg-success/80" : "bg-ink-500",
                 )}
               />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[11.5px] text-ink-200">{ev.summary}</span>
+                <span className="block truncate text-[11.5px] text-fg-muted">{ev.summary}</span>
                 {ev.detail && (
-                  <pre className="mt-1 max-h-[90px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1 font-mono text-[10px] text-ink-400">
+                  <pre className="mt-1 max-h-[90px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1 font-mono text-[10px] text-fg-subtle">
                     {ev.detail}
                   </pre>
                 )}
@@ -152,9 +152,9 @@ function FailedRunCard({
   const hasDetails = Boolean(error);
 
   return (
-    <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5">
+    <div className="rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5">
       <div className="flex items-center gap-2.5">
-        <Icon name="AlertTriangle" className="h-3.5 w-3.5 shrink-0 text-rose-300" />
+        <Icon name="AlertTriangle" className="h-3.5 w-3.5 shrink-0 text-danger-fg" />
         <button
           type="button"
           onClick={() => hasDetails && setOpen((v) => !v)}
@@ -162,11 +162,11 @@ function FailedRunCard({
           aria-expanded={open}
           className={cn("min-w-0 flex-1 text-left", hasDetails ? "cursor-pointer" : "cursor-default")}
         >
-          <span className="block text-[12px] text-rose-200">{t("chat.runFailedStrip")}</span>
+          <span className="block text-[12px] text-danger-fg">{t("chat.runFailedStrip")}</span>
           {/* collapsed preview only - the expanded body below carries the
               full text, so it never renders twice */}
           {hasDetails && !open && (
-            <span className="mt-0.5 block truncate font-mono text-[10.5px] text-rose-300/70">
+            <span className="mt-0.5 block truncate font-mono text-[10.5px] text-danger-fg/70">
               {error}
             </span>
           )}
@@ -177,7 +177,7 @@ function FailedRunCard({
             onClick={() => setOpen((v) => !v)}
             aria-label={t("chat.toggleDetails")}
             title={t("chat.toggleDetails")}
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-rose-300/70 transition hover:bg-rose-500/15 hover:text-rose-200"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-danger-fg/70 transition hover:bg-danger/15 hover:text-danger-fg"
           >
             <Icon name="ChevronDown" className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
           </button>
@@ -189,7 +189,7 @@ function FailedRunCard({
         )}
       </div>
       {open && hasDetails && (
-        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-rose-500/20 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-rose-200/90">
+        <pre className="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-danger/20 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-danger-fg/90">
           {error}
         </pre>
       )}
@@ -611,7 +611,7 @@ export default function ChatView() {
               setSelectedId(null);
               setNewMode(mode);
             }}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md bg-ink-50 py-1.5 text-[12.5px] font-medium text-ink-950 transition hover:bg-white"
+            className="flex w-full items-center justify-center gap-1.5 rounded-md bg-ink-50 py-1.5 text-[12.5px] font-medium text-fg-onEmphasis transition hover:bg-ink-25"
           >
             <Icon name="Plus" className="h-3.5 w-3.5" />
             {t("chat.new")}
@@ -629,7 +629,7 @@ export default function ChatView() {
                 aria-pressed={newMode === m}
                 className={cn(
                   "flex h-[26px] flex-1 items-center justify-center gap-1.5 rounded px-2 text-[11.5px] transition",
-                  newMode === m ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                  newMode === m ? "bg-ink-700 text-fg" : "text-fg-subtle hover:text-fg",
                 )}
               >
                 <Icon name={m === "model" ? "Bot" : "Cable"} className="h-3 w-3" />
@@ -643,7 +643,7 @@ export default function ChatView() {
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
           {visibleGroups.map((group) => (
             <div key={group.key}>
-              <p className="mb-1 px-2 py-1.5 text-[10px] font-medium tracking-[0.09em] text-ink-500 uppercase">
+              <p className="mb-1 px-2 py-1.5 text-[10px] font-medium tracking-[0.09em] text-fg-faint uppercase">
                 {t(`chat.group_${group.key}`)}
               </p>
               {group.list.map((c) => (
@@ -661,14 +661,14 @@ export default function ChatView() {
           ))}
 
           {loadError && conversations.length === 0 && (
-            <p className="flex items-center justify-center gap-1.5 px-2 py-4 text-center text-[12px] text-rose-300">
+            <p className="flex items-center justify-center gap-1.5 px-2 py-4 text-center text-[12px] text-danger-fg">
               <Icon name="AlertTriangle" className="h-3.5 w-3.5 shrink-0" />
               {t("chat.loadFailed")}
             </p>
           )}
 
           {!loadError && conversations.length === 0 && (
-            <p className="px-2 py-4 text-center text-[12px] text-ink-500">{t("chat.noChats")}</p>
+            <p className="px-2 py-4 text-center text-[12px] text-fg-faint">{t("chat.noChats")}</p>
           )}
         </div>
       </aside>
@@ -679,10 +679,10 @@ export default function ChatView() {
         <div className="flex h-11 shrink-0 items-center gap-2 border-b border-seam px-4">
           {selected ? (
             <>
-              <h2 className="truncate text-[13.5px] font-semibold text-ink-50">{selected.title}</h2>
+              <h2 className="truncate text-[13.5px] font-semibold text-fg">{selected.title}</h2>
               <div className="ml-auto flex items-center gap-2">
-                <span className="flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[11px] text-ink-300">
-                  <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3 w-3 shrink-0 text-ink-500" />
+                <span className="flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[11px] text-fg-subtle">
+                  <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3 w-3 shrink-0 text-fg-faint" />
                   {selected.mode === "pipeline"
                     ? headerPipeline ?? t("chat.publishedPipeline")
                     : modelLabel ?? t("chat.configureModel")}
@@ -699,21 +699,21 @@ export default function ChatView() {
                 <button
                   onClick={() => { setRenameTarget(selected); setRenameDraft(selected.title); }}
                   title={t("chat.rename")}
-                  className="grid h-7 w-7 place-items-center rounded-md text-ink-500 transition hover:bg-ink-800 hover:text-ink-100"
+                  className="grid h-7 w-7 place-items-center rounded-md text-fg-faint transition hover:bg-ink-800 hover:text-fg"
                 >
                   <Icon name="Pencil" className="h-[15px] w-[15px]" />
                 </button>
                 <button
                   onClick={() => void removeConversation(selected)}
                   title={t("chat.delete")}
-                  className="grid h-7 w-7 place-items-center rounded-md text-ink-500 transition hover:bg-ink-800 hover:text-rose-300"
+                  className="grid h-7 w-7 place-items-center rounded-md text-fg-faint transition hover:bg-ink-800 hover:text-danger-fg"
                 >
                   <Icon name="Trash2" className="h-[15px] w-[15px]" />
                 </button>
               </div>
             </>
           ) : (
-            <h2 className="text-[13.5px] font-semibold text-ink-50">
+            <h2 className="text-[13.5px] font-semibold text-fg">
               {newMode === "pipeline" ? t("chat.chatWithPipeline") : t("chat.new")}
             </h2>
           )}
@@ -736,7 +736,7 @@ export default function ChatView() {
                   <button
                     onClick={() => void loadOlder()}
                     disabled={loadingOlder}
-                    className="rounded-full border border-ink-700 bg-ink-850 px-3.5 py-1.5 text-[11.5px] text-ink-300 transition hover:border-ink-500 hover:text-ink-100 disabled:opacity-50"
+                    className="rounded-full border border-ink-700 bg-ink-850 px-3.5 py-1.5 text-[11.5px] text-fg-subtle transition hover:border-ink-500 hover:text-fg disabled:opacity-50"
                   >
                     {loadingOlder ? t("common.loading") : t("chat.loadEarlier")}
                   </button>
@@ -783,7 +783,7 @@ export default function ChatView() {
 
               {(activeRun || sending) && (
                 <div className="flex gap-3">
-                  <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-200">
+                  <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
                     <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
                   </span>
                   <div className="flex items-center gap-1 rounded-2xl bg-ink-850 px-4 py-3">
@@ -802,7 +802,7 @@ export default function ChatView() {
                 <div className="flex justify-center">
                   <button
                     onClick={() => void cancelRun()}
-                    className="flex items-center gap-1.5 rounded-full border border-ink-600 bg-ink-800 px-3 py-1.5 text-[11.5px] text-ink-200 transition hover:border-rose-400/40 hover:text-rose-200"
+                    className="flex items-center gap-1.5 rounded-full border border-ink-600 bg-ink-800 px-3 py-1.5 text-[11.5px] text-fg-muted transition hover:border-danger/40 hover:text-danger-fg"
                   >
                     <Icon name="Square" className="h-3 w-3" />
                     {t("chat.stop")}
@@ -816,16 +816,16 @@ export default function ChatView() {
             <div className="mx-auto flex max-w-[440px] flex-col items-center px-4 pt-14">
               <span
                 className={cn(
-                  "grid h-12 w-12 place-items-center rounded-2xl border text-ink-200",
+                  "grid h-12 w-12 place-items-center rounded-2xl border text-fg-muted",
                   newMode === "pipeline" ? "border-violet-500/40 bg-violet-500/10 text-violet-300" : "border-ink-700 bg-ink-850",
                 )}
               >
                 <Icon name={newMode === "pipeline" ? "Cable" : "Sparkles"} className="h-5 w-5" />
               </span>
-              <h2 className="mt-3 text-[15px] font-semibold text-ink-50">
+              <h2 className="mt-3 text-[15px] font-semibold text-fg">
                 {newMode === "pipeline" ? t("chat.chatWithPipeline") : t("chat.emptyPrompt")}
               </h2>
-              <p className="mt-1 max-w-[340px] text-center text-[12px] leading-relaxed text-ink-500">
+              <p className="mt-1 max-w-[340px] text-center text-[12px] leading-relaxed text-fg-faint">
                 {newMode === "pipeline"
                   ? t("chat.chatWithPipelineHint")
                   : modelLabel ?? t("chat.startModelDescription")}
@@ -837,10 +837,10 @@ export default function ChatView() {
                     <button
                       key={key}
                       onClick={() => setDraft(t(key))}
-                      className="group flex w-full items-center gap-2 rounded-xl border border-ink-700/80 bg-ink-850/60 px-4 py-2.5 text-left text-[13px] text-ink-300 transition hover:border-ink-500 hover:bg-ink-800 hover:text-ink-50"
+                      className="group flex w-full items-center gap-2 rounded-xl border border-ink-700/80 bg-ink-850/60 px-4 py-2.5 text-left text-[13px] text-fg-subtle transition hover:border-ink-500 hover:bg-ink-800 hover:text-fg"
                     >
                       <span className="flex-1">{t(key)}</span>
-                      <Icon name="ArrowUpRight" className="h-3.5 w-3.5 text-ink-600 group-hover:text-ink-300" />
+                      <Icon name="ArrowUpRight" className="h-3.5 w-3.5 text-fg-faint group-hover:text-fg-subtle" />
                     </button>
                   ))}
                 </div>
@@ -885,7 +885,7 @@ export default function ChatView() {
                 }}
                 aria-label={t("chat.message")}
                 placeholder={t("chat.message")}
-                className="w-full resize-none bg-transparent px-4 py-3 text-[13px] text-ink-50 placeholder:text-ink-500"
+                className="w-full resize-none bg-transparent px-4 py-3 text-[13px] text-fg placeholder:text-fg-faint"
               />
               <div className="flex items-center gap-2 px-3 pb-2.5">
                 {mode === "pipeline" ? (
@@ -905,13 +905,13 @@ export default function ChatView() {
                     />
                   )
                 ) : (
-                  <span className="flex items-center gap-1.5 text-[11px] text-ink-500">
+                  <span className="flex items-center gap-1.5 text-[11px] text-fg-faint">
                     <Icon name="Sparkles" className="h-3 w-3" />
                     {modelLabel ?? t("chat.configureModel")}
                   </span>
                 )}
 
-                <span className="ml-auto text-[10.5px] text-ink-600">{t("chat.enterToSend")}</span>
+                <span className="ml-auto text-[10.5px] text-fg-faint">{t("chat.enterToSend")}</span>
                 <button
                   onClick={() => void send()}
                   disabled={!draft.trim() || sending}
@@ -921,8 +921,8 @@ export default function ChatView() {
                     draft.trim() && !sending
                       ? mode === "pipeline"
                         ? "bg-violet-500 text-white hover:bg-violet-400"
-                        : "bg-ink-50 text-ink-950 hover:bg-white"
-                      : "cursor-not-allowed bg-ink-800 text-ink-500",
+                        : "bg-ink-50 text-fg-onEmphasis hover:bg-ink-25"
+                      : "cursor-not-allowed bg-ink-800 text-fg-faint",
                   )}
                 >
                   <Icon name={sending ? "Loader2" : "ArrowUpRight"} className={cn("h-4 w-4", sending && "animate-spin")} />
@@ -943,13 +943,13 @@ export default function ChatView() {
             <div className="ml-auto flex items-center gap-2">
               <button
                 onClick={() => void resolveApproval(false)}
-                className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+                className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-fg-muted transition hover:bg-ink-750"
               >
                 {t("chat.deny")}
               </button>
               <button
                 onClick={() => void resolveApproval(true)}
-                className="h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-ink-950 transition hover:bg-white"
+                className="h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-fg-onEmphasis transition hover:bg-ink-25"
               >
                 {t("chat.allow")}
               </button>
@@ -958,7 +958,7 @@ export default function ChatView() {
         >
           <div className="space-y-3">
             <Field label={t("chat.modelWants", { action: approval.toolCall.name.replace(/_/g, " ") })}>
-              <pre className="max-h-[220px] overflow-auto rounded-md border border-ink-700 bg-ink-950/60 p-3 font-mono text-[11px] text-ink-200">
+              <pre className="max-h-[220px] overflow-auto rounded-md border border-ink-700 bg-ink-950/60 p-3 font-mono text-[11px] text-fg-muted">
                 {JSON.stringify(approval.toolCall.arguments, null, 2)}
               </pre>
             </Field>
@@ -977,13 +977,13 @@ export default function ChatView() {
             <div className="ml-auto flex items-center gap-2">
               <button
                 onClick={() => setRenameTarget(null)}
-                className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+                className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-fg-muted transition hover:bg-ink-750"
               >
                 {t("common.cancel")}
               </button>
               <button
                 onClick={() => void commitRename()}
-                className="h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-ink-950 transition hover:bg-white"
+                className="h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-fg-onEmphasis transition hover:bg-ink-25"
               >
                 {t("common.save")}
               </button>
@@ -998,7 +998,7 @@ export default function ChatView() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") void commitRename();
               }}
-              className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-ink-100 focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+              className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
             />
           </Field>
         </Modal>
@@ -1021,7 +1021,7 @@ function TranscriptMessage({
   return (
     <div className={cn("flex gap-3", msg.role === "user" ? "justify-end" : "justify-start")}>
       {msg.role !== "user" && (
-        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-200">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
           <Icon name={pipelineMode ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
         </span>
       )}
@@ -1029,7 +1029,7 @@ function TranscriptMessage({
         onContextMenu={(e) => onCtx(e, msg.content)}
         className={cn(
           "max-w-[80%] cursor-default rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
-          msg.role === "user" ? "bg-ink-50 text-ink-950" : "bg-ink-850 text-ink-100",
+          msg.role === "user" ? "bg-ink-50 text-fg-onEmphasis" : "bg-ink-850 text-fg",
         )}
       >
         {msg.role === "user" ? msg.content : <MarkdownBody content={msg.content} />}
@@ -1061,32 +1061,32 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
   return (
     <div className="overflow-hidden rounded-xl border border-ink-700/70 bg-ink-850/50">
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
-        <Icon name="ChevronRight" className={cn("h-3 w-3 shrink-0 text-ink-500 transition-transform", open && "rotate-90")} />
+        <Icon name="ChevronRight" className={cn("h-3 w-3 shrink-0 text-fg-faint transition-transform", open && "rotate-90")} />
         <Icon name="Braces" className="h-3.5 w-3.5 shrink-0 text-violet-300/80" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-200">
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-fg-muted">
           {entry.call.name.replace(/_/g, " ")}
         </span>
         {running ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-sky-300">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />
+          <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-info-fg">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-info" />
             {t("chat.toolRunning")}
           </span>
         ) : (
-          <Icon name="Check" className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
+          <Icon name="Check" className="h-3.5 w-3.5 shrink-0 text-success-fg/80" />
         )}
       </button>
       {open && (
         <div className="space-y-2 border-t border-seam px-3 py-2">
           <div>
-            <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("chat.toolArguments")}</p>
-            <pre className="max-h-[140px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-ink-300">
+            <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-fg-faint">{t("chat.toolArguments")}</p>
+            <pre className="max-h-[140px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-fg-subtle">
               {prettyArguments}
             </pre>
           </div>
           {entry.result && (
             <div>
-              <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-ink-500">{t("chat.toolResult")}</p>
-              <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-ink-300">
+              <p className="mb-1 text-[10px] uppercase tracking-[0.09em] text-fg-faint">{t("chat.toolResult")}</p>
+              <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap rounded-md border border-ink-700 bg-ink-950/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-fg-subtle">
                 {resultText}
               </pre>
             </div>
@@ -1099,7 +1099,7 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
 
 const MarkdownBody = memo(function MarkdownBody({ content }: { content: string }) {
   return (
-    <div className="[&_a]:text-sky-300 [&_code]:rounded [&_code]:bg-ink-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_li]:ml-4 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-ink-700 [&_pre]:bg-ink-950/60 [&_pre]:p-3">
+    <div className="[&_a]:text-info-fg [&_code]:rounded [&_code]:bg-ink-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_li]:ml-4 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-ink-700 [&_pre]:bg-ink-950/60 [&_pre]:p-3">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
@@ -1113,7 +1113,7 @@ function CtaButton({ children, onClick, disabled }: { children: React.ReactNode;
       disabled={disabled}
       className={cn(
         "mt-6 h-8 rounded-md px-4 text-[12.5px] font-medium transition",
-        disabled ? "cursor-not-allowed bg-ink-800 text-ink-500" : "bg-ink-50 text-ink-950 hover:bg-white",
+        disabled ? "cursor-not-allowed bg-ink-800 text-fg-faint" : "bg-ink-50 text-fg-onEmphasis hover:bg-ink-25",
       )}
     >
       {children}

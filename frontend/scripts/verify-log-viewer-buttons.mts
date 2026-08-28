@@ -52,7 +52,7 @@ if (!headerRow) fail("header row restructure missing: inspect button must be a s
 /* hover-reveal: the row button fades in on row hover via the li's group class */
 if (!inspector.includes('"group border-b border-seam/70 px-3 py-2 transition"'))
   fail("log row li lost its group class (hover reveal target)");
-if (!inspector.includes("opacity-0 transition hover:bg-ink-750 hover:text-ink-50 focus-visible:opacity-100 group-hover:opacity-100"))
+if (!inspector.includes("opacity-0 transition hover:bg-ink-750 hover:text-fg focus-visible:opacity-100 group-hover:opacity-100"))
   fail("row inspect button lost its hover/focus reveal classes");
 
 /* ---------- modal contract the wiring depends on ---------- */
@@ -126,7 +126,7 @@ if (nodeBtn.includes(" title="))
 if (!nodeBtn.includes("aria-label={label}"))
   fail("NodeToolButton lost aria-label — the tooltip is visual-only, the button needs an accessible name");
 
-if (!modal.includes('className="max-w-[420px] truncate font-mono text-sky-300/90"'))
+if (!modal.includes('className="max-w-[420px] truncate font-mono text-info-fg/90"'))
   fail("copy-path tooltip no longer previews the path (mono, viewport-safe truncation)");
 
 /* path builder must live in lib and handle identifiers, indices, quoted keys */

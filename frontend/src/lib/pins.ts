@@ -3,6 +3,10 @@ import type { PinDataType, PortKind } from "../types";
 /**
  * Single source of truth for pin data-types and their visual language.
  * Previously duplicated across Inspector, CodeEditorModal and pin-colors.
+ *
+ * Colors are CSS variables (defined per theme in index.css) so the palette
+ * flips with [data-theme]. SVG presentation attributes cannot resolve
+ * var(), so canvas strokes/fills must be applied via style props.
  */
 
 export interface PinPalette {
@@ -20,16 +24,28 @@ export interface PinPalette {
   name: string;
 }
 
+function pal(type: PinDataType, name: string): PinPalette {
+  const v = `--pin-${type}`;
+  return {
+    dot: `var(${v})`,
+    bg: `var(${v})`,
+    hover: `var(${v}-strong)`,
+    edge: `var(${v}-deep)`,
+    label: `var(${v}-strong)`,
+    name,
+  };
+}
+
 const PALETTES: Record<PinDataType, PinPalette> = {
-  exec:    { dot: "#c9c9d2", bg: "#c9c9d2", hover: "#ecedf1", edge: "#7c7c88", label: "#c9c9d2", name: "Exec" },
-  tool:    { dot: "#818cf8", bg: "#818cf8", hover: "#a5b4fc", edge: "#4f46e5", label: "#a5b4fc", name: "Tool" },
-  text:    { dot: "#f472b6", bg: "#f472b6", hover: "#f9a8d4", edge: "#db2777", label: "#f9a8d4", name: "Text" },
-  number:  { dot: "#38bdf8", bg: "#38bdf8", hover: "#7dd3fc", edge: "#0284c7", label: "#7dd3fc", name: "Number" },
-  boolean: { dot: "#f87171", bg: "#f87171", hover: "#fca5a5", edge: "#dc2626", label: "#fca5a5", name: "Boolean" },
-  array:   { dot: "#a78bfa", bg: "#a78bfa", hover: "#c4b5fd", edge: "#7c3aed", label: "#c4b5fd", name: "Array" },
-  map:     { dot: "#fb923c", bg: "#fb923c", hover: "#fdba74", edge: "#ea580c", label: "#fdba74", name: "Map" },
-  object:  { dot: "#34d399", bg: "#34d399", hover: "#6ee7b7", edge: "#059669", label: "#6ee7b7", name: "Object" },
-  any:     { dot: "#94a3b8", bg: "#94a3b8", hover: "#cbd5e1", edge: "#64748b", label: "#cbd5e1", name: "Any" },
+  exec: pal("exec", "Exec"),
+  tool: pal("tool", "Tool"),
+  text: pal("text", "Text"),
+  number: pal("number", "Number"),
+  boolean: pal("boolean", "Boolean"),
+  array: pal("array", "Array"),
+  map: pal("map", "Map"),
+  object: pal("object", "Object"),
+  any: pal("any", "Any"),
 };
 
 /** data-types a user may assign to an editable pin (exec is structural, not selectable) */
@@ -51,7 +67,7 @@ export function pinColor(dataType?: string): string {
   return PALETTES[(dataType ?? "any") as PinDataType]?.dot ?? PALETTES.any.dot;
 }
 
-const DANGER = "#fb7185";
+const DANGER = "var(--status-danger)";
 
 export function edgeColor(
   kind: PortKind,
@@ -60,6 +76,6 @@ export function edgeColor(
   hover?: boolean,
 ): string {
   if (hover) return DANGER; // hovering an edge means "click to delete"
-  const pal = pinPalette(kind === "exec" || kind === "tool" ? kind : dataType);
-  return active ? pal.hover : pal.edge;
+  const p = pinPalette(kind === "exec" || kind === "tool" ? kind : dataType);
+  return active ? p.hover : p.edge;
 }

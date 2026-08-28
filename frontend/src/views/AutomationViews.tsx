@@ -66,7 +66,7 @@ export function TriggersView({ workspace, nav }: { workspace: Workspace; nav: Na
         <EmptyState icon="CircleDot" title={t("triggers.emptyTitle")} hint={t("triggers.emptyDescription")} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-ink-700/80">
-          <div className="grid grid-cols-[minmax(0,1fr)_130px_110px_130px_120px] gap-3 border-b border-seam bg-ink-850/70 px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-ink-400 uppercase">
+          <div className="grid grid-cols-[minmax(0,1fr)_130px_110px_130px_120px] gap-3 border-b border-seam bg-ink-850/70 px-3 py-2 text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">
             <span>{t("nav.triggers")}</span>
             <span>{t("pipelines.pipeline")}</span>
             <span>{t("pipelines.status")}</span>
@@ -85,19 +85,19 @@ export function TriggersView({ workspace, nav }: { workspace: Workspace; nav: Na
                     <button
                       onClick={() => nav.goto("pipelines")}
                       aria-label={t("board.openPipelines")}
-                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-300 transition hover:border-ink-500 hover:text-ink-50"
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-subtle transition hover:border-ink-500 hover:text-fg"
                     >
                       <Icon name={KIND_ICON[tr.kind] ?? "CircleDot"} className="h-4 w-4" />
                     </button>
                   </Tooltip>
                   <span className="min-w-0">
-                    <span className="block truncate text-[12.5px] font-medium text-ink-50">{tr.label}</span>
-                    <span className="block text-[11px] text-ink-500">{t(`triggers.types.${tr.kind}`)}</span>
+                    <span className="block truncate text-[12.5px] font-medium text-fg">{tr.label}</span>
+                    <span className="block text-[11px] text-fg-faint">{t(`triggers.types.${tr.kind}`)}</span>
                   </span>
                 </span>
-                <span className="truncate text-[12px] text-ink-300">{pipelineName(tr)}</span>
+                <span className="truncate text-[12px] text-fg-subtle">{pipelineName(tr)}</span>
                 <StatusPill status={tr.enabled ? "connected" : "idle"} />
-                <span className="font-mono text-[11px] text-ink-500">{formatDateTime(tr.lastRunAt)}</span>
+                <span className="font-mono text-[11px] text-fg-faint">{formatDateTime(tr.lastRunAt)}</span>
                 <span className="flex items-center justify-end gap-1.5">
                   {running ? (
                     <Button icon="Square" variant="solid" onClick={() => void stop(tr)} disabled={busyId === tr.id}>
@@ -125,7 +125,7 @@ export function TriggersView({ workspace, nav }: { workspace: Workspace; nav: Na
           })}
         </div>
       )}
-      <p className="mt-3 flex items-center gap-1.5 px-1 text-[11.5px] text-ink-500">
+      <p className="mt-3 flex items-center gap-1.5 px-1 text-[11.5px] text-fg-faint">
         <Icon name="Info" className="h-3.5 w-3.5 shrink-0" />
         {t("triggers.boardNote")}
       </p>
@@ -182,17 +182,17 @@ export function SchedulesView({ workspace }: { workspace: Workspace }) {
               key={s.id}
               className="flex items-center gap-3 border-b border-seam/70 px-3 py-2.5 transition last:border-b-0 hover:bg-ink-850"
             >
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-ink-300">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-subtle">
                 <Icon name="Clock" className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-ink-50">{s.label}</span>
-                <span className="block truncate text-[11.5px] text-ink-500">{pipelineName(s)}</span>
+                <span className="block truncate text-[13px] font-medium text-fg">{s.label}</span>
+                <span className="block truncate text-[11.5px] text-fg-faint">{pipelineName(s)}</span>
               </span>
-              <code className="rounded-md border border-ink-700/70 bg-ink-900/50 px-2.5 py-1.5 font-mono text-[11.5px] text-ink-200">
+              <code className="rounded-md border border-ink-700/70 bg-ink-900/50 px-2.5 py-1.5 font-mono text-[11.5px] text-fg-muted">
                 {s.cron}
               </code>
-              <span className="w-[170px] shrink-0 text-[11px] text-ink-500">
+              <span className="w-[170px] shrink-0 text-[11px] text-fg-faint">
                 {t("schedules.nextLast", {
                   next: formatDateTime(s.nextRunAt),
                   last: formatDateTime(s.lastRunAt),
@@ -203,7 +203,7 @@ export function SchedulesView({ workspace }: { workspace: Workspace }) {
                   {t("schedules.trust")}
                 </Button>
               ) : (
-                <span className="flex items-center gap-1.5 rounded bg-emerald-400/10 px-2 py-1 text-[10.5px] font-medium text-emerald-300">
+                <span className="flex items-center gap-1.5 rounded bg-success/10 px-2 py-1 text-[10.5px] font-medium text-success-fg">
                   <Icon name="ShieldCheck" className="h-3 w-3" />
                   {t("schedules.trusted", { version: s.revision })}
                 </span>
@@ -220,9 +220,9 @@ export function SchedulesView({ workspace }: { workspace: Workspace }) {
 /* ---------------- Functions ---------------- */
 
 const FN_KIND_META: Record<UiFunctionSummary["kind"], { labelKey: string; icon: string; tone: string }> = {
-  pure: { labelKey: "functions.pure", icon: "Sparkles", tone: "bg-sky-400/10 text-sky-300" },
-  impure: { labelKey: "functions.impure", icon: "Zap", tone: "bg-amber-400/10 text-amber-300" },
-  tool: { labelKey: "functions.tool", icon: "Bot", tone: "bg-emerald-400/10 text-emerald-300" },
+  pure: { labelKey: "functions.pure", icon: "Sparkles", tone: "bg-info/10 text-info-fg" },
+  impure: { labelKey: "functions.impure", icon: "Zap", tone: "bg-warning/10 text-warning-fg" },
+  tool: { labelKey: "functions.tool", icon: "Bot", tone: "bg-success/10 text-success-fg" },
 };
 
 function FunctionCreateDialog({
@@ -273,8 +273,8 @@ function FunctionCreateDialog({
                   : "border-ink-700 bg-ink-850 hover:border-ink-500",
               )}
             >
-              <span className="block text-[12px] font-semibold text-ink-50">{t(`functions.types.${tpl.id}.title`)}</span>
-              <span className="mt-1 block line-clamp-3 text-[10.5px] leading-snug text-ink-400">
+              <span className="block text-[12px] font-semibold text-fg">{t(`functions.types.${tpl.id}.title`)}</span>
+              <span className="mt-1 block line-clamp-3 text-[10.5px] leading-snug text-fg-subtle">
                 {t(`functions.types.${tpl.id}.description`)}
               </span>
             </button>
@@ -398,7 +398,7 @@ export function FunctionsView({ workspace, nav }: { workspace: Workspace; nav: N
               { value: "tool", label: t("functions.tool") },
             ]}
           />
-          <span className="ml-auto text-[11.5px] text-ink-500">{t("status.count", { count: list.length })}</span>
+          <span className="ml-auto text-[11.5px] text-fg-faint">{t("status.count", { count: list.length })}</span>
         </>
       }
     >
@@ -421,25 +421,25 @@ export function FunctionsView({ workspace, nav }: { workspace: Workspace; nav: N
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
-                      <span className="truncate text-[13px] font-medium text-ink-50">{f.name}</span>
+                      <span className="truncate text-[13px] font-medium text-fg">{f.name}</span>
                     </span>
                     <span className={cn("mt-1 inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] font-medium", meta.tone)}>
                       <Icon name={meta.icon} className="h-2.5 w-2.5" />
                       {t(meta.labelKey)}
                     </span>
                   </span>
-                  <Icon name="ChevronRight" className="mt-1 h-4 w-4 shrink-0 text-ink-600 transition group-hover:text-ink-200" />
+                  <Icon name="ChevronRight" className="mt-1 h-4 w-4 shrink-0 text-fg-faint transition group-hover:text-fg-muted" />
                 </div>
 
-                <p className="mt-2.5 line-clamp-2 min-h-[32px] text-[11.5px] leading-relaxed text-ink-400">{f.desc}</p>
+                <p className="mt-2.5 line-clamp-2 min-h-[32px] text-[11.5px] leading-relaxed text-fg-subtle">{f.desc}</p>
 
-                <div className="mt-3 flex items-center gap-3 border-t border-seam pt-2.5 text-[10.5px] text-ink-500">
+                <div className="mt-3 flex items-center gap-3 border-t border-seam pt-2.5 text-[10.5px] text-fg-faint">
                   {f.publishedRevision > 0 ? (
-                    <span className="rounded bg-emerald-400/10 px-1.5 py-px text-emerald-300">
+                    <span className="rounded bg-success/10 px-1.5 py-px text-success-fg">
                       {t("functions.published", { version: f.publishedRevision })}
                     </span>
                   ) : (
-                    <span className="text-ink-400">{t("functions.draft")}</span>
+                    <span className="text-fg-subtle">{t("functions.draft")}</span>
                   )}
                   <span className="ml-auto">{f.updated}</span>
                 </div>

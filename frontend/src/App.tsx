@@ -539,7 +539,7 @@ export default function App() {
 
   if (workspace.loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-ink-1000 text-ink-300">
+      <div className="flex h-screen items-center justify-center bg-ink-1000 text-fg-subtle">
         <span className="flex items-center gap-2 text-[13px]">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-600 border-t-ink-100" />
           {t("app.opening")}
@@ -562,7 +562,7 @@ export default function App() {
 
   return (
     <ContextMenuProvider>
-      <div className="flex h-screen flex-col overflow-hidden bg-ink-1000 text-ink-100">
+      <div className="flex h-screen flex-col overflow-hidden bg-ink-1000 text-fg">
         <TopBar
           inEditor={nav.inEditor}
           viewTitle={viewTitle}

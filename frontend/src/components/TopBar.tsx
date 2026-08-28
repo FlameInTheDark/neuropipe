@@ -79,11 +79,11 @@ function EditableName({
             }
           }}
           style={{ width: `${Math.max(90, Math.min(320, draft.length * 7.4 + 22))}px` }}
-          className="h-[26px] rounded-md border border-ink-500 bg-ink-850 px-1.5 text-[13px] font-medium text-ink-50 outline-none"
+          className="h-[26px] rounded-md border border-ink-500 bg-ink-850 px-1.5 text-[13px] font-medium text-fg outline-none"
         />
         <div className="absolute top-[calc(100%+6px)] left-0 z-50 w-[340px] rounded-lg border border-ink-650 bg-ink-900 p-3 shadow-[0_24px_60px_-16px_rgba(0,0,0,0.9)]">
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium text-ink-300">{label}</span>
+            <span className="mb-1 block text-[11px] font-medium text-fg-subtle">{label}</span>
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -96,11 +96,11 @@ function EditableName({
                   setEditing(false);
                 }
               }}
-              className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2 text-[12.5px] text-ink-50 outline-none focus:border-ink-500"
+              className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2 text-[12.5px] text-fg outline-none focus:border-ink-500"
             />
           </label>
           <label className="mt-2.5 block">
-            <span className="mb-1 block text-[11px] font-medium text-ink-300">
+            <span className="mb-1 block text-[11px] font-medium text-fg-subtle">
               {descriptionLabel ?? t("editor.rename")}
             </span>
             <textarea
@@ -119,7 +119,7 @@ function EditableName({
                   setEditing(false);
                 }
               }}
-              className="w-full resize-none rounded-md border border-ink-700 bg-ink-850 px-2 py-1.5 text-[12.5px] text-ink-50 outline-none focus:border-ink-500"
+              className="w-full resize-none rounded-md border border-ink-700 bg-ink-850 px-2 py-1.5 text-[12.5px] text-fg outline-none focus:border-ink-500"
             />
           </label>
           <div className="mt-2 flex items-center justify-end gap-2">
@@ -130,14 +130,14 @@ function EditableName({
                 setDraftDescription(description ?? "");
                 setEditing(false);
               }}
-              className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-ink-200 transition hover:bg-ink-750"
+              className="h-7 rounded-md border border-ink-700 bg-ink-850 px-3 text-[11.5px] text-fg-muted transition hover:bg-ink-750"
             >
               {t("common.cancel")}
             </button>
             <button
               type="button"
               onClick={commit}
-              className="h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-ink-950 transition hover:bg-white"
+              className="h-7 rounded-md bg-ink-50 px-3 text-[11.5px] font-medium text-fg-onEmphasis transition hover:bg-ink-25"
             >
               {t("common.save")}
             </button>
@@ -153,10 +153,10 @@ function EditableName({
         onClick={() => setEditing(true)}
         className="group flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-[3px] transition hover:bg-ink-800"
       >
-        <span className="truncate text-[13px] font-medium text-ink-50">{name}</span>
+        <span className="truncate text-[13px] font-medium text-fg">{name}</span>
         <Icon
           name="Pencil"
-          className="h-3 w-3 shrink-0 text-ink-600 opacity-0 transition group-hover:opacity-100"
+          className="h-3 w-3 shrink-0 text-fg-faint opacity-0 transition group-hover:opacity-100"
         />
       </button>
     </Tooltip>
@@ -265,18 +265,18 @@ export function TopBar({
               <button
                 onClick={onBack}
                 aria-label={parentTitle}
-                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-300 transition hover:bg-ink-800 hover:text-ink-50"
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-subtle transition hover:bg-ink-800 hover:text-fg"
               >
                 <Icon name="ArrowLeft" className="h-4 w-4" />
               </button>
             </Tooltip>
             <button
               onClick={onBack}
-              className="rounded px-1 py-0.5 text-ink-400 transition hover:bg-ink-800 hover:text-ink-100"
+              className="rounded px-1 py-0.5 text-fg-subtle transition hover:bg-ink-800 hover:text-fg"
             >
               {parentTitle}
             </button>
-            <Icon name="ChevronRight" className="h-3 w-3 shrink-0 text-ink-600" />
+            <Icon name="ChevronRight" className="h-3 w-3 shrink-0 text-fg-faint" />
             <EditableName
               name={pipelineName ?? ""}
               label={t("editor.rename")}
@@ -295,14 +295,14 @@ export function TopBar({
               </Badge>
             )}
             {dirty && (
-              <span className="flex shrink-0 items-center gap-1.5 pl-1 text-[11.5px] text-ink-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-400/80" />
+              <span className="flex shrink-0 items-center gap-1.5 pl-1 text-[11.5px] text-fg-subtle">
+                <span className="h-1.5 w-1.5 rounded-full bg-warning/80" />
                 {t("common.unsaved")}
               </span>
             )}
           </>
         ) : (
-          <span className="truncate font-medium text-ink-50">{viewTitle}</span>
+          <span className="truncate font-medium text-fg">{viewTitle}</span>
         )}
       </nav>
 
@@ -311,11 +311,11 @@ export function TopBar({
       <button
         onClick={onCommand}
         style={noDragStyle}
-        className="pointer-events-auto absolute left-1/2 top-1/2 hidden h-7 w-[300px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-md border border-ink-700/70 bg-ink-900/80 px-2.5 text-[12px] text-ink-400 transition hover:border-ink-600 hover:text-ink-200 lg:flex"
+        className="pointer-events-auto absolute left-1/2 top-1/2 hidden h-7 w-[300px] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-md border border-ink-700/70 bg-ink-900/80 px-2.5 text-[12px] text-fg-subtle transition hover:border-ink-600 hover:text-fg-muted lg:flex"
       >
         <Icon name="Search" className="h-3.5 w-3.5" />
         <span>{t("palette.search")}</span>
-        <kbd className="ml-auto rounded border border-ink-700 bg-ink-850 px-1 font-mono text-[10px] text-ink-500">
+        <kbd className="ml-auto rounded border border-ink-700 bg-ink-850 px-1 font-mono text-[10px] text-fg-faint">
           ⌘K
         </kbd>
       </button>
@@ -362,7 +362,7 @@ export function TopBar({
             icon="X"
             label={t("titlebar.close")}
             size="sm"
-            className="hover:bg-rose-500/80 hover:text-white"
+            className="hover:bg-danger hover:text-white"
             onClick={() => void Application.Quit().catch(() => undefined)}
           />
         </div>

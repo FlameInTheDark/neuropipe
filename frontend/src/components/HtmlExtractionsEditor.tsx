@@ -54,7 +54,7 @@ export function HtmlExtractionsEditor({
   if (items.length === 0) {
     return (
       <div className="space-y-2 rounded-md border border-ink-700 bg-ink-900/30 p-3">
-        <p className="text-[11px] leading-4 text-ink-500">{t("editor.htmlEmptyHint")}</p>
+        <p className="text-[11px] leading-4 text-fg-faint">{t("editor.htmlEmptyHint")}</p>
         <Button variant="ghost" icon="Plus" onClick={add}>
           {t("editor.addExtraction")}
         </Button>
@@ -67,18 +67,18 @@ export function HtmlExtractionsEditor({
       {items.map((item, index) => (
         <article key={item.id} className="rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-600">{item.id}</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-fg-faint">{item.id}</span>
             <Button
               variant="ghost"
               icon="Trash2"
               onClick={() => onChange(items.filter((_, current) => current !== index))}
-              className="h-6 px-2 text-[11px] text-ink-500 hover:text-rose-300"
+              className="h-6 px-2 text-[11px] text-fg-faint hover:text-danger-fg"
             >
               {t("common.delete")}
             </Button>
           </div>
 
-          <label className="block text-[11px] font-medium text-ink-300">
+          <label className="block text-[11px] font-medium text-fg-subtle">
             {t("editor.htmlLabel")}
             <TextInput
               value={text(item.id, "label", item.label)}
@@ -90,7 +90,7 @@ export function HtmlExtractionsEditor({
             />
           </label>
 
-          <label className="mt-2 block text-[11px] font-medium text-ink-300">
+          <label className="mt-2 block text-[11px] font-medium text-fg-subtle">
             {t("editor.htmlSelector")}
             <TextInput
               mono
@@ -104,7 +104,7 @@ export function HtmlExtractionsEditor({
           </label>
 
           <div className="mt-2 flex items-end gap-3">
-            <label className="min-w-0 flex-1 text-[11px] font-medium text-ink-300">
+            <label className="min-w-0 flex-1 text-[11px] font-medium text-fg-subtle">
               {t("editor.htmlMode")}
               <Dropdown
                 value={item.mode}
@@ -113,13 +113,13 @@ export function HtmlExtractionsEditor({
               />
             </label>
             <label className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-ink-700 bg-ink-900/50 px-2">
-              <span className="text-[11px] text-ink-300">{t("editor.htmlReturnAll")}</span>
+              <span className="text-[11px] text-fg-subtle">{t("editor.htmlReturnAll")}</span>
               <Toggle on={item.returnAll} onChange={(on) => update(index, { returnAll: on })} />
             </label>
           </div>
 
           {item.mode === "attribute" ? (
-            <label className="mt-2 block text-[11px] font-medium text-ink-300">
+            <label className="mt-2 block text-[11px] font-medium text-fg-subtle">
               {t("editor.htmlAttribute")}
               <TextInput
                 mono

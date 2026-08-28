@@ -104,7 +104,7 @@ export function ContextMenuProvider({ children, onAnyAction }: { children: React
       {menu && createPortal(<Menu menu={menu} menuRef={menuRef} close={close} action={action} />, document.body)}
       {glyph && (
         <div
-          className="action-glyph pointer-events-none fixed z-[70] rounded-full border border-ink-500/60 bg-ink-800 p-1.5 text-ink-100"
+          className="action-glyph pointer-events-none fixed z-[70] rounded-full border border-ink-500/60 bg-ink-800 p-1.5 text-fg"
           style={{ left: glyph.x - 26, top: glyph.y + 14 }}
         >
           <Icon name={glyph.icon ?? "Check"} className="h-3 w-3" />
@@ -178,23 +178,23 @@ function Menu({
             className={cn(
               "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] outline-none transition-colors",
               item.danger
-                ? "text-rose-300 hover:bg-rose-500/15 focus:bg-rose-500/15"
+                ? "text-danger-fg hover:bg-danger/15 focus:bg-danger/15"
                 : item.disabled
-                  ? "cursor-not-allowed text-ink-600"
-                  : "text-ink-100 hover:bg-ink-650/80 focus:bg-ink-650/80",
+                  ? "cursor-not-allowed text-fg-faint"
+                  : "text-fg hover:bg-ink-650/80 focus:bg-ink-650/80",
             )}
           >
             {item.icon ? (
               <Icon
                 name={item.icon}
-                className={cn("h-[14px] w-[14px] shrink-0", item.disabled ? "text-ink-600" : item.danger ? "text-rose-300/80" : "text-ink-400")}
+                className={cn("h-[14px] w-[14px] shrink-0", item.disabled ? "text-fg-faint" : item.danger ? "text-danger-fg/80" : "text-fg-subtle")}
               />
             ) : (
               <span className="w-[14px] shrink-0" />
             )}
             <span className="min-w-0 truncate">{item.label}</span>
-            {item.checked && <Icon name="Check" className="ml-auto h-3.5 w-3.5 shrink-0 text-ink-200" />}
-            {item.hint && <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-500">{item.hint}</span>}
+            {item.checked && <Icon name="Check" className="ml-auto h-3.5 w-3.5 shrink-0 text-fg-muted" />}
+            {item.hint && <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-faint">{item.hint}</span>}
           </button>
         ),
       )}
