@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Database, KVCommandResult, KVKey, KVKeyValue, KVServerInfo, TriggerBinding } from "@/lib/types";
 import { desktop } from "@/lib/bridge";
+import { usePersistedChoice, usePersistedValue } from "@/lib/prefs";
+import { buildKeyTree, type KeyTreeNode } from "@/lib/kvKeyTree";
 import { ask } from "@/stores/confirmation";
 import { Button } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { Dropdown } from "@/components/Dropdown";
+import { Tooltip } from "@/components/Tooltip";
 import { useCtxMenu } from "@/components/ContextMenu";
 import { TextInput } from "@/components/primitives/Field";
 import { Modal, ModalActions } from "@/components/primitives/Modal";
@@ -123,6 +126,14 @@ function KeysTab({ database }: { database: Database }) {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [view, setView] = usePersistedChoice<"list" | "grouped">(
+    "neuropipe.kv.keysView.v1",
+    ["list", "grouped"],
+    "list",
+  );
+  const [separator, setSeparator] = usePersistedValue("neuropipe.kv.keysSeparator.v1", ":");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const tree = useMemo(() => buildKeyTree(keys, separator), [keys, separator]);
   const ctx = useCtxMenu();
 
   const loadFirst = useCallback(async () => {
@@ -202,6 +213,36 @@ function KeysTab({ database }: { database: Database }) {
               label: type === "" ? t("kv.typeAny") : t(`kv.type.${type}`),
             }))}
           />
+          <div className="flex items-center gap-0.5 rounded-lg border border-ink-700 bg-ink-900 p-0.5">
+            {([
+              { id: "list", icon: "List", label: t("kv.viewList") },
+              { id: "grouped", icon: "ListTree", label: t("kv.viewGrouped") },
+            ] as const).map((entry) => (
+              <Tooltip key={entry.id} content={entry.label} side="bottom" delay={200}>
+                <button
+                  onClick={() => setView(entry.id)}
+                  aria-pressed={view === entry.id}
+                  aria-label={entry.label}
+                  className={cn(
+                    "flex h-6 w-7 items-center justify-center rounded-md transition",
+                    view === entry.id ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-100",
+                  )}
+                >
+                  <Icon name={entry.icon} className="h-3.5 w-3.5" />
+                </button>
+              </Tooltip>
+            ))}
+          </div>
+          {view === "grouped" && (
+            <input
+              value={separator}
+              onChange={(event) => setSeparator(event.target.value)}
+              placeholder=":"
+              maxLength={8}
+              aria-label={t("kv.separatorLabel")}
+              className="h-8 w-14 shrink-0 rounded-md border border-ink-700 bg-ink-850 px-2 text-center font-mono text-[12px] text-ink-100 focus:border-ink-400 focus:outline-none"
+            />
+          )}
           <Button variant="ghost" icon="RefreshCw" disabled={loading} onClick={() => setReloadToken((token) => token + 1)}>
             {t("common.refresh")}
           </Button>
@@ -217,6 +258,16 @@ function KeysTab({ database }: { database: Database }) {
         <div className="min-h-0 flex-1 overflow-y-auto">
           {keys.length === 0 && !loading && !error ? (
             <p className="px-3 py-3 text-[12px] text-ink-500">{t("kv.noKeys")}</p>
+          ) : view === "grouped" ? (
+            <KeyTreeRows
+              nodes={tree}
+              depth={0}
+              expanded={expanded}
+              onToggle={(path) => setExpanded((prev) => ({ ...prev, [path]: !prev[path] }))}
+              selected={selected}
+              onSelect={setSelected}
+              onContext={onKeyContext}
+            />
           ) : (
             keys.map((key) => (
               <button
@@ -250,6 +301,90 @@ function KeysTab({ database }: { database: Database }) {
       </div>
       {selected && <ValuePanel database={database} keyName={selected} onDeleted={() => setReloadToken((token) => token + 1)} />}
     </div>
+  );
+}
+
+function KeyTreeRows({
+  nodes,
+  depth,
+  expanded,
+  onToggle,
+  selected,
+  onSelect,
+  onContext,
+}: {
+  nodes: KeyTreeNode[];
+  depth: number;
+  expanded: Record<string, boolean>;
+  onToggle: (path: string) => void;
+  selected: string | null;
+  onSelect: (name: string) => void;
+  onContext: (e: React.MouseEvent, key: KVKey) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {nodes.map((node) =>
+        node.kind === "folder" ? (
+          <div key={`folder:${node.path}`}>
+            <button
+              onClick={() => onToggle(node.path)}
+              aria-expanded={expanded[node.path] ?? false}
+              className="flex w-full items-center gap-1.5 border-b border-seam/60 py-[7px] pr-3 text-left transition hover:bg-ink-850"
+              style={{ paddingLeft: 12 + depth * 14 }}
+            >
+              <Icon
+                name={expanded[node.path] ? "ChevronDown" : "ChevronRight"}
+                className="h-3 w-3 shrink-0 text-ink-500"
+              />
+              <Icon name="FolderOpen" className="h-3.5 w-3.5 shrink-0 text-amber-300/70" />
+              <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-200">
+                {node.name || t("kv.emptySegment")}
+              </span>
+              <span className="shrink-0 font-mono text-[10px] text-ink-500">{node.count}</span>
+            </button>
+            {(expanded[node.path] ?? false) && (
+              <KeyTreeRows
+                nodes={node.children}
+                depth={depth + 1}
+                expanded={expanded}
+                onToggle={onToggle}
+                selected={selected}
+                onSelect={onSelect}
+                onContext={onContext}
+              />
+            )}
+          </div>
+        ) : (
+          <button
+            key={`key:${node.key.name}`}
+            onClick={() => onSelect(node.key.name)}
+            onContextMenu={(e) => onContext(e, node.key)}
+            className={cn(
+              "flex w-full items-center gap-2.5 border-b border-seam/60 py-[7px] pr-3 text-left transition hover:bg-ink-850",
+              selected === node.key.name && "bg-ink-800/70",
+            )}
+            style={{ paddingLeft: 12 + depth * 14 }}
+          >
+            <span
+              className={cn(
+                "shrink-0 rounded px-1.5 py-px font-mono text-[9.5px] uppercase",
+                TYPE_STYLES[node.key.type] ?? TYPE_STYLES.none,
+              )}
+            >
+              {node.key.type}
+            </span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-100">
+              {node.name || t("kv.emptySegment")}
+            </span>
+            <span className="shrink-0 font-mono text-[10px] text-ink-500">{formatTTL(node.key.ttl, t)}</span>
+            {(node.key.size ?? 0) > 0 && (
+              <span className="shrink-0 font-mono text-[10px] text-ink-600">{formatBytes(node.key.size ?? 0)}</span>
+            )}
+          </button>
+        ),
+      )}
+    </>
   );
 }
 
