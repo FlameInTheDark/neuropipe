@@ -8,14 +8,15 @@ import (
 
 func TestResolveAndPinPreserveExactWireTypes(t *testing.T) {
 	for _, testCase := range []struct {
-		name      string
-		config    map[string]any
-		want      Representation
-		wantKind  domain.TypeKind
-		wantError bool
+		name         string
+		config       map[string]any
+		want         Representation
+		wantKind     domain.TypeKind
+		wantDataType domain.DataType
+		wantError    bool
 	}{
-		{name: "default", config: map[string]any{}, want: Text, wantKind: domain.TypeString},
-		{name: "bytes", config: map[string]any{"representation": "bytes"}, want: Bytes, wantKind: domain.TypeBytes},
+		{name: "default", config: map[string]any{}, want: Text, wantKind: domain.TypeString, wantDataType: domain.DataText},
+		{name: "bytes", config: map[string]any{"representation": "bytes"}, want: Bytes, wantKind: domain.TypeBytes, wantDataType: domain.DataBytes},
 		{name: "non-string", config: map[string]any{"representation": true}, wantError: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -32,6 +33,9 @@ func TestResolveAndPinPreserveExactWireTypes(t *testing.T) {
 			pin := Pin("value", "Value", domain.PinInput, representation, true)
 			if pin.Type == nil || pin.Type.Kind != testCase.wantKind {
 				t.Fatalf("Pin() = %#v", pin)
+			}
+			if pin.DataType != testCase.wantDataType {
+				t.Fatalf("Pin() DataType = %q, want %q", pin.DataType, testCase.wantDataType)
 			}
 		})
 	}

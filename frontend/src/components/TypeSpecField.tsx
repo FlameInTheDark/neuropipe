@@ -38,6 +38,7 @@ export function tokenToPinDataType(token: string): PinDataType {
     case "float": return "number";
     case "bool": return "boolean";
     case "list": return "array";
+    case "bytes": return "bytes";
     case "map":
     case "object": return "object";
     default: return "any";

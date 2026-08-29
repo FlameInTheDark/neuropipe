@@ -111,3 +111,43 @@ func TestValidateV3AllowsExplicitTypeAssertNarrowing(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 }
+
+func TestPinsCompatibleBytesContract(t *testing.T) {
+	bytes := domain.NodePort{Kind: domain.PinData, Type: &domain.TypeSpec{Kind: domain.TypeBytes}}
+	text := domain.NodePort{Kind: domain.PinData, Type: &domain.TypeSpec{Kind: domain.TypeString}}
+	any := domain.NodePort{Kind: domain.PinData, Type: &domain.TypeSpec{Kind: domain.TypeAny}}
+	if !pinsCompatible(bytes, bytes) {
+		t.Fatal("bytes should wire to bytes")
+	}
+	if pinsCompatible(text, bytes) || pinsCompatible(any, bytes) {
+		t.Fatal("text or any must not implicitly narrow into bytes")
+	}
+	if !pinsCompatible(bytes, any) {
+		t.Fatal("bytes should assign to any")
+	}
+}
+
+func TestValidateV3BytesPinsWireBytesToBytes(t *testing.T) {
+	registry := catalog.New()
+	base := []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("decode", "data:base64_to_bytes", map[string]any{"value": "aGVsbG8="}),
+		v2Node("upload", "action:storage_upload_file", map[string]any{"storageId": "stg-1", "source": "bytes", "remotePath": "out.bin"}),
+	}
+	edges := []domain.FlowEdge{
+		execEdge("exec", "start", "out", "upload", "in"),
+		dataEdge("data", "decode", "result", "upload", "data"),
+	}
+	if err := Validate(domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: base, Edges: edges}, registry); err != nil {
+		t.Fatalf("V3 rejected a bytes-to-bytes wire: %v", err)
+	}
+
+	typed := []domain.FlowNode{
+		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
+		v2Node("constant", "data:constant", map[string]any{"value": "aGVsbG8=", "type": "text"}),
+		v2Node("upload", "action:storage_upload_file", map[string]any{"storageId": "stg-1", "source": "bytes", "remotePath": "out.bin"}),
+	}
+	if err := Validate(domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: typed, Edges: edges}, registry); err == nil {
+		t.Fatal("V3 accepted a text output wired into a bytes pin")
+	}
+}

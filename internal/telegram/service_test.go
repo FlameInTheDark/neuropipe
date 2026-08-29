@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -579,5 +580,227 @@ func TestBacklogFlushDiscardsOfflineUpdates(t *testing.T) {
 	bindingIDs, _ := runner.snapshot()
 	if len(bindingIDs) != 0 {
 		t.Fatalf("backlog was delivered: %v", bindingIDs)
+	}
+}
+
+func TestSendDocumentByURLRequestShape(t *testing.T) {
+	api := newFakeAPI(t, func(method string, body map[string]any) (any, int) {
+		if method != "sendDocument" {
+			t.Errorf("unexpected method %q", method)
+		}
+		if body["chat_id"] != "55" || body["document"] != "https://example.com/report.pdf" || body["caption"] != "monthly" {
+			t.Fatalf("sendDocument body = %#v", body)
+		}
+		if _, exists := body["parse_mode"]; exists {
+			t.Fatalf("empty parse mode must be omitted: %#v", body)
+		}
+		return map[string]any{"message_id": 900}, 0
+	})
+	vault := &memoryVault{values: map[string]string{tokenKey("bot"): "token"}}
+	service := newTestService(t, api, vault, nil, nil)
+	service.Configure(domain.TelegramSettings{Identities: []domain.TelegramIdentity{botIdentity("bot")}, DefaultBotIdentityID: "bot"})
+
+	result, err := service.SendTelegramDocument(context.Background(), domain.TelegramDocumentRequest{ChatID: "55", DocumentURL: "https://example.com/report.pdf", Caption: "monthly"})
+	if err != nil || !result.Sent || result.MessageID != "900" {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+}
+
+func TestSendDocumentUploadsMultipart(t *testing.T) {
+	var captured struct {
+		contentType string
+		chatID      string
+		caption     string
+		parseMode   string
+		fileName    string
+		fileType    string
+		fileBody    string
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		captured.contentType = request.Header.Get("Content-Type")
+		if err := request.ParseMultipartForm(10 << 20); err != nil {
+			t.Errorf("parse multipart: %v", err)
+			return
+		}
+		captured.chatID = request.FormValue("chat_id")
+		captured.caption = request.FormValue("caption")
+		captured.parseMode = request.FormValue("parse_mode")
+		file, header, err := request.FormFile("document")
+		if err != nil {
+			t.Errorf("form file: %v", err)
+			return
+		}
+		defer func() { _ = file.Close() }()
+		captured.fileName = header.Filename
+		captured.fileType = header.Header.Get("Content-Type")
+		body, _ := io.ReadAll(file)
+		captured.fileBody = string(body)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(okResult(map[string]any{"message_id": 901})))
+	}))
+	defer server.Close()
+
+	vault := &memoryVault{values: map[string]string{tokenKey("bot"): "token"}}
+	service := New(vault, &fakeBindings{}, newFakeRunner(), nil, nil)
+	service.SetBaseURL(server.URL)
+	t.Cleanup(service.Stop)
+	service.Configure(domain.TelegramSettings{Identities: []domain.TelegramIdentity{botIdentity("bot")}, DefaultBotIdentityID: "bot"})
+
+	result, err := service.SendTelegramDocument(context.Background(), domain.TelegramDocumentRequest{
+		ChatID: "55", Caption: "rendered", ParseMode: "HTML",
+		FileName: "weather.png", ContentType: "image/png", Data: []byte("PNGDATA"),
+	})
+	if err != nil || !result.Sent || result.MessageID != "901" {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+	if !strings.HasPrefix(captured.contentType, "multipart/form-data") {
+		t.Fatalf("content type = %q", captured.contentType)
+	}
+	if captured.chatID != "55" || captured.caption != "rendered" || captured.parseMode != "HTML" {
+		t.Fatalf("form fields = %+v", captured)
+	}
+	if captured.fileName != "weather.png" || captured.fileType != "image/png" || captured.fileBody != "PNGDATA" {
+		t.Fatalf("file part = %+v", captured)
+	}
+}
+
+func TestSendDocumentPreValidatesCaptionCap(t *testing.T) {
+	service := New(&memoryVault{values: map[string]string{}}, &fakeBindings{}, newFakeRunner(), nil, nil)
+	result, err := service.SendTelegramDocument(context.Background(), domain.TelegramDocumentRequest{ChatID: "1", DocumentURL: "https://example.com/x", Caption: strings.Repeat("a", 1025)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Sent || !strings.Contains(result.Reason, "1,024") {
+		t.Fatalf("cap result = %#v", result)
+	}
+}
+
+func TestSendPhotoByURLRequestShape(t *testing.T) {
+	api := newFakeAPI(t, func(method string, body map[string]any) (any, int) {
+		if method != "sendPhoto" {
+			t.Errorf("unexpected method %q", method)
+		}
+		if body["chat_id"] != "55" || body["photo"] != "https://example.com/photo.jpg" || body["caption"] != "sunset" {
+			t.Fatalf("sendPhoto body = %#v", body)
+		}
+		if _, exists := body["parse_mode"]; exists {
+			t.Fatalf("empty parse mode must be omitted: %#v", body)
+		}
+		return map[string]any{"message_id": 910}, 0
+	})
+	vault := &memoryVault{values: map[string]string{tokenKey("bot"): "token"}}
+	service := newTestService(t, api, vault, nil, nil)
+	service.Configure(domain.TelegramSettings{Identities: []domain.TelegramIdentity{botIdentity("bot")}, DefaultBotIdentityID: "bot"})
+
+	result, err := service.SendTelegramPhoto(context.Background(), domain.TelegramPhotoRequest{ChatID: "55", PhotoURL: "https://example.com/photo.jpg", Caption: "sunset"})
+	if err != nil || !result.Sent || result.MessageID != "910" {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+}
+
+func TestSendPhotoUploadsMultipart(t *testing.T) {
+	var captured struct {
+		contentType string
+		chatID      string
+		caption     string
+		parseMode   string
+		fileName    string
+		fileType    string
+		fileBody    string
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		captured.contentType = request.Header.Get("Content-Type")
+		if err := request.ParseMultipartForm(10 << 20); err != nil {
+			t.Errorf("parse multipart: %v", err)
+			return
+		}
+		captured.chatID = request.FormValue("chat_id")
+		captured.caption = request.FormValue("caption")
+		captured.parseMode = request.FormValue("parse_mode")
+		file, header, err := request.FormFile("photo")
+		if err != nil {
+			t.Errorf("form file: %v", err)
+			return
+		}
+		defer func() { _ = file.Close() }()
+		captured.fileName = header.Filename
+		captured.fileType = header.Header.Get("Content-Type")
+		body, _ := io.ReadAll(file)
+		captured.fileBody = string(body)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(okResult(map[string]any{"message_id": 911})))
+	}))
+	defer server.Close()
+
+	vault := &memoryVault{values: map[string]string{tokenKey("bot"): "token"}}
+	service := New(vault, &fakeBindings{}, newFakeRunner(), nil, nil)
+	service.SetBaseURL(server.URL)
+	t.Cleanup(service.Stop)
+	service.Configure(domain.TelegramSettings{Identities: []domain.TelegramIdentity{botIdentity("bot")}, DefaultBotIdentityID: "bot"})
+
+	result, err := service.SendTelegramPhoto(context.Background(), domain.TelegramPhotoRequest{
+		ChatID: "55", Caption: "rendered", ParseMode: "HTML",
+		FileName: "weather.png", ContentType: "image/png", Data: []byte("PNGDATA"),
+	})
+	if err != nil || !result.Sent || result.MessageID != "911" {
+		t.Fatalf("result = %#v, err = %v", result, err)
+	}
+	if !strings.HasPrefix(captured.contentType, "multipart/form-data") {
+		t.Fatalf("content type = %q", captured.contentType)
+	}
+	if captured.chatID != "55" || captured.caption != "rendered" || captured.parseMode != "HTML" {
+		t.Fatalf("form fields = %+v", captured)
+	}
+	if captured.fileName != "weather.png" || captured.fileType != "image/png" || captured.fileBody != "PNGDATA" {
+		t.Fatalf("file part = %+v", captured)
+	}
+}
+
+func TestSendPhotoUploadDefaultsNameAndType(t *testing.T) {
+	var captured struct {
+		fileName string
+		fileType string
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if err := request.ParseMultipartForm(10 << 20); err != nil {
+			t.Errorf("parse multipart: %v", err)
+			return
+		}
+		file, header, err := request.FormFile("photo")
+		if err != nil {
+			t.Errorf("form file: %v", err)
+			return
+		}
+		defer func() { _ = file.Close() }()
+		captured.fileName = header.Filename
+		captured.fileType = header.Header.Get("Content-Type")
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(okResult(map[string]any{"message_id": 912})))
+	}))
+	defer server.Close()
+
+	vault := &memoryVault{values: map[string]string{tokenKey("bot"): "token"}}
+	service := New(vault, &fakeBindings{}, newFakeRunner(), nil, nil)
+	service.SetBaseURL(server.URL)
+	t.Cleanup(service.Stop)
+	service.Configure(domain.TelegramSettings{Identities: []domain.TelegramIdentity{botIdentity("bot")}, DefaultBotIdentityID: "bot"})
+
+	_, err := service.SendTelegramPhoto(context.Background(), domain.TelegramPhotoRequest{ChatID: "55", Data: []byte("RAW")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.fileName != "photo.jpg" || captured.fileType != "image/jpeg" {
+		t.Fatalf("defaults = %+v", captured)
+	}
+}
+
+func TestSendPhotoPreValidatesCaptionCap(t *testing.T) {
+	service := New(&memoryVault{values: map[string]string{}}, &fakeBindings{}, newFakeRunner(), nil, nil)
+	result, err := service.SendTelegramPhoto(context.Background(), domain.TelegramPhotoRequest{ChatID: "1", PhotoURL: "https://example.com/x.jpg", Caption: strings.Repeat("a", 1025)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Sent || !strings.Contains(result.Reason, "1,024") {
+		t.Fatalf("cap result = %#v", result)
 	}
 }

@@ -4,7 +4,7 @@ import { Events } from "@wailsio/runtime";
 import { ask } from "@/stores/confirmation";
 import i18n from "@/i18n";
 import { desktop } from "@/lib/bridge";
-import type { Database, Pipeline, TwitchIdentity, DiscordIdentity, TelegramIdentity } from "@/lib/types";
+import type { Database, Pipeline, Storage, TwitchIdentity, DiscordIdentity, TelegramIdentity } from "@/lib/types";
 import { pipelineFromBackend } from "@/lib/adapters";
 import { TopBar } from "./components/TopBar";
 import { IconRail, NAV_ALL } from "./components/IconRail";
@@ -208,9 +208,13 @@ export default function App() {
       case "runs":
         void workspace.refreshTriggers();
         break;
-      case "settings":
+      case "integrations":
         // integration pages render settings-backed identities and trigger
         // bindings; both mutate server-side while the user is elsewhere
+        void workspace.refreshSettings();
+        void workspace.refreshTriggers();
+        break;
+      case "settings":
         void workspace.refreshSettings();
         void workspace.refreshTriggers();
         break;
@@ -513,10 +517,12 @@ export default function App() {
 
   const [secrets, setSecrets] = useState<string[]>([]);
   const [databases, setDatabases] = useState<Database[]>([]);
+  const [storages, setStorages] = useState<Storage[]>([]);
   useEffect(() => {
     if (!nav.inEditor) return;
     void desktop.listSecrets().then((list) => setSecrets(list.map((s) => s.name))).catch(() => undefined);
     void desktop.listDatabases().then(setDatabases).catch(() => undefined);
+    void desktop.listStorages().then(setStorages).catch(() => undefined);
   }, [nav.inEditor]);
 
   const identities: TwitchIdentity[] = useMemo(
@@ -631,6 +637,7 @@ export default function App() {
                     pipelines: workspace.pipelines,
                     secrets,
                     databases,
+                    storages,
                     identities,
                     discordIdentities,
                     telegramIdentities,

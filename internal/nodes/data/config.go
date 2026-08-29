@@ -131,7 +131,7 @@ func ObjectFieldsFor(config, defaults map[string]any) ([]ObjectField, error) {
 // dynamic node editor. V3 pin contracts are resolved from these labels.
 func ValidDataType(dataType domain.DataType) bool {
 	switch dataType {
-	case domain.DataAny, domain.DataText, domain.DataNumber, domain.DataBoolean, domain.DataObject, domain.DataList:
+	case domain.DataAny, domain.DataText, domain.DataNumber, domain.DataBoolean, domain.DataObject, domain.DataList, domain.DataBytes:
 		return true
 	default:
 		return false

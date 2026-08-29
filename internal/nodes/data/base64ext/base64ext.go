@@ -47,7 +47,7 @@ func bytesToBase64Definition() domain.NodeDefinition {
 		Color:       "#22c55e",
 		Mode:        domain.NodePure,
 		Inputs: []domain.NodePort{
-			{ID: "value", Label: "Value", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataAny, Type: &bytesType, Color: "#a1a1aa", Required: true, MaxConnections: 1},
+			{ID: "value", Label: "Value", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataBytes, Type: &bytesType, Color: "#fbbf24", Required: true, MaxConnections: 1},
 		},
 		Outputs: []domain.NodePort{
 			{ID: "result", Label: "Result", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataText, Type: &textType, Color: "#e879f9", MaxConnections: 1},
@@ -96,7 +96,7 @@ func base64ToBytesDefinition() domain.NodeDefinition {
 			{ID: "value", Label: "Value", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataText, Type: &textType, Color: "#e879f9", Required: true, MaxConnections: 1},
 		},
 		Outputs: []domain.NodePort{
-			{ID: "result", Label: "Result", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataAny, Type: &bytesType, Color: "#a1a1aa", MaxConnections: 1},
+			{ID: "result", Label: "Result", Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataBytes, Type: &bytesType, Color: "#fbbf24", MaxConnections: 1},
 		},
 		Fields: []domain.ConfigField{
 			{Name: "value", Label: "Value", Kind: "textarea", Placeholder: "Paste Base64 here", Required: true},

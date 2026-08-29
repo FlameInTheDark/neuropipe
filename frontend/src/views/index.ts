@@ -6,5 +6,7 @@ export { RunsView } from "./RunsView";
 export { ReportsView } from "./ReportsView";
 export { TriggersView, SchedulesView, FunctionsView } from "./AutomationViews";
 export { VariablesView, DatastoresView } from "./DataViews";
+export { StoragesView } from "./StoragesView";
+export { IntegrationsView } from "./IntegrationsView";
 export { MetricsView, DocsView } from "./SystemViews";
 export { SettingsView } from "./SettingsView";

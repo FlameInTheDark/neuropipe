@@ -212,3 +212,36 @@ func (runtime *testRuntime) LookupVariable(name string) (any, bool) {
 
 func (runtime *testRuntime) StoreVariable(name string, value any) { runtime.variables[name] = value }
 func (runtime *testRuntime) DeleteVariable(name string)           { delete(runtime.variables, name) }
+
+func TestNodeResolvesBytesContractAsBytesPin(t *testing.T) {
+	module := New()
+	definition, err := module.Resolve(flowNode(configFor(
+		"return { picture };",
+		[]any{pin("picture", "Picture", domain.TypeSpec{Kind: domain.TypeBytes}, true)},
+		[]any{pin("blob", "Blob", domain.TypeSpec{Kind: domain.TypeBytes}, false)},
+		nil,
+	)))
+	if err != nil {
+		t.Fatalf("resolve JavaScript node: %v", err)
+	}
+	var input, output *domain.NodePort
+	for index := range definition.Inputs {
+		if definition.Inputs[index].ID == "picture" {
+			input = &definition.Inputs[index]
+		}
+	}
+	for index := range definition.Outputs {
+		if definition.Outputs[index].ID == "blob" {
+			output = &definition.Outputs[index]
+		}
+	}
+	if input == nil || output == nil {
+		t.Fatalf("bytes pins missing: %#v / %#v", definition.Inputs, definition.Outputs)
+	}
+	if input.DataType != domain.DataBytes || input.Type == nil || input.Type.Kind != domain.TypeBytes {
+		t.Fatalf("picture pin = %#v, want dataType bytes", input)
+	}
+	if output.DataType != domain.DataBytes || output.Type == nil || output.Type.Kind != domain.TypeBytes {
+		t.Fatalf("blob pin = %#v, want dataType bytes", output)
+	}
+}

@@ -46,6 +46,8 @@ func typeSpecForDataType(dataType domain.DataType) *domain.TypeSpec {
 	case domain.DataList:
 		spec.Kind = domain.TypeList
 		spec.Element = &domain.TypeSpec{Kind: domain.TypeAny}
+	case domain.DataBytes:
+		spec.Kind = domain.TypeBytes
 	default:
 		spec.Kind = domain.TypeAny
 	}
@@ -64,6 +66,8 @@ func dataColor(dataType domain.DataType) string {
 		return "#60a5fa"
 	case domain.DataList:
 		return "#facc15"
+	case domain.DataBytes:
+		return "#fbbf24"
 	default:
 		return "#a1a1aa"
 	}

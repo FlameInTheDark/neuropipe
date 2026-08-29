@@ -132,3 +132,16 @@ func TestValidateSpec(t *testing.T) {
 		t.Fatal("duplicate record field should be rejected")
 	}
 }
+
+func TestFromDataTypeMapsBytesLabel(t *testing.T) {
+	spec := FromDataType(domain.DataBytes)
+	if spec.Kind != domain.TypeBytes {
+		t.Fatalf("FromDataType(DataBytes) = %#v, want kind %q", spec, domain.TypeBytes)
+	}
+	if !Assignable(spec, domain.TypeSpec{Kind: domain.TypeBytes}) {
+		t.Fatal("bytes label should stay assignable to the bytes wire contract")
+	}
+	if Assignable(spec, String()) || Assignable(String(), spec) {
+		t.Fatal("bytes should never implicitly convert to or from text")
+	}
+}

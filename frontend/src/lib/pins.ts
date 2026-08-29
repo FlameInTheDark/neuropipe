@@ -45,12 +45,13 @@ const PALETTES: Record<PinDataType, PinPalette> = {
   array: pal("array", "Array"),
   map: pal("map", "Map"),
   object: pal("object", "Object"),
+  bytes: pal("bytes", "Bytes"),
   any: pal("any", "Any"),
 };
 
 /** data-types a user may assign to an editable pin (exec is structural, not selectable) */
 export const ASSIGNABLE_PIN_TYPES: PinDataType[] = [
-  "text", "number", "boolean", "array", "map", "object", "any",
+  "text", "number", "boolean", "array", "map", "object", "bytes", "any",
 ];
 
 export function portKindFromDataType(dataType?: PinDataType): PortKind {

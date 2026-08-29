@@ -8,6 +8,7 @@ export function typeSpecFromDataType(dataType: DataType): TypeSpec {
     case "boolean": return { kind: "bool" };
     case "object": return { kind: "record" };
     case "list": return { kind: "list", element: { kind: "any" } };
+    case "bytes": return { kind: "bytes" };
     default: return { kind: "any" };
   }
 }

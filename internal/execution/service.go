@@ -39,6 +39,7 @@ type Service struct {
 	globals  pipeline.GlobalVariablesStore
 	database nodes.SQLExecutor
 	kv       nodes.KVExecutor
+	storage  nodes.StorageExecutor
 	dialogs  nodes.DialogOpener
 	inputs   nodes.InputDialogOpener
 	forms    nodes.FormDialogOpener
@@ -120,6 +121,13 @@ func WithDatabaseService(service nodes.SQLExecutor) ServiceOption {
 // A nil service keeps the engine usable in headless tests.
 func WithKVService(service nodes.KVExecutor) ServiceOption {
 	return func(s *Service) { s.kv = service }
+}
+
+// WithStorageService supplies the registered S3/FTP executor to graph runs.
+// A nil service keeps the engine usable in headless tests and turns storage
+// node calls into explicit errors.
+func WithStorageService(service nodes.StorageExecutor) ServiceOption {
+	return func(s *Service) { s.storage = service }
 }
 
 // WithDialogOpener attaches the native dialog opener used by Display Message
@@ -616,6 +624,7 @@ func (s *Service) runQueued(ctx context.Context, job queuedRun) {
 		pipeline.WithGlobalVariablesStore(s.globals),
 		pipeline.WithSQLExecutor(s.database),
 		pipeline.WithKVExecutor(s.kv),
+		pipeline.WithStorageExecutor(s.storage),
 		pipeline.WithDialogOpener(s.dialogs),
 		pipeline.WithInputDialogOpener(s.inputs),
 		pipeline.WithFormDialogOpener(s.forms),
@@ -828,6 +837,7 @@ func (s *Service) runDefinition(ctx context.Context, pipelineID, executionTrigge
 		pipeline.WithGlobalVariablesStore(s.globals),
 		pipeline.WithSQLExecutor(s.database),
 		pipeline.WithKVExecutor(s.kv),
+		pipeline.WithStorageExecutor(s.storage),
 		pipeline.WithDialogOpener(s.dialogs),
 		pipeline.WithInputDialogOpener(s.inputs),
 		pipeline.WithFormDialogOpener(s.forms),

@@ -18,6 +18,7 @@ const CAT_ICON: Record<string, string> = {
   Date: "Clock",
   Display: "MessageSquare",
   Files: "FileText",
+  Image: "Image",
   "KV Store": "Boxes",
   Discord: "Hash",
   Telegram: "Send",

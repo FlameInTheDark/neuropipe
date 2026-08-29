@@ -104,7 +104,7 @@ export function ContextMenuProvider({ children, onAnyAction }: { children: React
       {menu && createPortal(<Menu menu={menu} menuRef={menuRef} close={close} action={action} />, document.body)}
       {glyph && (
         <div
-          className="action-glyph pointer-events-none fixed z-[70] rounded-full border border-ink-500/60 bg-ink-800 p-1.5 text-fg"
+          className="action-glyph pointer-events-none fixed z-[95] rounded-full border border-ink-500/60 bg-ink-800 p-1.5 text-fg"
           style={{ left: glyph.x - 26, top: glyph.y + 14 }}
         >
           <Icon name={glyph.icon ?? "Check"} className="h-3 w-3" />
@@ -157,7 +157,7 @@ function Menu({
       ref={menuRef}
       role="menu"
       style={{ left: pos.left, top: pos.top, transformOrigin: pos.origin }}
-      className="timeline-menu fixed z-[60] min-w-[200px] rounded-[9px] border border-ink-650 bg-ink-850/95 p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.02)_inset] backdrop-blur-xl"
+      className="timeline-menu fixed z-[95] min-w-[200px] rounded-[9px] border border-ink-650 bg-ink-850/95 p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.02)_inset] backdrop-blur-xl"
       onContextMenu={(e) => e.preventDefault()}
     >
       {menu.items.map((item, i) =>

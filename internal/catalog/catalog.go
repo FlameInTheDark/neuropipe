@@ -392,7 +392,7 @@ func fieldDataType(kind string) domain.DataType {
 }
 
 func isConfigurationOnlyField(kind string) bool {
-	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "type-spec" || kind == "wire-representation" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent" || kind == "javascript-editor" || kind == "boolean" || kind == "chat-mode" || kind == "form-builder"
+	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "type-spec" || kind == "wire-representation" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent" || kind == "javascript-editor" || kind == "boolean" || kind == "chat-mode" || kind == "form-builder" || kind == "image-editor" || kind == "embed-editor"
 }
 
 func field(name, label, kind, placeholder string, required bool) domain.ConfigField {

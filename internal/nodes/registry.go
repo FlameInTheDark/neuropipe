@@ -279,6 +279,27 @@ type KVExecutor interface {
 	ExecuteCommand(context.Context, domain.KVCommandRequest) (domain.KVCommandResult, error)
 }
 
+// StorageExecutorProvider supplies the registered-storage boundary to
+// storage nodes.
+type StorageExecutorProvider interface {
+	StorageExecutor() StorageExecutor
+}
+
+// StorageExecutor is the only remote-storage surface available to Blueprint
+// nodes. Nodes never import S3 or FTP clients; they pass normalized domain
+// requests and receive JSON-safe results.
+type StorageExecutor interface {
+	StorageListFiles(ctx context.Context, request domain.StorageListRequest) (domain.StorageListResult, error)
+	StorageUploadFile(ctx context.Context, request domain.StorageUploadFileRequest) (domain.StorageUploadResult, error)
+	StorageUploadData(ctx context.Context, request domain.StorageUploadDataRequest) (domain.StorageUploadResult, error)
+	StorageDownloadFile(ctx context.Context, request domain.StorageDownloadRequest) (domain.StorageDownloadResult, error)
+	StorageDelete(ctx context.Context, request domain.StorageDeleteRequest) (domain.StorageDeleteResult, error)
+	StorageMakeDir(ctx context.Context, request domain.StorageMakeDirRequest) (domain.StorageMakeDirResult, error)
+	StorageMove(ctx context.Context, request domain.StorageMoveRequest) (domain.StorageMoveResult, error)
+	StoragePresignURL(ctx context.Context, request domain.StoragePresignRequest) (domain.StoragePresignResult, error)
+	StoragePublicURL(ctx context.Context, request domain.StoragePublicURLRequest) (domain.StoragePublicURLResult, error)
+}
+
 // JavaScriptHostProvider supplies the deliberately narrow application services
 // that a JavaScript node can reach through its np object. Node modules depend
 // on this port rather than Wails, persistence, or a graph-engine concrete type.
@@ -482,6 +503,7 @@ type DiscordSender interface {
 type TelegramSender interface {
 	SendTelegramMessage(ctx context.Context, request domain.TelegramMessageRequest) (domain.TelegramMessageResult, error)
 	SendTelegramPhoto(ctx context.Context, request domain.TelegramPhotoRequest) (domain.TelegramMessageResult, error)
+	SendTelegramDocument(ctx context.Context, request domain.TelegramDocumentRequest) (domain.TelegramMessageResult, error)
 	EditTelegramMessage(ctx context.Context, request domain.TelegramEditRequest) (domain.TelegramActionResult, error)
 	DeleteTelegramMessage(ctx context.Context, request domain.TelegramDeleteRequest) (domain.TelegramActionResult, error)
 	AnswerTelegramCallbackQuery(ctx context.Context, request domain.TelegramCallbackAnswerRequest) (domain.TelegramActionResult, error)

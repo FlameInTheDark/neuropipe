@@ -2,7 +2,10 @@ package sendmessage
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -127,5 +130,319 @@ func TestValidationErrors(t *testing.T) {
 	}
 	if _, err := module.Execute(context.Background(), invocation(map[string]any{"channel": "1", "message": "x"}), nil); err == nil {
 		t.Fatal("missing runtime accepted")
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* embeds                                                              */
+/* ------------------------------------------------------------------ */
+
+func TestEmbedsFromDocumentWithTemplates(t *testing.T) {
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-1", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	config := map[string]any{"embeds": map[string]any{
+		"pins": []any{map[string]any{"name": "city", "type": "text", "sample": "Berlin"}},
+		"embeds": []any{map[string]any{
+			"title": "Weather in {{city}}", "color": "#5865F2",
+			"fields": []any{map[string]any{"name": "City", "value": "{{city}}"}},
+		}},
+	}}
+	invocation := invocation(map[string]any{"channel": "55", "city": "Osaka"})
+	invocation.Config = config
+	result, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Ports[0] != "sent" {
+		t.Fatalf("ports = %v", result.Ports)
+	}
+	if len(sender.request.Embeds) != 1 {
+		t.Fatalf("embeds = %#v", sender.request.Embeds)
+	}
+	embed := sender.request.Embeds[0]
+	if embed.Title != "Weather in Osaka" || embed.Color != 0x5865F2 {
+		t.Fatalf("embed = %#v", embed)
+	}
+	if len(embed.Fields) != 1 || embed.Fields[0].Value != "Osaka" {
+		t.Fatalf("fields = %#v", embed.Fields)
+	}
+}
+
+func TestEmbedsJsonPinOverridesDocument(t *testing.T) {
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-2", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	invocation := invocation(map[string]any{
+		"channel": "55", "embedsJson": `{"title":"Live data","description":"from a pin"}`,
+	})
+	invocation.Config = map[string]any{"embeds": map[string]any{
+		"embeds": []any{map[string]any{"title": "from editor"}},
+	}}
+	if _, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.request.Embeds) != 1 || sender.request.Embeds[0].Title != "Live data" {
+		t.Fatalf("embeds = %#v", sender.request.Embeds)
+	}
+}
+
+func TestEmbedsJsonInvalidRejected(t *testing.T) {
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	result, err := module.Execute(context.Background(), invocation(map[string]any{
+		"channel": "55", "embedsJson": `{"title":`,
+	}), runtimeStub{sender: &senderStub{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Ports[0] != "rejected" || !strings.Contains(result.Outputs["reason"].(string), "not a valid embed") {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestEmbedsOnlyMessageWithoutText(t *testing.T) {
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-3", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	invocation := invocation(map[string]any{"channel": "55"})
+	invocation.Config = map[string]any{"embeds": map[string]any{
+		"embeds": []any{map[string]any{"title": "No text needed"}},
+	}}
+	if _, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if sender.request.Message != "" || len(sender.request.Embeds) != 1 {
+		t.Fatalf("request = %#v", sender.request)
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* attachments                                                         */
+/* ------------------------------------------------------------------ */
+
+func TestAttachmentsFromPathAndData(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.txt")
+	if err := os.WriteFile(path, []byte("report body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-4", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	inputs := map[string]any{
+		"channel": "55", "message": "see attached",
+		"filePath": path, "fileName": "weather.png",
+		"fileData": base64.StdEncoding.EncodeToString([]byte("drawn image")),
+	}
+	invocation := invocation(inputs)
+	if _, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.request.Attachments) != 2 {
+		t.Fatalf("attachments = %#v", sender.request.Attachments)
+	}
+	if sender.request.Attachments[0].Name != "report.txt" || string(sender.request.Attachments[0].Data) != "report body" {
+		t.Fatalf("path attachment = %#v", sender.request.Attachments[0])
+	}
+	if sender.request.Attachments[1].Name != "weather.png" || string(sender.request.Attachments[1].Data) != "drawn image" {
+		t.Fatalf("data attachment = %#v", sender.request.Attachments[1])
+	}
+}
+
+func TestAttachmentsOnlyMessageWithoutText(t *testing.T) {
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-5", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	invocation := invocation(map[string]any{"channel": "55", "fileData": []byte("bytes"), "fileName": "out.bin"})
+	if _, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.request.Attachments) != 1 {
+		t.Fatalf("attachments = %#v", sender.request.Attachments)
+	}
+	if sender.request.Attachments[0].Name != "out.bin" {
+		t.Fatalf("attachment = %#v", sender.request.Attachments[0])
+	}
+}
+
+func TestAttachmentMissingFileRejected(t *testing.T) {
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	result, err := module.Execute(context.Background(), invocation(map[string]any{
+		"channel": "55", "message": "x", "filePath": "/definitely/missing/file.bin",
+	}), runtimeStub{sender: &senderStub{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Ports[0] != "rejected" || !strings.Contains(result.Outputs["reason"].(string), "no such file or directory") {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestEmptyEverythingRejected(t *testing.T) {
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	if _, err := module.Execute(context.Background(), invocation(map[string]any{"channel": "55"}), runtimeStub{sender: &senderStub{}}); err == nil {
+		t.Fatal("empty message with no embeds or attachments accepted")
+	}
+}
+
+func TestResolveAddsDocumentPinPorts(t *testing.T) {
+	node := domain.FlowNode{Type: "action:discord_send_message", Data: map[string]any{"config": map[string]any{
+		"embeds": map[string]any{
+			"pins": []any{
+				map[string]any{"name": "city", "type": "text"},
+				map[string]any{"name": "temp", "type": "number"},
+				map[string]any{"name": "hot", "type": "boolean"},
+			},
+			"embeds": []any{map[string]any{"title": "T"}},
+		},
+	}}}
+	definition, err := resolve(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(definition.Inputs))
+	for _, port := range definition.Inputs {
+		ids = append(ids, port.ID)
+	}
+	want := []string{"in", "message", "channel", "replyToMessageId", "embedsJson", "fileUrl", "filePath", "fileBase64", "fileData", "fileName", "identityId", "city", "temp", "hot"}
+	if len(ids) != len(want) {
+		t.Fatalf("pin ids = %v", ids)
+	}
+	for index := range want {
+		if ids[index] != want[index] {
+			t.Fatalf("pin ids = %v, want %v", ids, want)
+		}
+	}
+	for _, port := range definition.Inputs[11:] {
+		if port.Kind != domain.PinData || port.MaxConnections != 1 {
+			t.Fatalf("dynamic port = %#v", port)
+		}
+	}
+	if definition.Inputs[12].DataType != domain.DataNumber || definition.Inputs[13].DataType != domain.DataBoolean {
+		t.Fatalf("typed pins = %#v %#v", definition.Inputs[11], definition.Inputs[12])
+	}
+}
+
+func TestResolveWithoutEmbedsConfigKeepsBasePins(t *testing.T) {
+	// graphs saved before embeds existed carry no embeds config at all
+	node := domain.FlowNode{Type: "action:discord_send_message", Data: map[string]any{"config": map[string]any{}}}
+	definition, err := resolve(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definition.Inputs) != 11 {
+		t.Fatalf("pin count = %d", len(definition.Inputs))
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* image source selector                                               */
+/* ------------------------------------------------------------------ */
+
+func pinIDs(definition domain.NodeDefinition) []string {
+	ids := make([]string, 0, len(definition.Inputs))
+	for _, port := range definition.Inputs {
+		ids = append(ids, port.ID)
+	}
+	return ids
+}
+
+func resolveWithConfig(t *testing.T, config map[string]any) domain.NodeDefinition {
+	t.Helper()
+	definition, err := resolve(domain.FlowNode{Type: "action:discord_send_message", Data: map[string]any{"config": config}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return definition
+}
+
+func containsPin(ids []string, pinID string) bool {
+	for _, id := range ids {
+		if id == pinID {
+			return true
+		}
+	}
+	return false
+}
+
+// An explicit source keeps only its own pin plus the shared file name pin;
+// everything unrelated to attachments stays visible.
+func TestResolveImageSourceFiltersPins(t *testing.T) {
+	urlOnly := pinIDs(resolveWithConfig(t, map[string]any{"imageSource": "url"}))
+	if !containsPin(urlOnly, "fileUrl") || containsPin(urlOnly, "filePath") || containsPin(urlOnly, "fileBase64") || containsPin(urlOnly, "fileData") || containsPin(urlOnly, "fileName") {
+		t.Fatalf("url mode pins = %v", urlOnly)
+	}
+	bytesOnly := pinIDs(resolveWithConfig(t, map[string]any{"imageSource": "bytes"}))
+	if !containsPin(bytesOnly, "fileData") || !containsPin(bytesOnly, "fileName") || containsPin(bytesOnly, "fileUrl") || containsPin(bytesOnly, "filePath") || containsPin(bytesOnly, "fileBase64") {
+		t.Fatalf("bytes mode pins = %v", bytesOnly)
+	}
+	base64Only := pinIDs(resolveWithConfig(t, map[string]any{"imageSource": "base64"}))
+	if !containsPin(base64Only, "fileBase64") || !containsPin(base64Only, "fileName") || containsPin(base64Only, "fileData") {
+		t.Fatalf("base64 mode pins = %v", base64Only)
+	}
+	for _, always := range []string{"in", "message", "channel", "embedsJson", "identityId"} {
+		if !containsPin(bytesOnly, always) {
+			t.Fatalf("mode filtering dropped unrelated pin %q: %v", always, bytesOnly)
+		}
+	}
+}
+
+// Auto (and a graph saved before the selector existed) keeps every source
+// pin so wired connections from older blueprints keep resolving.
+func TestResolveImageSourceAutoKeepsAllPins(t *testing.T) {
+	for _, config := range []map[string]any{{"imageSource": ""}, {}} {
+		ids := pinIDs(resolveWithConfig(t, config))
+		for _, pin := range []string{"fileUrl", "filePath", "fileBase64", "fileData", "fileName"} {
+			if !containsPin(ids, pin) {
+				t.Fatalf("config %v lost pin %q: %v", config, pin, ids)
+			}
+		}
+	}
+}
+
+func TestAttachmentFromBase64Source(t *testing.T) {
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-6", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	invocation := invocation(map[string]any{
+		"channel": "55", "fileBase64": "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("pixel data")), "fileName": "chart.png",
+	})
+	invocation.Config = map[string]any{"imageSource": "base64"}
+	if _, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.request.Attachments) != 1 {
+		t.Fatalf("attachments = %#v", sender.request.Attachments)
+	}
+	attachment := sender.request.Attachments[0]
+	if attachment.Name != "chart.png" || string(attachment.Data) != "pixel data" {
+		t.Fatalf("attachment = %#v", attachment)
+	}
+}
+
+// A stale value left behind in a hidden field must never leak into the
+// message: an explicit mode reads only its own source.
+func TestImageSourceModeIgnoresOtherSources(t *testing.T) {
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-7", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	invocation := invocation(map[string]any{
+		"channel": "55", "message": "hello",
+		"fileUrl": "https://example.com/old.png", "filePath": "/definitely/missing.png", "fileBase64": "not-used",
+	})
+	invocation.Config = map[string]any{"imageSource": "bytes"}
+	if _, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.request.Attachments) != 0 {
+		t.Fatalf("bytes mode must ignore other sources: %#v", sender.request.Attachments)
+	}
+}
+
+func TestAttachmentFromBytesSource(t *testing.T) {
+	sender := &senderStub{result: domain.DiscordMessageResult{MessageID: "msg-8", Sent: true}}
+	module := nodes.Implementation{Metadata: definition(), Executor: execute}
+	invocation := invocation(map[string]any{
+		"channel": "55", "fileData": []byte("drawn image"), "fileName": "weather.png",
+	})
+	invocation.Config = map[string]any{"imageSource": "bytes"}
+	if _, err := module.Execute(context.Background(), invocation, runtimeStub{sender: sender}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.request.Attachments) != 1 || sender.request.Attachments[0].Name != "weather.png" || string(sender.request.Attachments[0].Data) != "drawn image" {
+		t.Fatalf("attachments = %#v", sender.request.Attachments)
 	}
 }

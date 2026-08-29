@@ -165,6 +165,13 @@ func WithKVExecutor(executor nodes.KVExecutor) EngineOption {
 	return func(engine *Engine) { engine.kv = executor }
 }
 
+// WithStorageExecutor enables registered S3/FTP storage access for storage
+// nodes. A nil executor keeps the engine usable in headless tests and turns
+// storage node calls into explicit errors.
+func WithStorageExecutor(executor nodes.StorageExecutor) EngineOption {
+	return func(engine *Engine) { engine.storage = executor }
+}
+
 // WithDialogOpener enables Display Message and Display Question nodes by
 // exposing a focused native-dialog opener to running graphs. A nil opener
 // keeps the engine usable in headless tests and turns dialog calls into

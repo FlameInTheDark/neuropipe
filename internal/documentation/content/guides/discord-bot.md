@@ -17,7 +17,7 @@ permissions your pipelines need: *Send Messages*, *Read Message History*,
 
 ## Connect the identity
 
-In **Settings → Discord**, choose **Add bot** and paste the token. Neuropipe
+In **Integrations → Discord**, choose **Add bot** and paste the token. Neuropipe
 validates it with a REST `users/@me` call, stores it only in the
 Windows-protected local vault, and lists the resolved bot identity. Tokens are
 static secrets — they do not expire like OAuth tokens — but they can be
@@ -46,7 +46,7 @@ filters work the same way: an event that does not match simply stops the flow.
 
 Example: configure `message.create`, prefix `!hello`. Connect Text to a
 formatter and the trigger's Channel ID to **Send Discord Message**. Publish
-the pipeline, trust the trigger on the settings page, then send `!hello` in a
+the pipeline, trust the trigger on the Integrations page, then send `!hello` in a
 channel the bot can read.
 
 ## Sending messages and reactions

@@ -48,7 +48,7 @@ export type Capability =
 export type PinKind = "exec" | "data" | "tool";
 export type PinDirection = "input" | "output";
 export type DataType =
-  "any" | "text" | "number" | "boolean" | "object" | "list";
+  "any" | "text" | "number" | "boolean" | "object" | "list" | "bytes";
 export type TypeKind =
   | "any" | "bool" | "string" | "int" | "float" | "bytes" | "list" | "map" | "record";
 export interface TypeSpec {
@@ -353,6 +353,70 @@ export interface DatabaseSchema { tables: DatabaseTable[]; }
 export interface DatabaseTable { name: string; columns: DatabaseColumn[]; indexes: DatabaseIndex[]; }
 export interface DatabaseColumn { name: string; dataType: string; nullable: boolean; primaryKey: boolean; default?: string; }
 export interface DatabaseIndex { name: string; unique: boolean; columns: string[]; }
+
+/* ---------------- Remote storages (S3 / FTP) contracts ---------------- */
+
+export type StorageDriver = "s3" | "ftp";
+export type StorageTLSMode = "" | "none" | "explicit" | "implicit";
+
+export interface Storage {
+  id: string;
+  name: string;
+  driver: StorageDriver;
+  /** S3-compatible settings. */
+  endpoint?: string;
+  region?: string;
+  bucket?: string;
+  accessKey?: string;
+  secretRef?: string;
+  /** HTTPS for custom endpoints (undefined = default on). */
+  secure?: boolean;
+  /** FTP settings. */
+  host?: string;
+  port?: number;
+  username?: string;
+  passwordRef?: string;
+  tlsMode?: StorageTLSMode;
+  baseDir?: string;
+  /** optional HTTP(S) base serving the storage root (CDN / web mapping). */
+  publicBaseUrl?: string;
+  status: DatabaseStatus;
+  lastPingAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveStorageRequest {
+  id?: string;
+  name: string;
+  driver: StorageDriver;
+  endpoint?: string;
+  region?: string;
+  bucket?: string;
+  accessKey?: string;
+  secretRef?: string;
+  /** write-only; blank keeps the stored secret */
+  secret?: string;
+  secure?: boolean;
+  host?: string;
+  port?: number;
+  username?: string;
+  passwordRef?: string;
+  /** write-only; blank keeps the stored password */
+  password?: string;
+  tlsMode?: StorageTLSMode;
+  baseDir?: string;
+  publicBaseUrl?: string;
+}
+
+export interface StorageEntry { name: string; path: string; isDir: boolean; size: number; modTime: string; }
+export interface StorageListResult { path: string; entries: StorageEntry[] | null; }
+export interface StorageUploadResult { key: string; size: number; driver: string; }
+export interface StorageDownloadResult { path: string; name: string; bytes: number; }
+export interface StorageDeleteResult { deleted: boolean; count: number; }
+export interface StorageMakeDirResult { path: string; created: boolean; }
+export interface StorageMoveResult { from: string; to: string; moved: boolean; }
+
 export interface SQLParameter { id: string; name: string; label: string; type: TypeSpec; required?: boolean; }
 export interface SQLArgument { name: string; value: unknown; }
 export interface SQLRequest { databaseId: string; sql: string; parameters: SQLArgument[]; maxRows?: number; }

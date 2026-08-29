@@ -55,6 +55,10 @@ const (
 	DataBoolean DataType = "boolean"
 	DataObject  DataType = "object"
 	DataList    DataType = "list"
+	// DataBytes is the legacy display label for the V3 bytes wire contract.
+	// A pin declared bytes carries raw binary data ([]byte) and never accepts
+	// implicit text conversion; use an explicit encoder node to bridge.
+	DataBytes DataType = "bytes"
 )
 
 // TypeKind is the JSON-safe subset of Go types available on Blueprint data
@@ -916,7 +920,7 @@ func ValidateGlobalVariableName(name string) error {
 // ValidDataType reports whether the value is a recognised pinned data type.
 func ValidDataType(dataType DataType) bool {
 	switch dataType {
-	case DataAny, DataText, DataNumber, DataBoolean, DataObject, DataList:
+	case DataAny, DataText, DataNumber, DataBoolean, DataObject, DataList, DataBytes:
 		return true
 	default:
 		return false
@@ -1155,10 +1159,57 @@ type DiscordEventDescriptor struct {
 }
 
 type DiscordMessageRequest struct {
-	IdentityID string `json:"identityId,omitempty"`
-	ChannelID  string `json:"channelId"`
-	Message    string `json:"message"`
-	ReplyToID  string `json:"replyToMessageId,omitempty"`
+	IdentityID  string              `json:"identityId,omitempty"`
+	ChannelID   string              `json:"channelId"`
+	Message     string              `json:"message"`
+	ReplyToID   string              `json:"replyToMessageId,omitempty"`
+	Embeds      []*DiscordEmbed     `json:"embeds,omitempty"`
+	Attachments []DiscordAttachment `json:"attachments,omitempty"`
+}
+
+// DiscordEmbed mirrors Discord's embed object using the API's own snake_case
+// wire format, so raw embed JSON pasted into the embedsJson pin parses without
+// translation. It is converted to the transport library's type inside the
+// Discord service; nodes never depend on discordgo.
+type DiscordEmbed struct {
+	Title       string               `json:"title,omitempty"`
+	Description string               `json:"description,omitempty"`
+	URL         string               `json:"url,omitempty"`
+	Timestamp   string               `json:"timestamp,omitempty"`
+	Color       int                  `json:"color,omitempty"`
+	Footer      *DiscordEmbedFooter  `json:"footer,omitempty"`
+	Image       *DiscordEmbedMedia   `json:"image,omitempty"`
+	Thumbnail   *DiscordEmbedMedia   `json:"thumbnail,omitempty"`
+	Author      *DiscordEmbedAuthor  `json:"author,omitempty"`
+	Fields      []*DiscordEmbedField `json:"fields,omitempty"`
+}
+
+type DiscordEmbedFooter struct {
+	Text    string `json:"text,omitempty"`
+	IconURL string `json:"icon_url,omitempty"`
+}
+
+type DiscordEmbedMedia struct {
+	URL string `json:"url,omitempty"`
+}
+
+type DiscordEmbedAuthor struct {
+	Name    string `json:"name,omitempty"`
+	URL     string `json:"url,omitempty"`
+	IconURL string `json:"icon_url,omitempty"`
+}
+
+type DiscordEmbedField struct {
+	Name   string `json:"name,omitempty"`
+	Value  string `json:"value,omitempty"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+// DiscordAttachment is one pre-loaded file payload attached to a message.
+type DiscordAttachment struct {
+	Name        string `json:"name"`
+	ContentType string `json:"contentType,omitempty"`
+	Data        []byte `json:"-"`
 }
 
 type DiscordDMRequest struct {
@@ -1262,12 +1313,34 @@ type TelegramMessageRequest struct {
 	DisableNotification bool   `json:"disableNotification,omitempty"`
 }
 
+// TelegramPhotoRequest sends one photo. Either PhotoURL is set (Telegram
+// fetches it server-side) or Data carries the raw image bytes uploaded as
+// multipart by the service.
 type TelegramPhotoRequest struct {
-	IdentityID string `json:"identityId,omitempty"`
-	ChatID     string `json:"chatId"`
-	PhotoURL   string `json:"photoUrl"`
-	Caption    string `json:"caption,omitempty"`
-	ParseMode  string `json:"parseMode,omitempty"`
+	IdentityID  string `json:"identityId,omitempty"`
+	ChatID      string `json:"chatId"`
+	PhotoURL    string `json:"photoUrl"`
+	FileName    string `json:"fileName,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+	Data        []byte `json:"-"`
+	Caption     string `json:"caption,omitempty"`
+	ParseMode   string `json:"parseMode,omitempty"`
+}
+
+// TelegramDocumentRequest sends one general file. Either DocumentURL is set
+// (Telegram fetches it server-side) or Data carries the raw bytes uploaded as
+// multipart by the service.
+type TelegramDocumentRequest struct {
+	IdentityID          string `json:"identityId,omitempty"`
+	ChatID              string `json:"chatId"`
+	DocumentURL         string `json:"documentUrl,omitempty"`
+	FileName            string `json:"fileName,omitempty"`
+	ContentType         string `json:"contentType,omitempty"`
+	Data                []byte `json:"-"`
+	Caption             string `json:"caption,omitempty"`
+	ParseMode           string `json:"parseMode,omitempty"`
+	ReplyToMessageID    string `json:"replyToMessageId,omitempty"`
+	DisableNotification bool   `json:"disableNotification,omitempty"`
 }
 
 type TelegramEditRequest struct {
@@ -1794,4 +1867,241 @@ type RemoteExecutorListItem struct {
 type ExecutorCreateResult struct {
 	Executor RemoteExecutor `json:"executor"`
 	Token    string         `json:"token"`
+}
+
+/* ------------------------------------------------------------------ */
+/* Storage (S3 / FTP) contracts                                        */
+/* ------------------------------------------------------------------ */
+
+// StorageDriver identifies a supported remote storage connection type.
+type StorageDriver string
+
+const (
+	StorageDriverS3  StorageDriver = "s3"
+	StorageDriverFTP StorageDriver = "ftp"
+)
+
+// StorageTLSMode selects how an FTP connection protects its traffic.
+type StorageTLSMode string
+
+const (
+	StorageTLSNone     StorageTLSMode = "none"
+	StorageTLSExplicit StorageTLSMode = "explicit"
+	StorageTLSImplicit StorageTLSMode = "implicit"
+)
+
+// ValidStorageTLSMode reports whether the FTP TLS mode is recognised.
+func ValidStorageTLSMode(mode StorageTLSMode) bool {
+	switch mode {
+	case StorageTLSNone, StorageTLSExplicit, StorageTLSImplicit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Storage is one registered remote storage connection. S3 connections fill
+// Endpoint/Region/Bucket/AccessKey/SecretRef; FTP connections fill Host/Port/
+// Username/PasswordRef/TLSMode/BaseDir. Secrets never leave the local vault;
+// only their opaque references are persisted. PublicBaseURL optionally maps
+// the storage root to an HTTP address (CDN in front of a bucket, or a web
+// server serving the FTP tree) so public URLs can be built without a network
+// round-trip.
+type Storage struct {
+	ID     string        `json:"id"`
+	Name   string        `json:"name"`
+	Driver StorageDriver `json:"driver"`
+	// S3-compatible settings (driver "s3").
+	Endpoint  string `json:"endpoint,omitempty"`
+	Region    string `json:"region,omitempty"`
+	Bucket    string `json:"bucket,omitempty"`
+	AccessKey string `json:"accessKey,omitempty"`
+	SecretRef string `json:"secretRef,omitempty"`
+	// Secure enables HTTPS for custom endpoints; the AWS endpoint is always
+	// TLS. Local MinIO instances served over plain HTTP turn this off.
+	Secure *bool `json:"secure,omitempty"`
+	// FTP settings (driver "ftp").
+	Host        string         `json:"host,omitempty"`
+	Port        int            `json:"port,omitempty"`
+	Username    string         `json:"username,omitempty"`
+	PasswordRef string         `json:"passwordRef,omitempty"`
+	TLSMode     StorageTLSMode `json:"tlsMode,omitempty"`
+	BaseDir     string         `json:"baseDir,omitempty"`
+	// PublicBaseURL is an optional HTTP(S) base that serves the storage root
+	// (path "" as shown in the browser). Shared by both drivers.
+	PublicBaseURL string `json:"publicBaseUrl,omitempty"`
+	// Shared bookkeeping.
+	Status     DatabaseStatus `json:"status"`
+	LastPingAt *time.Time     `json:"lastPingAt,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
+}
+
+// SaveStorageRequest carries editable storage metadata across Wails. Secret
+// and Password are write-only (never returned in reads).
+type SaveStorageRequest struct {
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Driver        StorageDriver  `json:"driver"`
+	Endpoint      string         `json:"endpoint,omitempty"`
+	Region        string         `json:"region,omitempty"`
+	Bucket        string         `json:"bucket,omitempty"`
+	AccessKey     string         `json:"accessKey,omitempty"`
+	SecretRef     string         `json:"secretRef,omitempty"`
+	Secret        string         `json:"secret,omitempty"`
+	Secure        *bool          `json:"secure,omitempty"`
+	Host          string         `json:"host,omitempty"`
+	Port          int            `json:"port,omitempty"`
+	Username      string         `json:"username,omitempty"`
+	PasswordRef   string         `json:"passwordRef,omitempty"`
+	Password      string         `json:"password,omitempty"`
+	TLSMode       StorageTLSMode `json:"tlsMode,omitempty"`
+	BaseDir       string         `json:"baseDir,omitempty"`
+	PublicBaseURL string         `json:"publicBaseUrl,omitempty"`
+}
+
+// StorageEntry is one browsable file or folder inside a storage. Path is the
+// full remote path without a trailing slash; root listings use "".
+type StorageEntry struct {
+	Name    string    `json:"name"`
+	Path    string    `json:"path"`
+	IsDir   bool      `json:"isDir"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"modTime"`
+}
+
+// StorageListRequest lists the direct children of one remote directory.
+// Empty Path lists the root. MaxEntries caps folder recursion when counting
+// deletable objects (0 means unlimited).
+type StorageListRequest struct {
+	StorageID string `json:"storageId"`
+	Path      string `json:"path"`
+}
+
+// StorageListResult is the folder-first listing of one remote directory.
+type StorageListResult struct {
+	Path    string         `json:"path"`
+	Entries []StorageEntry `json:"entries"`
+}
+
+// StorageUploadFileRequest streams one local file into the storage. When
+// RemotePath ends with "/" the original file name is appended.
+type StorageUploadFileRequest struct {
+	StorageID   string `json:"storageId"`
+	LocalPath   string `json:"localPath"`
+	RemotePath  string `json:"remotePath"`
+	ContentType string `json:"contentType,omitempty"`
+}
+
+// StorageUploadDataRequest writes in-memory bytes (Draw Image output, HTTP
+// downloads) into the storage.
+type StorageUploadDataRequest struct {
+	StorageID   string `json:"storageId"`
+	Data        []byte `json:"data"`
+	RemotePath  string `json:"remotePath"`
+	ContentType string `json:"contentType,omitempty"`
+}
+
+// StorageUploadResult reports the stored key and the number of bytes written.
+type StorageUploadResult struct {
+	Key    string `json:"key"`
+	Size   int64  `json:"size"`
+	Driver string `json:"driver"`
+}
+
+// StorageDownloadRequest streams one remote file to a local path.
+type StorageDownloadRequest struct {
+	StorageID  string `json:"storageId"`
+	RemotePath string `json:"remotePath"`
+	LocalPath  string `json:"localPath"`
+}
+
+// StorageDownloadResult reports the local destination and byte count.
+type StorageDownloadResult struct {
+	Path  string `json:"path"`
+	Name  string `json:"name"`
+	Bytes int64  `json:"bytes"`
+}
+
+// StorageDeleteRequest removes one remote file, or one folder with everything
+// inside it when Recursive is set.
+type StorageDeleteRequest struct {
+	StorageID string `json:"storageId"`
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive,omitempty"`
+}
+
+// StorageDeleteResult reports how many remote entries were removed.
+type StorageDeleteResult struct {
+	Deleted bool  `json:"deleted"`
+	Count   int64 `json:"count"`
+}
+
+// StorageMakeDirRequest creates one remote folder (S3: zero-byte marker).
+type StorageMakeDirRequest struct {
+	StorageID string `json:"storageId"`
+	Path      string `json:"path"`
+}
+
+// StorageMakeDirResult reports the created folder path.
+type StorageMakeDirResult struct {
+	Path    string `json:"path"`
+	Created bool   `json:"created"`
+}
+
+// StorageMoveRequest renames or moves one remote file or folder (S3: copy
+// plus delete; FTP: server-side rename).
+type StorageMoveRequest struct {
+	StorageID string `json:"storageId"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+}
+
+// StorageMoveResult reports the source and destination paths.
+type StorageMoveResult struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Moved bool   `json:"moved"`
+}
+
+// StoragePresignRequest generates a temporary signed URL for one S3 object.
+// Method is one of GET, PUT, HEAD, or DELETE. ExpiresSeconds uses the SigV4
+// window 1..604800 (0 falls back to one hour). Headers are signed into the
+// URL — whoever uses the URL must send exactly these headers. Params become
+// signed query parameters (response-* overrides, versionId, …).
+type StoragePresignRequest struct {
+	StorageID      string            `json:"storageId"`
+	Path           string            `json:"path"`
+	Method         string            `json:"method"`
+	ExpiresSeconds int64             `json:"expiresSeconds,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	Params         map[string]string `json:"params,omitempty"`
+}
+
+// StoragePresignResult reports the signed URL and the constraints attached
+// to it. Headers echoes the canonicalized header names and values the caller
+// must send for the signature to validate.
+type StoragePresignResult struct {
+	URL              string            `json:"url"`
+	Method           string            `json:"method"`
+	ExpiresInSeconds int64             `json:"expiresInSeconds"`
+	ExpiresAt        string            `json:"expiresAt"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Params           map[string]string `json:"params,omitempty"`
+}
+
+// StoragePublicURLRequest builds the public address of one remote file or
+// folder. Construction is pure metadata — no network round-trip — so URLs can
+// be produced for objects that are not uploaded yet.
+type StoragePublicURLRequest struct {
+	StorageID string `json:"storageId"`
+	Path      string `json:"path"`
+}
+
+// StoragePublicURLResult reports the constructed URL and where it came from:
+// "public-base" (the connection's public base URL), "s3" (the direct object
+// address), or "ftp" (a best-effort protocol URL).
+type StoragePublicURLResult struct {
+	URL  string `json:"url"`
+	Kind string `json:"kind"`
 }

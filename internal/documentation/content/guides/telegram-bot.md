@@ -25,12 +25,12 @@ admin) always deliver every message.
 
 ## Connect the identity
 
-In **Settings → Telegram**, choose **Add bot** and paste the token. Neuropipe
+In **Integrations → Telegram**, choose **Add bot** and paste the token. Neuropipe
 validates it with `getMe`, stores it only in the Windows-protected local
 vault, and lists the resolved bot identity. One bot token permits exactly one
 polling consumer: a second client on the same token (a phone session running
 the bot, another Neuropipe instance) produces a 409 conflict surfaced on the
-settings page.
+integration page.
 
 ## Telegram Event Trigger
 
@@ -54,7 +54,7 @@ routing inline keyboard buttons. A non-matching update simply stops the flow.
 
 Example: configure `message`, prefix `/alert`. Connect Text to a formatter
 and Chat ID to **Send Telegram Message**. Publish the pipeline, trust the
-trigger on the settings page, then send `/alert hello` to the bot.
+trigger on the Integrations page, then send `/alert hello` to the bot.
 
 ## Sending messages
 

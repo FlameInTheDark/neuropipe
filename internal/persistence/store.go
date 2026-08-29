@@ -279,6 +279,29 @@ CREATE TABLE IF NOT EXISTS databases (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS databases_name ON databases(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS storages (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  driver TEXT NOT NULL DEFAULT 's3',
+  endpoint TEXT NOT NULL DEFAULT '',
+  region TEXT NOT NULL DEFAULT '',
+  bucket TEXT NOT NULL DEFAULT '',
+  access_key TEXT NOT NULL DEFAULT '',
+  secret_ref TEXT NOT NULL DEFAULT '',
+  secure INTEGER NOT NULL DEFAULT 1,
+  host TEXT NOT NULL DEFAULT '',
+  port INTEGER NOT NULL DEFAULT 0,
+  username TEXT NOT NULL DEFAULT '',
+  password_ref TEXT NOT NULL DEFAULT '',
+  tls_mode TEXT NOT NULL DEFAULT 'none',
+  base_dir TEXT NOT NULL DEFAULT '',
+  public_base_url TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'unknown',
+  last_ping_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS storages_name ON storages(name COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS functions (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -466,6 +489,9 @@ CREATE TABLE IF NOT EXISTS remote_executors (
 		return err
 	}
 	if err := s.ensureKVColumns(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureStorageColumns(ctx); err != nil {
 		return err
 	}
 	if err := s.repairV3LegacyMarkers(ctx); err != nil {
@@ -695,6 +721,28 @@ func (s *Store) ensureKVColumns(ctx context.Context) error {
 		}
 		if _, err := s.db.ExecContext(ctx, column.ddl); err != nil {
 			return fmt.Errorf("migrate databases.%s: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+// ensureStorageColumns adds the public base URL column to the storages table
+// for existing installations. Fresh installs get it from the CREATE TABLE
+// statement; this only handles the ALTER TABLE path, added independently so
+// partially migrated installations converge.
+func (s *Store) ensureStorageColumns(ctx context.Context) error {
+	for _, column := range []struct{ name, ddl string }{
+		{"public_base_url", "ALTER TABLE storages ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''"},
+	} {
+		var present int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('storages') WHERE name = ?`, column.name).Scan(&present); err != nil {
+			return fmt.Errorf("inspect storages.%s migration: %w", column.name, err)
+		}
+		if present > 0 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, column.ddl); err != nil {
+			return fmt.Errorf("migrate storages.%s: %w", column.name, err)
 		}
 	}
 	return nil

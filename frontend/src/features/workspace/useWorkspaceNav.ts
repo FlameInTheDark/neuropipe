@@ -15,6 +15,8 @@ export type RailId =
   | "functions"
   | "variables"
   | "databases"
+  | "storages"
+  | "integrations"
   | "metrics"
   | "docs"
   | "settings";

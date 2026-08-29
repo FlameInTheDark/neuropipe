@@ -28,4 +28,4 @@ without guessing.
 
 Listening for *Message Content* and *Server Members* events requires the
 matching Privileged Gateway Intents toggles in the Discord Developer Portal;
-the Discord settings page surfaces a warning until they are enabled.
+the Discord integration page surfaces a warning until they are enabled.

@@ -40,7 +40,7 @@ func Resolve(config, defaults map[string]any, key string) (Representation, error
 }
 
 // Pin creates a data pin with the exact TypeSpec for representation. Bytes is
-// distinct from text even though the legacy presentation data type is any.
+// distinct from text on both the wire contract and the display data type.
 func Pin(id, label string, direction domain.PinDirection, representation Representation, required bool) domain.NodePort {
 	dataType, typeSpec, color := pinType(representation)
 	return domain.NodePort{
@@ -105,5 +105,5 @@ func pinType(representation Representation) (domain.DataType, domain.TypeSpec, s
 	if representation == Text {
 		return domain.DataText, typespec.String(), "#e879f9"
 	}
-	return domain.DataAny, domain.TypeSpec{Kind: domain.TypeBytes}, "#a1a1aa"
+	return domain.DataBytes, domain.TypeSpec{Kind: domain.TypeBytes}, "#fbbf24"
 }

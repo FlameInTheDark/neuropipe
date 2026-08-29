@@ -26,6 +26,9 @@ func (s *senderStub) SendTelegramMessage(_ context.Context, request domain.Teleg
 func (s *senderStub) SendTelegramPhoto(context.Context, domain.TelegramPhotoRequest) (domain.TelegramMessageResult, error) {
 	panic("unused")
 }
+func (s *senderStub) SendTelegramDocument(context.Context, domain.TelegramDocumentRequest) (domain.TelegramMessageResult, error) {
+	panic("unused")
+}
 func (s *senderStub) EditTelegramMessage(context.Context, domain.TelegramEditRequest) (domain.TelegramActionResult, error) {
 	panic("unused")
 }

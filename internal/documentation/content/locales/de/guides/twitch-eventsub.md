@@ -1,6 +1,6 @@
 # Twitch EventSub
 
-Tragen Sie unter **Einstellungen → Twitch** die öffentliche Client-ID ein und
+Tragen Sie unter **Integrationen → Twitch** die öffentliche Client-ID ein und
 verbinden Sie eine Identität über den Device-Code-Dialog. Tokens bleiben im
 Windows-geschützten Tresor und gelangen nie in den Renderer.
 

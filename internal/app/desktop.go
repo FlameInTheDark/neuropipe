@@ -37,6 +37,7 @@ import (
 	javascriptnode "github.com/FlameInTheDark/neuropipe/internal/nodes/code/javascript"
 	getglobalvariablenodes "github.com/FlameInTheDark/neuropipe/internal/nodes/data/getglobalvariable"
 	setglobalvariablenodes "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/setglobalvariable"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/drawimage"
 	"github.com/FlameInTheDark/neuropipe/internal/notifications"
 	"github.com/FlameInTheDark/neuropipe/internal/persistence"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
@@ -45,6 +46,7 @@ import (
 	localruntime "github.com/FlameInTheDark/neuropipe/internal/runtime"
 	"github.com/FlameInTheDark/neuropipe/internal/scheduler"
 	"github.com/FlameInTheDark/neuropipe/internal/security"
+	storagesservice "github.com/FlameInTheDark/neuropipe/internal/storages"
 	telegramservice "github.com/FlameInTheDark/neuropipe/internal/telegram"
 	twitchservice "github.com/FlameInTheDark/neuropipe/internal/twitch"
 	"github.com/FlameInTheDark/neuropipe/internal/updatecheck"
@@ -93,6 +95,7 @@ type Desktop struct {
 	variables              *variablesservice.Service
 	databases              *databaseservice.Service
 	kv                     *kvservice.Service
+	storage                *storagesservice.Service
 	kvsubs                 *kvsubservice.Service
 	trayMu                 sync.RWMutex
 	trayMenu               trayLabelSink
@@ -148,6 +151,7 @@ func New(version string) (*Desktop, error) {
 	}
 	databases := databaseservice.New(store, vault)
 	kv := kvservice.New(store, vault, root)
+	storages := storagesservice.New(store, vault)
 	getglobalvariablenodes.SetDeclaredType(variables.VariableType)
 	getglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
 	setglobalvariablenodes.SetDeclaredOptions(variables.VariableOptions)
@@ -158,7 +162,7 @@ func New(version string) (*Desktop, error) {
 		_ = store.Close()
 		return nil, err
 	}
-	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version), variables: variables, databases: databases, kv: kv}
+	desktop := &Desktop{dataRoot: root, store: store, registry: registry, vault: vault, settings: settings, plugins: pluginManager, documentation: docs, updates: updatecheck.NewChecker(updatecheck.NewGitHubSource(nil), version), variables: variables, databases: databases, kv: kv, storage: storages}
 	desktop.registry.SetVariableOptions(variables.VariableOptions)
 	if err := desktop.refreshFunctionRegistry(context.Background()); err != nil {
 		_ = store.Close()
@@ -180,6 +184,7 @@ func New(version string) (*Desktop, error) {
 		execution.WithGlobalVariablesStore(variables),
 		execution.WithDatabaseService(databases),
 		execution.WithKVService(kv),
+		execution.WithStorageService(storages),
 		execution.WithDialogOpener(dialogs.NewOpenerAdapter(desktop.dialogs)),
 		execution.WithInputDialogOpener(dialogs.NewInputAdapter(desktop.dialogs)),
 		execution.WithFormDialogOpener(dialogs.NewFormAdapter(desktop.dialogs)),
@@ -283,6 +288,7 @@ func (d *Desktop) Shutdown(context.Context) {
 	d.llama.Stop()
 	_ = d.databases.Close()
 	_ = d.kv.Close()
+	_ = d.storage.Close()
 	_ = d.store.Close()
 }
 
@@ -360,6 +366,99 @@ func (d *Desktop) InspectDatabase(id string) (domain.DatabaseSchema, error) {
 
 func (d *Desktop) DebugDatabase(request domain.SQLDebugRequest) (domain.SQLResult, error) {
 	return d.databases.Debug(d.context(), request)
+}
+
+/* ---------------- Storage (S3 / FTP) bindings ---------------- */
+
+// ListStorages returns every registered S3/FTP storage connection.
+func (d *Desktop) ListStorages() ([]domain.Storage, error) {
+	return d.storage.List(d.context())
+}
+
+// RegisterStorage records a new storage connection, storing its secret in
+// the vault and probing reachability.
+func (d *Desktop) RegisterStorage(request domain.SaveStorageRequest) (domain.Storage, error) {
+	return d.storage.Register(d.context(), request)
+}
+
+func (d *Desktop) UpdateStorage(request domain.SaveStorageRequest) (domain.Storage, error) {
+	return d.storage.Update(d.context(), request)
+}
+
+// DeleteStorage removes the registration and its vault secrets. Remote
+// files are never touched.
+func (d *Desktop) DeleteStorage(id string) error {
+	return d.storage.Delete(d.context(), id)
+}
+
+// PingStorage re-probes the connection and persists the resulting status.
+func (d *Desktop) PingStorage(id string) (domain.DatabaseStatus, error) {
+	return d.storage.Ping(d.context(), id)
+}
+
+// TestStorage connects with the supplied configuration without persisting
+// anything. It powers the "Test connection" button in the storage dialog.
+func (d *Desktop) TestStorage(request domain.SaveStorageRequest) (domain.DatabaseStatus, error) {
+	item, err := storagesservice.BuildStorage(request)
+	if err != nil {
+		return domain.DatabaseStatusError, err
+	}
+	secret := strings.TrimSpace(request.Secret)
+	password := strings.TrimSpace(request.Password)
+	return d.storage.TestConnection(d.context(), item, secret, password)
+}
+
+// StorageListFiles lists the direct children of one remote directory for
+// the Storages browser.
+func (d *Desktop) StorageListFiles(id string, path string) (domain.StorageListResult, error) {
+	return d.storage.StorageListFiles(d.context(), domain.StorageListRequest{StorageID: id, Path: path})
+}
+
+// StorageUploadFile streams one local file into the storage from the
+// browser's Upload button.
+func (d *Desktop) StorageUploadFile(id string, localPath string, remotePath string) (domain.StorageUploadResult, error) {
+	return d.storage.StorageUploadFile(d.context(), domain.StorageUploadFileRequest{StorageID: id, LocalPath: localPath, RemotePath: remotePath})
+}
+
+// StorageDownloadFile streams one remote file to a local path chosen in a
+// native save dialog.
+func (d *Desktop) StorageDownloadFile(id string, remotePath string, localPath string) (domain.StorageDownloadResult, error) {
+	return d.storage.StorageDownloadFile(d.context(), domain.StorageDownloadRequest{StorageID: id, RemotePath: remotePath, LocalPath: localPath})
+}
+
+// StorageDeleteEntry removes one remote file or folder (folders require
+// recursive=true, enforced by the service).
+func (d *Desktop) StorageDeleteEntry(id string, path string, recursive bool) (domain.StorageDeleteResult, error) {
+	return d.storage.StorageDelete(d.context(), domain.StorageDeleteRequest{StorageID: id, Path: path, Recursive: recursive})
+}
+
+// StorageMakeDir creates one remote folder.
+func (d *Desktop) StorageMakeDir(id string, path string) (domain.StorageMakeDirResult, error) {
+	return d.storage.StorageMakeDir(d.context(), domain.StorageMakeDirRequest{StorageID: id, Path: path})
+}
+
+// StorageMoveEntry renames or moves one remote entry.
+func (d *Desktop) StorageMoveEntry(id string, from string, to string) (domain.StorageMoveResult, error) {
+	return d.storage.StorageMove(d.context(), domain.StorageMoveRequest{StorageID: id, From: from, To: to})
+}
+
+// ChooseStorageUploadFile opens a native picker for any local file that
+// should be uploaded into a storage.
+func (d *Desktop) ChooseStorageUploadFile() (string, error) {
+	dialog := d.app.Dialog.OpenFileWithOptions(&application.OpenFileDialogOptions{
+		Title: "Choose file to upload",
+	})
+	return dialog.PromptForSingleSelection()
+}
+
+// ChooseStorageSaveFile opens a native save dialog suggesting the remote
+// file's name for a download destination.
+func (d *Desktop) ChooseStorageSaveFile(suggested string) (string, error) {
+	dialog := d.app.Dialog.SaveFileWithOptions(&application.SaveFileDialogOptions{
+		Title:    "Save downloaded file",
+		Filename: suggested,
+	})
+	return dialog.PromptForSingleSelection()
 }
 
 /* ---------------- KV (Redis protocol) bindings ---------------- */
@@ -460,6 +559,32 @@ func (d *Desktop) ChooseDirectory(title string) (string, error) {
 		CanCreateDirectories: true,
 	})
 	return dialog.PromptForSingleSelection()
+}
+
+// ChooseImageFile opens a native image picker used by the Draw Image editor
+// to reference a picture on disk.
+func (d *Desktop) ChooseImageFile() (string, error) {
+	dialog := d.app.Dialog.OpenFileWithOptions(&application.OpenFileDialogOptions{
+		Title: "Choose image",
+		Filters: []application.FileFilter{
+			{DisplayName: "Images", Pattern: "*.png;*.jpg;*.jpeg;*.webp;*.gif"},
+		},
+	})
+	return dialog.PromptForSingleSelection()
+}
+
+// DrawImagePreview renders a draw image document with the real backend
+// renderer and returns the PNG as base64. Sample values arrive as a JSON
+// object keyed by pin name so the editor can verify the final output.
+func (d *Desktop) DrawImagePreview(documentJSON, valuesJSON string) (string, error) {
+	return drawimage.RenderPreviewJSON(d.context(), documentJSON, valuesJSON)
+}
+
+// DrawImageLoadImageSource fetches an image for the editor's live preview.
+// The backend performs the request (no browser CORS restrictions) and also
+// reads local paths. kind is "url" or "path"; the result is a data URL.
+func (d *Desktop) DrawImageLoadImageSource(kind, value string) (string, error) {
+	return drawimage.LoadImageSourceDataURL(d.context(), kind, value)
 }
 
 func (d *Desktop) ListPipelines() ([]domain.PipelineSummary, error) {
@@ -2103,7 +2228,7 @@ func validateFunctionPins(side string, pins []domain.FunctionPin) error {
 		}
 		seen[pin.ID] = struct{}{}
 		switch pin.DataType {
-		case domain.DataAny, domain.DataText, domain.DataNumber, domain.DataBoolean, domain.DataObject, domain.DataList:
+		case domain.DataAny, domain.DataText, domain.DataNumber, domain.DataBoolean, domain.DataObject, domain.DataList, domain.DataBytes:
 		default:
 			return fmt.Errorf("function %s pin %q has an invalid data type", side, pin.Name)
 		}

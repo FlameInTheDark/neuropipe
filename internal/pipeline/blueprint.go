@@ -332,6 +332,10 @@ func (s *blueprintState) SQLExecutor() nodes.SQLExecutor { return s.engine.datab
 // KVExecutor exposes only the key/value operation required by KV nodes.
 func (s *blueprintState) KVExecutor() nodes.KVExecutor { return s.engine.kv }
 
+// StorageExecutor exposes only the storage operations required by storage
+// nodes.
+func (s *blueprintState) StorageExecutor() nodes.StorageExecutor { return s.engine.storage }
+
 func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.NodeDefinition, inputs map[string]any, frame *blueprintFrame, execInput string) (map[string]any, []string, *nodes.LoopPlan, error) {
 	if strings.HasPrefix(node.Type, "function:") && node.Type != "function:return" && node.Type != "function:entry" {
 		outputs, err := s.runFunction(node, inputs, frame)

@@ -23,6 +23,9 @@ const (
 	pollTimeoutSecs = 50
 	// maxMessageRunes matches Telegram's documented text length limit.
 	maxMessageRunes = 4096
+	// maxCaptionRunes matches Telegram's documented caption length limit for
+	// media messages — a document's caption is its message text.
+	maxCaptionRunes = 1024
 	// backlogFlushUpdateID asks Telegram for only the newest pending update so
 	// a restarted loop can confirm (discard) the offline backlog instead of
 	// replaying stale events.

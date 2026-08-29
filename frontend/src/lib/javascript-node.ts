@@ -96,6 +96,7 @@ function dataTypeFor(type: TypeSpec): DataType {
     case "float": return "number";
     case "bool": return "boolean";
     case "list": return "list";
+    case "bytes": return "bytes";
     case "map":
     case "record": return "object";
     default: return "any";

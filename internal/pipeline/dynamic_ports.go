@@ -161,6 +161,8 @@ func dataTypeForSpec(typeSpec domain.TypeSpec) domain.DataType {
 		return domain.DataList
 	case domain.TypeMap, domain.TypeRecord:
 		return domain.DataObject
+	case domain.TypeBytes:
+		return domain.DataBytes
 	default:
 		return domain.DataAny
 	}
@@ -348,6 +350,8 @@ func dataTypeColor(dataType domain.DataType) string {
 		return "#60a5fa"
 	case domain.DataList:
 		return "#facc15"
+	case domain.DataBytes:
+		return "#fbbf24"
 	default:
 		return "#a1a1aa"
 	}
@@ -372,7 +376,7 @@ func constantOutputType(config, defaults map[string]any) (domain.DataType, bool)
 
 func validDataType(dataType domain.DataType) bool {
 	switch dataType {
-	case domain.DataAny, domain.DataText, domain.DataNumber, domain.DataBoolean, domain.DataObject, domain.DataList:
+	case domain.DataAny, domain.DataText, domain.DataNumber, domain.DataBoolean, domain.DataObject, domain.DataList, domain.DataBytes:
 		return true
 	default:
 		return false

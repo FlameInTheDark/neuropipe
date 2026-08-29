@@ -20,4 +20,14 @@ globalThis.window = {
   removeEventListener() {},
   setTimeout,
   clearTimeout,
+  setInterval,
+  clearInterval,
 };
+
+// @ts-expect-error MouseEvent stub — @wailsio/runtime probes it at import
+// time (canTrackButtons) even when no call is ever made against Wails.
+class MouseEventStub {
+  buttons = 0;
+  constructor(public type: string, public init: Record<string, unknown> = {}) {}
+}
+globalThis.MouseEvent = MouseEventStub;

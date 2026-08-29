@@ -12,6 +12,7 @@ import (
 type senderStub struct {
 	message    domain.TelegramMessageRequest
 	photo      domain.TelegramPhotoRequest
+	document   domain.TelegramDocumentRequest
 	edit       domain.TelegramEditRequest
 	del        domain.TelegramDeleteRequest
 	callback   domain.TelegramCallbackAnswerRequest
@@ -20,6 +21,7 @@ type senderStub struct {
 
 	messageResult  domain.TelegramMessageResult
 	photoResult    domain.TelegramMessageResult
+	documentResult domain.TelegramMessageResult
 	editResult     domain.TelegramActionResult
 	deleteResult   domain.TelegramActionResult
 	callbackResult domain.TelegramActionResult
@@ -34,6 +36,10 @@ func (s *senderStub) SendTelegramMessage(_ context.Context, request domain.Teleg
 func (s *senderStub) SendTelegramPhoto(_ context.Context, request domain.TelegramPhotoRequest) (domain.TelegramMessageResult, error) {
 	s.photo = request
 	return s.photoResult, nil
+}
+func (s *senderStub) SendTelegramDocument(_ context.Context, request domain.TelegramDocumentRequest) (domain.TelegramMessageResult, error) {
+	s.document = request
+	return s.documentResult, nil
 }
 func (s *senderStub) EditTelegramMessage(_ context.Context, request domain.TelegramEditRequest) (domain.TelegramActionResult, error) {
 	s.edit = request

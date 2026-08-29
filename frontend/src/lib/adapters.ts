@@ -35,6 +35,7 @@ export function mapDataType(dataType?: DataType | string): PinDataType {
     case "list": return "array";
     case "map": return "map";
     case "object": return "object";
+    case "bytes": return "bytes";
     default: return "any";
   }
 }
@@ -46,6 +47,7 @@ export function unmapDataType(dataType?: PinDataType | string): DataType {
     case "number": return "number";
     case "boolean": return "boolean";
     case "array": return "list";
+    case "bytes": return "bytes";
     case "map":
     case "object": return "object";
     default: return "any";
@@ -65,6 +67,7 @@ export function mapSpecToPin(type?: import("./types").TypeSpec): PinDataType {
     case "float": return "number";
     case "bool": return "boolean";
     case "list": return "array";
+    case "bytes": return "bytes";
     case "map":
     case "record": return "object";
     default: return "any";
@@ -116,6 +119,8 @@ function mapDataToPinType(dataType: string): string {
       return "array";
     case "object":
       return "object";
+    case "bytes":
+      return "bytes";
     default:
       return "any";
   }
@@ -173,6 +178,8 @@ const COMPLEX_FIELD_KINDS = new Set([
   "kv-string-list",
   "kv-hash-fields",
   "kv-scored-entries",
+  "image-editor",
+  "embed-editor",
 ]);
 
 /** Maps a backend ConfigField onto a canvas inspector field definition. */
@@ -204,6 +211,8 @@ export function fieldDefFromConfig(field: ConfigField): FieldDef {
       return { ...base, type: "select", dynamic: "databases" } as FieldDef;
     case "kv-database-select":
       return { ...base, type: "select", dynamic: "kv-databases" } as FieldDef;
+    case "storage-select":
+      return { ...base, type: "select", dynamic: "storages" } as FieldDef;
     case "twitch-identity":
       return { ...base, type: "select", dynamic: "twitch-identity" } as FieldDef;
     case "discord-identity":
@@ -227,15 +236,55 @@ export function fieldDefFromConfig(field: ConfigField): FieldDef {
 
 /** Fields filtered by their `visibleWhen` predicate against current config. */
 export function visibleFields(fields: ConfigField[], values: Record<string, unknown>): ConfigField[] {
-  return fields.filter((f) => {
-    if (!f.visibleWhen) return true;
-    // "!" prefix inverts the predicate (e.g. headers editor hidden while
-    // the take-from-pin toggle is on)
-    const negated = f.visibleWhen.startsWith("!");
-    const name = negated ? f.visibleWhen.slice(1) : f.visibleWhen;
-    const value = name === "chatMode" ? values.chatMode === "history" : Boolean(values[name] ?? false);
-    return negated ? !value : value;
-  });
+  return fields.filter((f) => matchesVisibleWhen(f.visibleWhen, values));
+}
+
+/**
+ * Evaluates one `visibleWhen` predicate against the current config values.
+ *
+ * A predicate is a `|`-separated list where ANY match makes the field visible
+ * (OR). Each term is one of:
+ *   - `name`       — visible when the value is truthy
+ *   - `!name`      — visible when the value is falsy
+ *   - `name=value` — visible when the value equals the string ("" matches
+ *                    undefined too, so legacy graphs fall in the Auto bucket)
+ *   - `name!=value`— visible when the value differs from the string
+ */
+export function matchesVisibleWhen(
+  predicate: string | undefined,
+  values: Record<string, unknown>,
+): boolean {
+  if (!predicate) return true;
+  return predicate.split("|").some((term) => matchesPredicateTerm(term.trim(), values));
+}
+
+function matchesPredicateTerm(term: string, values: Record<string, unknown>): boolean {
+  // "!" prefix inverts the predicate (e.g. headers editor hidden while
+  // the take-from-pin toggle is on)
+  const negated = term.startsWith("!");
+  const expr = negated ? term.slice(1) : term;
+  const notEqual = expr.indexOf("!=");
+  const equal = notEqual >= 0 ? -1 : expr.indexOf("=");
+  if (notEqual >= 0) {
+    const name = expr.slice(0, notEqual);
+    const expected = expr.slice(notEqual + 2);
+    return predicateValue(name, values) !== expected;
+  }
+  if (equal >= 0) {
+    const name = expr.slice(0, equal);
+    const expected = expr.slice(equal + 1);
+    return predicateValue(name, values) === expected;
+  }
+  const value = expr === "chatMode" ? values.chatMode === "history" : Boolean(values[expr] ?? false);
+  return negated ? !value : value;
+}
+
+/** Renders one config value for string comparison; missing reads as "". */
+function predicateValue(name: string, values: Record<string, unknown>): string {
+  const value = values[name];
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  return String(value);
 }
 
 /* ------------------------------------------------------------------ */

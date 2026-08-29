@@ -45,6 +45,7 @@ export function IconButton({
   label,
   active,
   onClick,
+  disabled,
   size = "md",
   className,
 }: {
@@ -52,6 +53,7 @@ export function IconButton({
   label: string;
   active?: boolean;
   onClick?: () => void;
+  disabled?: boolean;
   size?: "sm" | "md";
   className?: string;
 }) {
@@ -60,11 +62,14 @@ export function IconButton({
       <button
         aria-label={label}
         onClick={onClick}
+        disabled={disabled}
         className={cn(
           "group relative grid place-items-center rounded-md text-fg-subtle transition",
-          "hover:bg-ink-700/70 hover:text-fg active:scale-[0.94]",
+          disabled
+            ? "cursor-not-allowed text-fg-faint/40 hover:bg-transparent hover:text-fg-faint/40"
+            : "hover:bg-ink-700/70 hover:text-fg active:scale-[0.94]",
           size === "sm" ? "h-6 w-6" : "h-7 w-7",
-          active && "bg-ink-700 text-fg",
+          active && !disabled && "bg-ink-700 text-fg",
           className,
         )}
       >

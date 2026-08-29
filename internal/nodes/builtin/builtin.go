@@ -71,6 +71,7 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displaymessage"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/displayquestion"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/download"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/drawimage"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/base64tofile"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/copyfile"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/local/fileops/copyfolder"
@@ -93,12 +94,14 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/divide"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/multiply"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/math/subtract"
+	storagenodes "github.com/FlameInTheDark/neuropipe/internal/nodes/storage"
 	telegramanswercallback "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/answercallback"
 	telegramchataction "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/chataction"
 	telegramdeletemessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/deletemessage"
 	telegrameditmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/editmessage"
 	telegramevent "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/event"
 	telegrampinmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/pinmessage"
+	telegramsenddocument "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/senddocument"
 	telegramsendmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/sendmessage"
 	telegramsendphoto "github.com/FlameInTheDark/neuropipe/internal/nodes/telegram/sendphoto"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/text/case"
@@ -120,6 +123,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 	for _, register := range []func(nodes.Registrar) error{
 		javascript.Register,
 		sqlnode.Register,
+		storagenodes.Register,
 		kvkeys.RegisterGet,
 		kvkeys.RegisterSet,
 		kvkeys.RegisterDelete,
@@ -194,6 +198,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 		readfile.Register,
 		writefile.Register,
 		download.Register,
+		drawimage.Register,
 		displaymessage.Register,
 		displayquestion.Register,
 		displayinput.Register,
@@ -212,6 +217,7 @@ func RegisterAll(registrar nodes.Registrar) error {
 		telegramevent.Register,
 		telegrameditmessage.Register,
 		telegrampinmessage.Register,
+		telegramsenddocument.Register,
 		telegramsendmessage.Register,
 		telegramsendphoto.Register,
 		split.Register,

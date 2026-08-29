@@ -16,6 +16,8 @@ export const NAV_MIDDLE = [
   { id: "functions", icon: "SquareFunction", labelKey: "nav.functions" },
   { id: "variables", icon: "Braces", labelKey: "nav.variables" },
   { id: "databases", icon: "Database", labelKey: "nav.databases" },
+  { id: "storages", icon: "Cloud", labelKey: "nav.storages" },
+  { id: "integrations", icon: "Plug", labelKey: "nav.integrations" },
 ];
 
 export const NAV_BOTTOM = [

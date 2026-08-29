@@ -818,7 +818,7 @@ export function Canvas({
 
         {legendOpen && (
           <div className="pop-in mt-1 flex flex-col gap-0.5 rounded-lg border border-ink-700 bg-ink-850/95 p-1 shadow-[0_10px_30px_-14px_rgba(0,0,0,0.9)] backdrop-blur">
-            {(["exec", "text", "number", "boolean", "array", "map", "object"] as const).map((lt) => {
+            {(["exec", "text", "number", "boolean", "array", "map", "object", "bytes"] as const).map((lt) => {
               const c = pinPalette(lt);
               return (
                 <Tooltip

@@ -127,6 +127,15 @@
       "path": "guides/kv-databases.md"
     },
     {
+      "id": "guides/storages",
+      "title": "Storages (S3 and FTP)",
+      "summary": "Register S3-compatible and FTP/FTPS storages, browse files, and build pipelines with storage nodes.",
+      "category": [
+        "Guides"
+      ],
+      "path": "guides/storages.md"
+    },
+    {
       "id": "guides/ai-workflows",
       "title": "AI workflows",
       "summary": "Use a model as a constrained decision maker.",
@@ -200,6 +209,7 @@
         "telegram:event",
         "action:telegram_send_message",
         "action:telegram_send_photo",
+        "action:telegram_send_document",
         "action:telegram_edit_message",
         "action:telegram_delete_message",
         "action:telegram_answer_callback",
@@ -341,6 +351,26 @@
         "action:http",
         "action:report",
         "action:subpipeline"
+      ]
+    },
+    {
+      "id": "reference/storage",
+      "title": "Storage nodes",
+      "summary": "Upload, download, list, move, and delete files in registered S3 and FTP storages, and share them with presigned or public URLs.",
+      "category": [
+        "Node reference",
+        "Storage"
+      ],
+      "path": "reference/storage.md",
+      "nodeTypes": [
+        "action:storage_upload_file",
+        "action:storage_download_file",
+        "action:storage_list_files",
+        "action:storage_delete_file",
+        "action:storage_create_folder",
+        "action:storage_move_file",
+        "action:storage_presign_url",
+        "action:storage_public_url"
       ]
     },
     {

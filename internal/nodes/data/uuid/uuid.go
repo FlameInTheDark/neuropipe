@@ -157,7 +157,7 @@ func parseDefinition() domain.NodeDefinition {
 				{Path: "isValid", Label: "Valid", DataType: domain.DataBoolean},
 				{Path: "version", Label: "Version", DataType: domain.DataNumber},
 				{Path: "variant", Label: "Variant", DataType: domain.DataText},
-				{Path: "bytes", Label: "Bytes", DataType: domain.DataAny},
+				{Path: "bytes", Label: "Bytes", DataType: domain.DataBytes},
 				{Path: "urn", Label: "URN", DataType: domain.DataText},
 			}},
 		},

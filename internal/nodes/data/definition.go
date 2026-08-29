@@ -52,6 +52,8 @@ func color(dataType domain.DataType) string {
 		return "#60a5fa"
 	case domain.DataList:
 		return "#facc15"
+	case domain.DataBytes:
+		return "#fbbf24"
 	default:
 		return "#a1a1aa"
 	}

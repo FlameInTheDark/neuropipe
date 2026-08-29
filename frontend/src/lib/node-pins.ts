@@ -14,6 +14,8 @@ export function dataPinColor(dataType?: DataType): string {
       return "#60a5fa";
     case "list":
       return "#facc15";
+    case "bytes":
+      return "#fbbf24";
     default:
       return "#a1a1aa";
   }

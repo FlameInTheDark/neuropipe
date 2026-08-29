@@ -1,6 +1,7 @@
 package discord
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,10 +38,14 @@ func (s *Service) fetchSelf(_ context.Context, token string) (*discordgo.User, e
 
 // SendDiscordMessage sends one channel message. Transport failures are hard
 // errors; Discord REST rejections are soft results carrying the API's own
-// message.
+// message. A message may consist of content, embeds, attachments, or any
+// combination — Discord requires at least one of them.
 func (s *Service) SendDiscordMessage(ctx context.Context, request domain.DiscordMessageRequest) (domain.DiscordMessageResult, error) {
 	if utf8.RuneCountInString(request.Message) > maxMessageRunes {
 		return domain.DiscordMessageResult{Reason: "message exceeds Discord's 2,000-character limit"}, nil
+	}
+	if request.Message == "" && len(request.Embeds) == 0 && len(request.Attachments) == 0 {
+		return domain.DiscordMessageResult{Reason: "message is empty — provide message text, embeds, or attachments"}, nil
 	}
 	if !validSnowflake(request.ChannelID) {
 		return domain.DiscordMessageResult{Reason: fmt.Sprintf("channel ID %q is not a valid Discord ID (expected up to 20 digits)", request.ChannelID)}, nil
@@ -57,7 +62,11 @@ func (s *Service) SendDiscordMessage(ctx context.Context, request domain.Discord
 	if err != nil {
 		return domain.DiscordMessageResult{}, err
 	}
-	data := &discordgo.MessageSend{Content: request.Message}
+	data := &discordgo.MessageSend{Content: request.Message, Embeds: transportEmbeds(request.Embeds)}
+	for index := range request.Attachments {
+		attachment := request.Attachments[index]
+		data.Files = append(data.Files, &discordgo.File{Name: attachment.Name, ContentType: attachment.ContentType, Reader: bytes.NewReader(attachment.Data)})
+	}
 	if request.ReplyToID != "" {
 		data.Reference = &discordgo.MessageReference{MessageID: request.ReplyToID}
 	}
@@ -66,6 +75,48 @@ func (s *Service) SendDiscordMessage(ctx context.Context, request domain.Discord
 		return messageRejection(request, err), nil
 	}
 	return domain.DiscordMessageResult{MessageID: message.ID, Sent: true}, nil
+}
+
+// transportEmbeds converts domain embeds into the transport library's wire
+// type. Nil maps stay nil so the JSON payload omits empty sections exactly
+// like a hand-written embed.
+func transportEmbeds(embeds []*domain.DiscordEmbed) []*discordgo.MessageEmbed {
+	if len(embeds) == 0 {
+		return nil
+	}
+	converted := make([]*discordgo.MessageEmbed, 0, len(embeds))
+	for _, embed := range embeds {
+		if embed == nil {
+			continue
+		}
+		next := &discordgo.MessageEmbed{
+			URL:         embed.URL,
+			Title:       embed.Title,
+			Description: embed.Description,
+			Timestamp:   embed.Timestamp,
+			Color:       embed.Color,
+		}
+		if embed.Footer != nil {
+			next.Footer = &discordgo.MessageEmbedFooter{Text: embed.Footer.Text, IconURL: embed.Footer.IconURL}
+		}
+		if embed.Image != nil {
+			next.Image = &discordgo.MessageEmbedImage{URL: embed.Image.URL}
+		}
+		if embed.Thumbnail != nil {
+			next.Thumbnail = &discordgo.MessageEmbedThumbnail{URL: embed.Thumbnail.URL}
+		}
+		if embed.Author != nil {
+			next.Author = &discordgo.MessageEmbedAuthor{Name: embed.Author.Name, URL: embed.Author.URL, IconURL: embed.Author.IconURL}
+		}
+		for _, field := range embed.Fields {
+			if field == nil {
+				continue
+			}
+			next.Fields = append(next.Fields, &discordgo.MessageEmbedField{Name: field.Name, Value: field.Value, Inline: field.Inline})
+		}
+		converted = append(converted, next)
+	}
+	return converted
 }
 
 func (s *Service) SendDiscordDirectMessage(ctx context.Context, request domain.DiscordDMRequest) (domain.DiscordMessageResult, error) {

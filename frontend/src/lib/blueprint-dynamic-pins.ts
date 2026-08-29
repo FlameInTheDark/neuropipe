@@ -1,4 +1,6 @@
 import { dataPinColor } from "@/lib/node-pins";
+import { normalizeDrawImageDoc } from "@/lib/draw-image";
+import { normalizeEmbedDoc } from "@/lib/embed";
 import {
   resolveJavaScriptInputs,
   resolveJavaScriptOutputs,
@@ -67,6 +69,7 @@ const dataTypes: readonly DataType[] = [
   "boolean",
   "object",
   "list",
+  "bytes",
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,6 +98,7 @@ function dataTypeForTypeSpec(type: TypeSpec): DataType {
     case "float": return "number";
     case "bool": return "boolean";
     case "list": return "list";
+    case "bytes": return "bytes";
     case "map":
     case "record": return "object";
     default: return "any";
@@ -108,7 +112,7 @@ function textBytesRepresentation(value: unknown): TextBytesRepresentation {
 }
 
 function textBytesPin(pin: NodePort, representation: TextBytesRepresentation): NodePort {
-        const dataType: DataType = representation === "text" ? "text" : "any";
+        const dataType: DataType = representation === "text" ? "text" : "bytes";
         return {
                 ...pin,
                 dataType,
@@ -307,6 +311,49 @@ export function resolveConfigDrivenInputs(
 ): NodePort[] {
   if (!definition) return [];
   const inputs = definitionPorts(definition.inputs);
+  if (definition.type === "action:draw_image") {
+    // dynamic input pins mirror the document's declared pins (Go resolver twin)
+    const doc = normalizeDrawImageDoc(config.document ?? definition.defaultConfig?.document);
+    const declared: NodePort[] = doc.pins.map((pin) => ({
+      id: pin.name,
+      label: pin.name,
+      kind: "data",
+      direction: "input",
+      dataType: drawPinDataType(pin.type),
+      type: drawPinTypeSpec(pin.type),
+      color: dataPinColor(drawPinDataType(pin.type)),
+      maxConnections: 1,
+      default: pin.type === "text" && pin.default !== "" ? pin.default : undefined,
+    }));
+    return [...inputs, ...declared];
+  }
+  if (definition.type === "action:discord_send_message") {
+    // dynamic input pins mirror the embed document's variables (Go resolver twin)
+    const doc = normalizeEmbedDoc(config.embeds ?? definition.defaultConfig?.embeds);
+    const declared: NodePort[] = doc.pins.map((pin) => ({
+      id: pin.name,
+      label: pin.name,
+      kind: "data",
+      direction: "input",
+      dataType: drawPinDataType(pin.type),
+      type: drawPinTypeSpec(pin.type),
+      color: dataPinColor(drawPinDataType(pin.type)),
+      maxConnections: 1,
+      default: pin.type === "text" && pin.default !== "" ? pin.default : undefined,
+    }));
+    // the Image source dropdown gates the attachment pins (Go resolver twin)
+    return filterSourcePins([...inputs, ...declared], imageSourceSpec, config.imageSource ?? definition.defaultConfig?.imageSource);
+  }
+  if (definition.type === "action:telegram_send_photo") {
+    return filterSourcePins(inputs, photoSourceSpec, config.photoSource ?? definition.defaultConfig?.photoSource);
+  }
+  if (definition.type === "action:telegram_send_document") {
+    return filterSourcePins(inputs, documentSourceSpec, config.documentSource ?? definition.defaultConfig?.documentSource);
+  }
+  if (definition.type === "action:storage_upload_file") {
+    // the Source dropdown gates the upload pins (Go resolver twin)
+    return filterUploadSourcePins(inputs, config.source ?? definition.defaultConfig?.source);
+  }
   if (definition.type === "action:javascript") {
     return resolveJavaScriptInputs({ ...definition, inputs }, config);
   }
@@ -517,6 +564,123 @@ export function resolveConfigDrivenOutputs(
   }));
 }
 
+
+/* ------------------------------------------------------------------ */
+/* send-node image/file source pin gating (Go resolver twins)          */
+/* ------------------------------------------------------------------ */
+
+/** One send node's mapping of source pin IDs onto their source mode. */
+interface SourcePinSpec {
+  url: string;
+  file: string;
+  base64: string;
+  bytes: string;
+  name: string;
+}
+
+const imageSourceSpec: SourcePinSpec = {
+  url: "fileUrl",
+  file: "filePath",
+  base64: "fileBase64",
+  bytes: "fileData",
+  name: "fileName",
+};
+
+const photoSourceSpec: SourcePinSpec = {
+  url: "photoUrl",
+  file: "photoPath",
+  base64: "photoBase64",
+  bytes: "photoData",
+  name: "photoName",
+};
+
+const documentSourceSpec: SourcePinSpec = {
+  url: "documentUrl",
+  file: "documentPath",
+  base64: "documentBase64",
+  bytes: "documentData",
+  name: "fileName",
+};
+
+/** Normalises a source selector value; unknown values read as Auto (""). */
+function sendSourceMode(value: unknown): string {
+  return value === "url" || value === "file" || value === "base64" || value === "bytes" ? value : "";
+}
+
+/** Keeps only the pins the selected source uses; Auto keeps everything so
+ * graphs saved before the selector keep their wired connections. */
+function filterSourcePins(
+  inputs: NodePort[],
+  spec: SourcePinSpec,
+  configured: unknown,
+): NodePort[] {
+  const mode = sendSourceMode(configured);
+  if (mode === "") return inputs;
+  const gated = new Set([spec.url, spec.file, spec.base64, spec.bytes, spec.name]);
+  return inputs.filter((pin) => {
+    if (!gated.has(pin.id)) return true;
+    if (pin.id === spec.name) {
+      return mode === "base64" || mode === "bytes";
+    }
+    return (
+      (pin.id === spec.url && mode === "url") ||
+      (pin.id === spec.file && mode === "file") ||
+      (pin.id === spec.base64 && mode === "base64") ||
+      (pin.id === spec.bytes && mode === "bytes")
+    );
+  });
+}
+
+/** Normalises an upload source selector value; unknown values (including the
+ * send nodes' url mode) read as Auto (""). Mirrors uploadSourceMode in Go. */
+function uploadSourceMode(value: unknown): string {
+  return value === "file" || value === "bytes" || value === "base64" ? value : "";
+}
+
+/** Upload File pin gating: the Source dropdown keeps only the pins its mode
+ * uses (localPath / data / base64); Auto keeps everything so graphs saved
+ * before the selector keep their wires. Go resolver twin. */
+function filterUploadSourcePins(inputs: NodePort[], configured: unknown): NodePort[] {
+  const mode = uploadSourceMode(configured);
+  if (mode === "") return inputs;
+  return inputs.filter((pin) => {
+    if (pin.id === "localPath") return mode === "file";
+    if (pin.id === "data") return mode === "bytes";
+    if (pin.id === "base64") return mode === "base64";
+    return true;
+  });
+}
+
+/** Draw Image pin wire types mirrored from the Go resolver. */
+function drawPinDataType(pinType: string): DataType {
+  switch (pinType) {
+    case "number":
+      return "number";
+    case "boolean":
+      return "boolean";
+    case "object":
+      return "object";
+    case "array":
+      return "list";
+    default:
+      return "text";
+  }
+}
+
+function drawPinTypeSpec(pinType: string): TypeSpec {
+  switch (pinType) {
+    case "number":
+      return { kind: "float" };
+    case "boolean":
+      return { kind: "bool" };
+    case "object":
+      return { kind: "map", key: { kind: "string" }, value: { kind: "any" } };
+    case "array":
+      return { kind: "list", element: { kind: "any" } };
+    default:
+      return { kind: "string" };
+  }
+}
 export function formLayoutFromValue(value: unknown): FormLayoutValue {
   if (!value || typeof value !== "object") {
     return { items: [{ id: "field_1", kind: "input", label: "Input", col: 0, row: 0, span: 4, rowSpan: 1, inputType: "text" }] };

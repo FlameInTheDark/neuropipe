@@ -20,6 +20,7 @@ function specTypeLabel(t: Translate, spec?: TypeSpec): string {
     case "int":
     case "float": return t("pins.type_number");
     case "bool": return t("pins.type_boolean");
+    case "bytes": return t("pins.type_bytes");
     case "list": return t("pins.type_array");
     case "map": return t("pins.type_map");
     case "record": return spec.name || t("pins.type_object");

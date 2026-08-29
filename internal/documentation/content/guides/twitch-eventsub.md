@@ -2,7 +2,7 @@
 
 ## Connect an identity
 
-In **Settings → Twitch**, enter the public Client ID from your Twitch
+In **Integrations → Twitch**, enter the public Client ID from your Twitch
 application, then choose **Connect Twitch**. The device-code dialog shows the
 verification code and opens Twitch’s verification page. Access and refresh
 tokens are stored only in the Windows-protected local vault and never return to

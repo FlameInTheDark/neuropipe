@@ -11,6 +11,8 @@ import { TextEditorModal } from "./TextEditorModal";
 import { CodeEditorModal } from "./CodeEditorModal";
 import { JsonViewerModal } from "./JsonViewerModal";
 import { FormBuilderEditor } from "./FormBuilderEditor";
+import { DrawImageEditor } from "./DrawImageEditor";
+import { EmbedEditor } from "./EmbedEditor";
 import { RouteOptionsEditor, SchemaEditor, SwitchCasesEditor } from "./StructuredFieldEditors";
 import { HtmlExtractionsEditor } from "./HtmlExtractionsEditor";
 import { HeadersEditor } from "./HeadersEditor";
@@ -387,6 +389,10 @@ function InspectBody({
     () => api.databases.filter((d) => d.driver === "redis" || d.driver === "sugardb").map((d) => ({ value: d.id, label: d.name, icon: "Database" })),
     [api.databases],
   );
+  const storageOptions = useMemo(
+    () => api.storages.map((s) => ({ value: s.id, label: s.name, icon: s.driver === "s3" ? "Cloud" : "Globe" })),
+    [api.storages],
+  );
   const secretOptions = useMemo<{ value: string; label: string; icon?: string }[]>(
     () => [
       { value: "", label: t("editor.secretPlaceholder") },
@@ -542,6 +548,7 @@ function InspectBody({
                 node={node}
                 dbOptions={dbOptions}
                 kvDbOptions={kvDbOptions}
+                storageOptions={storageOptions}
                 secretOptions={secretOptions}
                 identityOptions={identityOptions}
                 discordIdentityOptions={discordIdentityOptions}
@@ -634,12 +641,40 @@ function stringifyValue(value: unknown): string {
   }
 }
 
+/** Attachment names for the embed editor's Discord preview: URL entries,
+ * local paths, and the named data file, in the order Discord would show them. */
+function embedPreviewAttachments(node: GraphNode): Array<{ name: string }> {
+  const names: string[] = [];
+  const pushLines = (value: unknown) => {
+    if (typeof value !== "string") return;
+    for (const line of value.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const withoutQuery = trimmed.split("?")[0].split("#")[0];
+      const base = withoutQuery.split("/").filter(Boolean).pop() ?? trimmed;
+      names.push(base || trimmed);
+    }
+  };
+  pushLines(node.values.fileUrl);
+  pushLines(node.values.filePath);
+  const hasInlinePayload =
+    (typeof node.values.fileBase64 === "string" && node.values.fileBase64.trim() !== "") ||
+    node.values.fileData !== undefined && node.values.fileData !== null;
+  if (typeof node.values.fileName === "string" && node.values.fileName.trim() !== "") {
+    names.push(node.values.fileName.trim());
+  } else if (hasInlinePayload) {
+    names.push("file.bin");
+  }
+  return names.slice(0, 10).map((name) => ({ name }));
+}
+
 function InspectorField({
   fieldKey,
   field,
   node,
   dbOptions,
   kvDbOptions,
+  storageOptions,
   secretOptions,
   identityOptions,
   discordIdentityOptions,
@@ -654,6 +689,7 @@ function InspectorField({
   node: GraphNode;
   dbOptions: DropdownOption[];
   kvDbOptions: DropdownOption[];
+  storageOptions: DropdownOption[];
   secretOptions: DropdownOption[];
   identityOptions: { value: string; label: string }[];
   discordIdentityOptions: { value: string; label: string }[];
@@ -767,6 +803,28 @@ function InspectorField({
     );
   }
 
+  /* visual image document editor for the Draw Image node */
+  if (field.kind === "image-editor") {
+    return (
+      <div className="space-y-1.5">
+        <Label text={field.label} required={field.required} />
+        <DrawImageEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />
+      </div>
+    );
+  }
+
+  /* visual embed editor for the Discord Send Message node */
+  if (field.kind === "embed-editor") {
+    return (
+      <EmbedEditor
+        value={raw}
+        onChange={(next) => onChange(fieldKey, next)}
+        previewContent={typeof node.values.message === "string" ? node.values.message : ""}
+        previewAttachments={embedPreviewAttachments(node)}
+      />
+    );
+  }
+
   if (field.type === "toggle") {
     return (
       <div className="flex items-center justify-between rounded-md border border-ink-700/70 bg-ink-850 px-2.5 py-[7px]">
@@ -782,22 +840,19 @@ function InspectorField({
   }
 
   if (field.type === "select") {
+    const optionMap: Record<string, DropdownOption[] | undefined> = {
+      databases: dbOptions,
+      "kv-databases": kvDbOptions,
+      storages: storageOptions,
+      secrets: secretOptions,
+      "twitch-identity": identityOptions,
+      "discord-identity": discordIdentityOptions,
+      "telegram-identity": telegramIdentityOptions,
+      pipelines: pipelineOptions,
+    };
     const options =
-      field.dynamic === "databases"
-        ? dbOptions
-        : field.dynamic === "kv-databases"
-          ? kvDbOptions
-          : field.dynamic === "secrets"
-            ? secretOptions
-            : field.dynamic === "twitch-identity"
-              ? identityOptions
-              : field.dynamic === "discord-identity"
-                ? discordIdentityOptions
-                : field.dynamic === "telegram-identity"
-                  ? telegramIdentityOptions
-                  : field.dynamic === "pipelines"
-                    ? pipelineOptions
-                    : (field.options ?? []).map((o) => ({ value: o.value, label: o.label }));
+      (field.dynamic ? optionMap[field.dynamic] : undefined) ??
+      (field.options ?? []).map((o) => ({ value: o.value, label: o.label }));
     return (
       <label className="block">
         <span className="mb-1 block">
@@ -963,7 +1018,7 @@ function serializeNamedFields(entries: NamedFieldEntry[]): unknown[] {
   });
 }
 
-const NAMED_FIELD_TYPES = ["any", "text", "number", "boolean", "object", "list"] as const;
+const NAMED_FIELD_TYPES = ["any", "text", "number", "boolean", "object", "list", "bytes"] as const;
 
 function NamedFieldsEditor({
   label,

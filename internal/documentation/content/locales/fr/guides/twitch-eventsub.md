@@ -1,6 +1,6 @@
 # Twitch EventSub
 
-Dans **Paramètres → Twitch**, saisissez l’ID client public puis connectez une
+Dans **Intégrations → Twitch**, saisissez l’ID client public puis connectez une
 identité avec le dialogue de code d’appareil. Les jetons restent dans le coffre
 protégé par Windows et ne vont jamais dans le renderer.
 

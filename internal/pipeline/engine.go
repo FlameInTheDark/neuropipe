@@ -59,6 +59,7 @@ type Engine struct {
 	globals       GlobalVariablesStore
 	databases     nodes.SQLExecutor
 	kv            nodes.KVExecutor
+	storage       nodes.StorageExecutor
 	dialogs       nodes.DialogOpener
 	inputDialogs  nodes.InputDialogOpener
 	formDialogs   nodes.FormDialogOpener

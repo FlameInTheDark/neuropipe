@@ -87,6 +87,8 @@ func FromDataType(dataType domain.DataType) domain.TypeSpec {
 	case domain.DataList:
 		element := Any()
 		return domain.TypeSpec{Kind: domain.TypeList, Element: &element}
+	case domain.DataBytes:
+		return domain.TypeSpec{Kind: domain.TypeBytes}
 	default:
 		return Any()
 	}
