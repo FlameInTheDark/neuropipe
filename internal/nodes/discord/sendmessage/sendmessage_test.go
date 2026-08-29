@@ -260,6 +260,19 @@ func TestAttachmentsOnlyMessageWithoutText(t *testing.T) {
 	}
 }
 
+// missingFileStatError mirrors the os.Stat call attachments.loadPath performs
+// on the cleaned path, so the rejection reason can be asserted on any platform
+// ("no such file or directory" on Unix, "cannot find the path specified" on
+// Windows) instead of hardcoding one OS error text.
+func missingFileStatError(t *testing.T, path string) string {
+	t.Helper()
+	_, err := os.Stat(filepath.Clean(path))
+	if err == nil {
+		t.Fatalf("expected %q to be missing on this machine", path)
+	}
+	return err.Error()
+}
+
 func TestAttachmentMissingFileRejected(t *testing.T) {
 	module := nodes.Implementation{Metadata: definition(), Executor: execute}
 	result, err := module.Execute(context.Background(), invocation(map[string]any{
@@ -268,7 +281,7 @@ func TestAttachmentMissingFileRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Ports[0] != "rejected" || !strings.Contains(result.Outputs["reason"].(string), "no such file or directory") {
+	if result.Ports[0] != "rejected" || !strings.Contains(result.Outputs["reason"].(string), missingFileStatError(t, "/definitely/missing/file.bin")) {
 		t.Fatalf("result = %#v", result)
 	}
 }
