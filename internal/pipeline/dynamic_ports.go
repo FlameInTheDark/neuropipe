@@ -67,7 +67,7 @@ func definitionForNode(definition domain.NodeDefinition, node domain.FlowNode) (
 			copy(outputs, definition.Outputs)
 			for index := range outputs {
 				outputs[index].DataType = dataType
-				typeSpec := typespec.FromDataType(dataType)
+				typeSpec := castOutputSpec(dataType)
 				outputs[index].Type = &typeSpec
 				outputs[index].Color = dataTypeColor(dataType)
 			}
@@ -176,9 +176,27 @@ func castOutputType(config map[string]any) (domain.DataType, bool) {
 		return domain.DataNumber, true
 	case "boolean":
 		return domain.DataBoolean, true
+	case "object":
+		return domain.DataObject, true
+	case "list":
+		return domain.DataList, true
+	case "bytes":
+		return domain.DataBytes, true
 	default:
 		return "", false
 	}
+}
+
+// castOutputSpec mirrors the cast module's wire contract: objects use the
+// graph-wide map<string, any> shape so the fallback agrees with the
+// registered module resolver.
+func castOutputSpec(dataType domain.DataType) domain.TypeSpec {
+	if dataType == domain.DataObject {
+		key := domain.TypeSpec{Kind: domain.TypeString}
+		value := domain.TypeSpec{Kind: domain.TypeAny}
+		return domain.TypeSpec{Kind: domain.TypeMap, Key: &key, Value: &value}
+	}
+	return typespec.FromDataType(dataType)
 }
 
 type fieldOutput struct {

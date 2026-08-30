@@ -24,6 +24,7 @@ import { Dropdown } from "../components/Dropdown";
 import { Modal, ModalActions } from "../components/primitives/Modal";
 import { Field, TextInput } from "../components/primitives/Field";
 import { SectionCard } from "./SettingsView";
+import { ApplicationCommandsSection } from "../components/discord/ApplicationCommands";
 
 /**
  * The Twitch / Discord / Telegram panels of the Integrations view.
@@ -457,6 +458,11 @@ export function DiscordPanel({
             ))
           )}
         </div>
+      </SectionCard>
+
+      <SectionCard title={t("discord.commands.section")}>
+        <p className="mb-3 text-[11.5px] leading-relaxed text-fg-faint">{t("discord.commands.sectionHelp")}</p>
+        <ApplicationCommandsSection identities={draft.discord.identities} />
       </SectionCard>
 
       <SectionCard title={t("discord.triggers")}>

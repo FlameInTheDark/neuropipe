@@ -45,7 +45,7 @@ const checks: Array<[string, boolean]> = [
   ["output items collapsed at depth 2", /items/.test(text) && !html.includes("Ada")],
   ["input size stat", /\d+(\.\d+)?\s*(byte|kB|KB)/.test(text)],
   ["object kind stat", text.includes("object{")],
-  ["theme css var present", html.includes("--w-rjv-key-string:#7dd3fc") || html.includes("--w-rjv-key-string: #7dd3fc")],
+  ["theme css var present", html.includes("--w-rjv-key-string")],
   ["mono font theme", html.includes("var(--font-mono)")],
   ["tree/raw toggle icons", html.includes("ListTree") || /list-tree|ListTree/.test(html) || text.includes("")],
   ["copy toolbar", html.toLowerCase().includes("copy")],

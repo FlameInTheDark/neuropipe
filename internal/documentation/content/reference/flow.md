@@ -12,7 +12,7 @@ Flow nodes are impure: an exec pulse is required before their data outputs exist
 
 ## For Each Loop
 
-**Purpose:** process list items. **Pins:** Exec/Array inputs; Loop Body, Completed, Array Element, Array Index outputs. **Configure:** none. **Produces:** one scoped frame per item. **Capabilities:** none. **Failure:** non-list input or cancellation stops safely. **Example:** Query JSON items → For Each → HTTP Request.
+**Purpose:** process list items. **Pins:** Exec/Array inputs; Loop Body, Completed, Array Element, Array Index outputs. **Configure:** none. **Produces:** one scoped frame per item. **Capabilities:** none. **Failure:** non-list input or cancellation stops safely. **Example:** Query JSON `$.items` → For Each → HTTP Request.
 
 ## For Loop
 

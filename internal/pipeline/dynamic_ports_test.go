@@ -125,6 +125,48 @@ func TestDefinitionForNodeBuildsTypeAssertContract(t *testing.T) {
 	}
 }
 
+func TestDefinitionForNodeTypesCastOutputs(t *testing.T) {
+	definition, ok := catalog.New().Get("data:cast")
+	if !ok {
+		t.Fatal("Cast definition is missing")
+	}
+	tests := []struct {
+		target   string
+		dataType domain.DataType
+		kind     domain.TypeKind
+	}{
+		{"object", domain.DataObject, domain.TypeMap},
+		{"list", domain.DataList, domain.TypeList},
+		{"bytes", domain.DataBytes, domain.TypeBytes},
+	}
+	for _, test := range tests {
+		resolved, err := definitionForNode(definition, domain.FlowNode{ID: "cast", Type: "data:cast", Data: map[string]any{"config": map[string]any{"target": test.target}}})
+		if err != nil {
+			t.Fatalf("definitionForNode(%s) error = %v", test.target, err)
+		}
+		output := resolved.Outputs[0]
+		if output.DataType != test.dataType {
+			t.Fatalf("target %s output data type = %q, want %q", test.target, output.DataType, test.dataType)
+		}
+		if output.Type == nil || output.Type.Kind != test.kind {
+			t.Fatalf("target %s output contract = %#v, want kind %s", test.target, output.Type, test.kind)
+		}
+	}
+	object := resolvedOutputFor(t, definition, "object")
+	if object.Type == nil || object.Type.Key == nil || object.Type.Key.Kind != domain.TypeString || object.Type.Value == nil || object.Type.Value.Kind != domain.TypeAny {
+		t.Fatalf("object cast contract = %#v, want map<string, any>", object.Type)
+	}
+}
+
+func resolvedOutputFor(t *testing.T, definition domain.NodeDefinition, target string) domain.NodePort {
+	t.Helper()
+	resolved, err := definitionForNode(definition, domain.FlowNode{ID: "cast", Type: "data:cast", Data: map[string]any{"config": map[string]any{"target": target}}})
+	if err != nil {
+		t.Fatalf("definitionForNode(%s) error = %v", target, err)
+	}
+	return resolved.Outputs[0]
+}
+
 func TestDefinitionForNodePreservesLegacyGetFieldPath(t *testing.T) {
 	definition, _ := catalog.New().Get("data:get_field")
 	resolved, err := definitionForNode(definition, domain.FlowNode{

@@ -139,7 +139,9 @@ export function SchemaEditor({
             <span className="text-[10px] text-fg-faint">{schema.properties.length}</span>
           </div>
           {schema.properties.map((property, index) => (
-            <article key={`${property.name}-${index}`} className="rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
+            // index-keyed: content-derived keys remount the row mid-keystroke
+            // and steal focus from the input being edited
+            <article key={index} className="rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-faint">
                   {t("editorExtra.field")} {index + 1}
@@ -257,7 +259,9 @@ export function RouteOptionsEditor({
     <div className="space-y-3 rounded-md border border-ink-700 bg-ink-900/30 p-3">
       <p className="text-[11px] leading-4 text-fg-faint">{t("editorExtra.optionHelp")}</p>
       {options.map((option, index) => (
-        <article key={`${option.id}-${index}`} className="rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
+        // index-keyed: content-derived keys remount the row mid-keystroke and
+        // steal focus from the Output ID input being edited
+        <article key={index} className="rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
           <div className="mb-2 flex items-center justify-between">
             <div>
               <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-faint">

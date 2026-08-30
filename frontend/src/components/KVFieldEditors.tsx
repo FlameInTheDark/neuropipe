@@ -169,7 +169,9 @@ export function KVHashFieldsEditor({
         <ColumnHeads left={t("editor.kvFieldColumn")} right={t("editor.kvValueColumn")} />
       )}
       {rows.map((row, index) => (
-        <div key={`${index}-${row.field}`} className="flex items-center gap-1.5">
+        // index-keyed: content-derived keys remount the row mid-keystroke and
+        // steal focus from the input being edited
+        <div key={index} className="flex items-center gap-1.5">
           <input
             value={row.field}
             onChange={(e) => commit(rows.map((r, i) => (i === index ? { ...r, field: e.target.value } : r)))}
@@ -222,7 +224,9 @@ export function KVScoredEntriesEditor({
         <ColumnHeads left={t("editor.kvMemberColumn")} right={t("editor.kvScoreColumn")} />
       )}
       {rows.map((row, index) => (
-        <div key={`${index}-${row.member}`} className="flex items-center gap-1.5">
+        // index-keyed: content-derived keys remount the row mid-keystroke and
+        // steal focus from the input being edited
+        <div key={index} className="flex items-center gap-1.5">
           <input
             value={row.member}
             onChange={(e) => commit(rows.map((r, i) => (i === index ? { ...r, member: e.target.value } : r)))}

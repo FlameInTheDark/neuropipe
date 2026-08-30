@@ -37,6 +37,10 @@ type EventSink func(string, any)
 // maxMessageRunes matches Discord's documented message length limit.
 const maxMessageRunes = 2000
 
+// interactionTokenTTL is how long an interaction token stays valid after
+// Discord created it: 15 minutes, per the interactions documentation.
+const interactionTokenTTL = 15 * time.Minute
+
 // Service is an owned lifecycle. Every gateway session shares ctx and stops
 // synchronously, so reconnects and validation cannot outlive Desktop.
 type Service struct {
@@ -50,6 +54,7 @@ type Service struct {
 	settings domain.DiscordSettings
 	status   domain.DiscordStatus
 	sessions map[string]*discordgo.Session
+	acked    map[string]time.Time
 	opening  sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc

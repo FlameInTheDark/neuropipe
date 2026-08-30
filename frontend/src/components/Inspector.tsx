@@ -13,12 +13,15 @@ import { JsonViewerModal } from "./JsonViewerModal";
 import { FormBuilderEditor } from "./FormBuilderEditor";
 import { DrawImageEditor } from "./DrawImageEditor";
 import { EmbedEditor } from "./EmbedEditor";
+import { CommandField } from "./discord/CommandField";
 import { RouteOptionsEditor, SchemaEditor, SwitchCasesEditor } from "./StructuredFieldEditors";
 import { HtmlExtractionsEditor } from "./HtmlExtractionsEditor";
 import { HeadersEditor } from "./HeadersEditor";
 import { KVArgumentsEditor, KVHashFieldsEditor, KVScoredEntriesEditor, KVStringListEditor } from "./KVFieldEditors";
 import { TypeSpecField, specTopToken, tokenToPinDataType } from "./TypeSpecField";
 import { typeSpecFromDataType } from "../lib/type-spec";
+import { parseNamedFields, serializeNamedFields, uniqueFieldID } from "../lib/named-fields";
+import type { NamedFieldEntry } from "../lib/named-fields";
 import { unmapDataType } from "../lib/adapters";
 import { formatDuration } from "@/lib/format";
 import type { TypeSpec } from "../lib/types";
@@ -813,6 +816,22 @@ function InspectorField({
     );
   }
 
+  /* command picker for the Discord Command Trigger */
+  if (field.kind === "discord-command") {
+    return (
+      <label className="block">
+        <span className="mb-1 block">
+          <Label text={field.label} required={field.required} />
+        </span>
+        <CommandField
+          value={raw}
+          identityId={typeof node.values.identityId === "string" ? node.values.identityId : ""}
+          onChange={(next) => onChange(fieldKey, next)}
+        />
+      </label>
+    );
+  }
+
   /* visual embed editor for the Discord Send Message node */
   if (field.kind === "embed-editor") {
     return (
@@ -976,51 +995,12 @@ function isValidJson(text: string): boolean {
 
 /* ------------------------------------------------------------------ */
 /*  Named typed fields editor (field-outputs / object-fields)          */
+/*  Serialization + identity rules live in lib/named-fields.ts         */
 /* ------------------------------------------------------------------ */
-
-interface NamedFieldEntry {
-  id: string;
-  label: string;
-  path: string;
-  key: string;
-  dataType: string;
-}
-
-function parseNamedFields(raw: unknown): NamedFieldEntry[] {
-  let list: unknown = raw;
-  if (typeof raw === "string") {
-    try { list = JSON.parse(raw); } catch { return []; }
-  }
-  if (!Array.isArray(list)) return [];
-  return list
-    .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
-    .map((p, i) => ({
-      id: typeof p.id === "string" ? p.id : `field_${i + 1}`,
-      label: typeof p.label === "string" ? p.label : "",
-      path: typeof p.path === "string" ? p.path : "",
-      key: typeof p.key === "string" ? p.key : "",
-      dataType: typeof p.dataType === "string" ? p.dataType : "any",
-    }));
-}
-
-function serializeNamedFields(entries: NamedFieldEntry[]): unknown[] {
-  return entries.map((e, i) => {
-    const id = /^[A-Za-z_][A-Za-z0-9_]*$/.test(e.label.replace(/\s+/g, "_"))
-      ? e.label.replace(/\s+/g, "_")
-      : `field_${i + 1}`;
-    return {
-      id,
-      label: e.label.trim() || id,
-      ...(e.path ? { path: e.path } : {}),
-      ...(e.key ? { key: e.key } : {}),
-      dataType: e.dataType,
-    };
-  });
-}
 
 const NAMED_FIELD_TYPES = ["any", "text", "number", "boolean", "object", "list", "bytes"] as const;
 
-function NamedFieldsEditor({
+export function NamedFieldsEditor({
   label,
   raw,
   secondKey,
@@ -1045,6 +1025,8 @@ function NamedFieldsEditor({
       <Label text={label} />
       {entries.map((e, i) => (
         <div key={`${e.id}-${i}`} className="space-y-1 rounded-md border border-ink-700/70 bg-ink-850/50 p-2">
+          {/* ids are frozen at creation, so the composite key never changes
+              while typing and the inputs keep focus */}
           <div className="flex items-center gap-1.5">
             <input
               value={e.label}
@@ -1081,7 +1063,10 @@ function NamedFieldsEditor({
         </p>
       )}
       <button
-        onClick={() => commit([...entries, { id: `field_${entries.length + 1}`, label: "", path: "", key: "", dataType: "text" }])}
+        onClick={() => {
+          const used = new Set(entries.map((e) => e.id));
+          commit([...entries, { id: uniqueFieldID(used), label: "", path: "", key: "", dataType: "text" }]);
+        }}
         className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 text-[11.5px] text-fg-muted hover:bg-ink-750"
       >
         <Icon name="Plus" className="h-3.5 w-3.5" />

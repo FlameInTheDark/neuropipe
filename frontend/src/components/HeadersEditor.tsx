@@ -73,7 +73,9 @@ export function HeadersEditor({
       )}
 
       {rows.map((row, index) => (
-        <div key={`${index}-${row.name}`} className="flex items-center gap-1.5">
+        // index-keyed: content-derived keys remount the row mid-keystroke and
+        // steal focus from the input being edited
+        <div key={index} className="flex items-center gap-1.5">
           <input
             value={text(index, "name", row.name)}
             onChange={(e) => {

@@ -617,6 +617,37 @@ export interface DiscordStatus { connected: boolean; connectionState: string; ac
 export interface DiscordManualIdentityRequest { label: string; token: string; }
 export interface DiscordEventConditionField { id: string; label: string; description: string; required: boolean; }
 export interface DiscordEventDescriptor { type: string; gatewayEvent: string; label: string; description: string; intents: number; privileged: boolean; chatMessage: boolean; conditions: DiscordEventConditionField[]; }
+export interface DiscordApplicationCommandChoice { name: string; value: string | number; }
+export interface DiscordApplicationCommandOption {
+  type: number;
+  name: string;
+  description?: string;
+  required?: boolean;
+  choices?: DiscordApplicationCommandChoice[];
+  channelTypes?: number[];
+  minValue?: number;
+  maxValue?: number;
+  minLength?: number;
+  maxLength?: number;
+  autocomplete?: boolean;
+  options?: DiscordApplicationCommandOption[];
+}
+export interface DiscordApplicationCommand {
+  id?: string;
+  applicationId?: string;
+  guildId?: string;
+  version?: string;
+  type?: number;
+  name: string;
+  description?: string;
+  options?: DiscordApplicationCommandOption[];
+  defaultMemberPermission?: number;
+  dmPermission?: boolean;
+  nsfw?: boolean;
+  contexts?: number[];
+}
+export interface DiscordCommandRequest { identityId?: string; guildId?: string; command: DiscordApplicationCommand; }
+export interface DiscordGuildLite { id: string; name: string; icon?: string; }
 export type TelegramIdentityStatus = "connected" | "invalid" | "revoked";
 export interface TelegramIdentity { id: string; label: string; botUserId: string; username: string; status: TelegramIdentityStatus; }
 export interface TelegramSettings { defaultBotIdentityId?: string; identities: TelegramIdentity[]; }

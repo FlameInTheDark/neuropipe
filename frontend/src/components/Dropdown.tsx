@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Icon } from "./icons";
@@ -18,6 +18,8 @@ export function Dropdown({
   placeholder,
   className,
   compact,
+  searchable,
+  searchPlaceholder,
 }: {
   value: string;
   options: DropdownOption[];
@@ -25,6 +27,10 @@ export function Dropdown({
   placeholder?: string;
   className?: string;
   compact?: boolean;
+  /* Renders a search input pinned at the top of the menu and filters the
+   * options by it. Meant for long option lists (e.g. a bot's servers). */
+  searchable?: boolean;
+  searchPlaceholder?: string;
 }) {
   const { t } = useTranslation();
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -67,6 +73,8 @@ export function Dropdown({
           anchorRef={btnRef}
           options={options}
           value={value}
+          searchable={searchable}
+          searchPlaceholder={searchPlaceholder}
           onPick={(v) => {
             onChange(v);
             setOpen(false);
@@ -83,18 +91,43 @@ function Menu({
   anchorRef,
   options,
   value,
+  searchable,
+  searchPlaceholder,
   onPick,
   onClose,
 }: {
   anchorRef: React.RefObject<HTMLButtonElement | null>;
   options: DropdownOption[];
   value: string;
+  searchable?: boolean;
+  searchPlaceholder?: string;
   onPick: (v: string) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
+  const [query, setQuery] = useState("");
+  const { t } = useTranslation();
+  const filtered = useMemo(() => {
+    if (!searchable || !query.trim()) return options;
+    const needle = query.trim().toLowerCase();
+    return options.filter(
+      (o) => o.label.toLowerCase().includes(needle) || (o.hint ?? "").toLowerCase().includes(needle),
+    );
+  }, [options, query, searchable]);
   const [hi, setHi] = useState(() => Math.max(0, options.findIndex((o) => o.value === value)));
+
+  // A new filter invalidates the highlight: point it at the first match.
+  useEffect(() => {
+    setHi(0);
+  }, [query]);
+
+  // Keep the highlight inside the (possibly filtered) list and bring it
+  // into view while walking with the arrow keys.
+  useEffect(() => {
+    if (hi > filtered.length - 1) setHi(Math.max(0, filtered.length - 1));
+  }, [filtered.length, hi]);
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
@@ -109,7 +142,10 @@ function Menu({
   }, [anchorRef]);
 
   useEffect(() => {
-    ref.current?.focus();
+    // With a search box the input is the focus target so typing filters
+    // immediately; otherwise the menu container keeps key events.
+    if (searchable) searchRef.current?.focus();
+    else ref.current?.focus();
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (ref.current?.contains(t) || anchorRef.current?.contains(t)) return;
@@ -126,7 +162,7 @@ function Menu({
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener("resize", onClose);
     };
-  }, [anchorRef, onClose]);
+  }, [anchorRef, onClose, searchable]);
 
   return createPortal(
     <div
@@ -135,43 +171,69 @@ function Menu({
       tabIndex={-1}
       style={pos ? { left: pos.left, top: pos.top, minWidth: pos.width } : { left: -9999, top: -9999 }}
       onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-        else if (e.key === "ArrowDown") {
+        if (e.key === "Escape") {
+          // Clearing the filter first matches every searchable picker the
+          // app already ships; the second Escape closes the menu.
+          if (searchable && query) {
+            setQuery("");
+            return;
+          }
+          onClose();
+        } else if (e.key === "ArrowDown") {
           e.preventDefault();
-          setHi((h) => Math.min(h + 1, options.length - 1));
+          setHi((h) => Math.min(h + 1, filtered.length - 1));
         } else if (e.key === "ArrowUp") {
           e.preventDefault();
           setHi((h) => Math.max(h - 1, 0));
         } else if (e.key === "Enter") {
           e.preventDefault();
-          const o = options[hi];
+          const o = filtered[hi];
           if (o) onPick(o.value);
         }
       }}
-      className="timeline-menu fixed z-[90] max-h-[264px] overflow-y-auto rounded-[9px] border border-ink-650 bg-ink-850/95 p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.02)_inset] outline-none backdrop-blur-xl"
+      className="timeline-menu fixed z-[90] rounded-[9px] border border-ink-650 bg-ink-850/95 p-1 shadow-[0_18px_44px_-12px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.02)_inset] outline-none backdrop-blur-xl"
     >
-      {options.map((o, i) => (
-        <button
-          key={o.value}
-          role="option"
-          aria-selected={o.value === value}
-          onMouseEnter={() => setHi(i)}
-          onClick={() => onPick(o.value)}
-          className={cn(
-            "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] transition-colors",
-            i === hi ? "bg-ink-650/80 text-fg" : "text-fg",
-          )}
-        >
-          {o.icon ? (
-            <Icon name={o.icon} className="h-[14px] w-[14px] shrink-0 text-fg-subtle" />
-          ) : null}
-          <span className="min-w-0 truncate">{o.label}</span>
-          {o.hint && <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-faint">{o.hint}</span>}
-          {o.value === value && !o.hint && (
-            <Icon name="Check" className="ml-auto h-3.5 w-3.5 shrink-0 text-fg-muted" />
-          )}
-        </button>
-      ))}
+      {searchable ? (
+        <div className="mb-1 flex h-7 items-center gap-1.5 rounded-md border border-ink-600 bg-ink-900/70 px-2">
+          <Icon name="Search" className="h-3 w-3 shrink-0 text-fg-faint" />
+          <input
+            ref={searchRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={searchPlaceholder ?? t("common.search")}
+            spellCheck={false}
+            className="h-full w-full bg-transparent text-[12px] text-fg placeholder:text-fg-faint focus:outline-none"
+          />
+        </div>
+      ) : null}
+      <div className="max-h-[264px] overflow-y-auto">
+        {filtered.length === 0 ? (
+          <p className="px-2 py-2 text-center text-[11.5px] text-fg-faint">{t("common.noMatches")}</p>
+        ) : (
+          filtered.map((o, i) => (
+            <button
+              key={o.value}
+              role="option"
+              aria-selected={o.value === value}
+              onMouseEnter={() => setHi(i)}
+              onClick={() => onPick(o.value)}
+              className={cn(
+                "flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] transition-colors",
+                i === hi ? "bg-ink-650/80 text-fg" : "text-fg",
+              )}
+            >
+              {o.icon ? (
+                <Icon name={o.icon} className="h-[14px] w-[14px] shrink-0 text-fg-subtle" />
+              ) : null}
+              <span className="min-w-0 truncate">{o.label}</span>
+              {o.hint && <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-faint">{o.hint}</span>}
+              {o.value === value && !o.hint && (
+                <Icon name="Check" className="ml-auto h-3.5 w-3.5 shrink-0 text-fg-muted" />
+              )}
+            </button>
+          ))
+        )}
+      </div>
     </div>,
     document.body,
   );

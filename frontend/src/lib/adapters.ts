@@ -304,6 +304,11 @@ export function indexDefinitions(definitions: readonly NodeDefinition[]): Defini
 const BACKEND_RESOLVED_TYPES = new Set([
   "twitch:event",
   "discord:event",
+  // the Command Trigger's envelope pins (event, command, interaction, …)
+  // exist only in the resolved contract — the static catalog carries just the
+  // Start exec pin, so without backend resolution the Reply/Followup/Edit
+  // nodes have no Interaction output to wire from
+  "discord:app_command",
   "telegram:event",
   "kv:subscribe",
   "data:get_global_variable",

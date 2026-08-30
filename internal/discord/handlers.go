@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/FlameInTheDark/neuropipe/internal/discordspec"
+	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
 	"github.com/bwmarrin/discordgo"
 )
@@ -139,6 +140,99 @@ func (s *Service) handleInteraction(identityID string, interaction *discordgo.In
 		"userId": typed.UserID, "channelId": typed.ChannelID, "guildId": typed.GuildID,
 	}
 	s.emitEvent(identityID, "interaction.create", "INTERACTION_CREATE", interaction.ID, payload)
+
+	if interaction.Type == discordgo.InteractionApplicationCommand {
+		s.handleApplicationCommand(identityID, interaction)
+	}
+}
+
+// handleApplicationCommand emits the rich application.command event that the
+// Command Trigger consumes. The payload carries the user's typed inputs, the
+// resolved entities behind user/channel/role/message options, and the
+// interaction reference (id, application id, token) the reply nodes need.
+func (s *Service) handleApplicationCommand(identityID string, interaction *discordgo.Interaction) {
+	data := interaction.ApplicationCommandData()
+	command := discordspec.CommandEvent{
+		Command: domain.DiscordInteractionRef{
+			InteractionID: interaction.ID,
+			ApplicationID: interaction.AppID,
+			Token:         interaction.Token,
+			CommandName:   data.Name,
+			CommandID:     data.ID,
+		},
+		CommandID:   data.ID,
+		CommandName: data.Name,
+		CommandType: int(data.CommandType),
+		Options:     map[string]string{},
+		ChannelID:   interaction.ChannelID,
+		GuildID:     interaction.GuildID,
+		Locale:      string(interaction.Locale),
+	}
+	if interaction.Member != nil && interaction.Member.User != nil {
+		command.UserID = interaction.Member.User.ID
+		command.Username = interaction.Member.User.Username
+		command.Nickname = interaction.Member.Nick
+	} else if interaction.User != nil {
+		command.UserID = interaction.User.ID
+		command.Username = interaction.User.Username
+	}
+	if command.CommandType == 0 {
+		command.CommandType = domain.DiscordCommandChatInput
+	}
+	collectCommandOptions(data.Options, command.Options)
+	if data.CommandType == discordgo.UserApplicationCommand || data.CommandType == discordgo.MessageApplicationCommand {
+		command.TargetUserID = data.TargetID
+		if data.CommandType == discordgo.MessageApplicationCommand {
+			command.TargetMessageID = data.TargetID
+		}
+	}
+	if data.Resolved != nil {
+		if data.CommandType == discordgo.MessageApplicationCommand {
+			if message, found := data.Resolved.Messages[data.TargetID]; found && message != nil {
+				command.TargetMessageID = message.ID
+			}
+		}
+		if data.CommandType == discordgo.UserApplicationCommand {
+			if user, found := data.Resolved.Users[data.TargetID]; found && user != nil {
+				command.TargetUsername = user.Username
+			}
+			if member, found := data.Resolved.Members[data.TargetID]; found && member != nil && member.Nick != "" {
+				command.Nickname = member.Nick
+			}
+		}
+	}
+	payload := map[string]any{
+		"command":     command,
+		"commandId":   command.CommandID,
+		"commandName": command.CommandName,
+		"options":     command.Options,
+		"userId":      command.UserID,
+		"username":    command.Username,
+		"channelId":   command.ChannelID,
+		"guildId":     command.GuildID,
+	}
+	s.emitEvent(identityID, "application.command", "INTERACTION_CREATE", interaction.ID, payload)
+}
+
+// collectCommandOptions flattens the option tree (subcommand groups and
+// subcommands collapse into their value options) mapping option names to
+// their string representation, mirroring what the trigger's option pins
+// expose.
+func collectCommandOptions(options []*discordgo.ApplicationCommandInteractionDataOption, destination map[string]string) {
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		if len(option.Options) > 0 {
+			collectCommandOptions(option.Options, destination)
+			continue
+		}
+		if option.Value != nil {
+			destination[option.Name] = fmt.Sprint(option.Value)
+		} else {
+			destination[option.Name] = ""
+		}
+	}
 }
 
 func collectOptions(options []*discordgo.ApplicationCommandInteractionDataOption, destination map[string]string) {
@@ -206,6 +300,8 @@ func (s *Service) deliver(ctx context.Context, identityID string, event discords
 	s.mu.RLock()
 	defaultID := s.settings.DefaultBotIdentityID
 	s.mu.RUnlock()
+	matching := make([]domain.TriggerBinding, 0, 4)
+	deferMode := false
 	for _, binding := range bindings {
 		if !binding.Enabled || !binding.Trusted || stringConfig(binding.Config, "eventType") != event.Type {
 			continue
@@ -220,11 +316,73 @@ func (s *Service) deliver(ctx context.Context, identityID string, event discords
 		if !conditionMatches(binding.Config, event.Payload) {
 			continue
 		}
-		if s.runner == nil {
-			continue
+		matching = append(matching, binding)
+		if event.Type == "application.command" && stringConfig(binding.Config, "responseMode") != "manual" {
+			deferMode = true
 		}
+	}
+	if len(matching) == 0 {
+		return
+	}
+	if deferMode && s.acknowledgeInteraction(identityID, event.Payload) {
+		markDeferred(event.Payload)
+	}
+	if s.runner == nil {
+		return
+	}
+	for _, binding := range matching {
 		_, _ = s.runner.QueueBinding(ctx, binding.ID, pipeline.Packet{"event": event}, true)
 	}
+}
+
+// markDeferred flips the Deferred flag on the queued event payload so the
+// Command Trigger (and through it every reply node) knows the interaction
+// was acknowledged and has the full 15-minute token window.
+func markDeferred(payload map[string]any) {
+	command, ok := payload["command"].(discordspec.CommandEvent)
+	if !ok {
+		return
+	}
+	command.Command.Deferred = true
+	payload["command"] = command
+}
+
+// acknowledgeInteraction sends the deferred callback that buys the pipeline
+// the interaction's full 15-minute window instead of the initial 3 seconds.
+// It runs at most once per interaction: the service remembers recently
+// acknowledged interaction ids.
+func (s *Service) acknowledgeInteraction(identityID string, payload map[string]any) bool {
+	command, ok := payload["command"].(discordspec.CommandEvent)
+	if !ok || command.Command.Token == "" {
+		return false
+	}
+	s.mu.Lock()
+	if s.acked == nil {
+		s.acked = map[string]time.Time{}
+	}
+	if _, seen := s.acked[command.Command.InteractionID]; seen {
+		s.mu.Unlock()
+		return true
+	}
+	s.acked[command.Command.InteractionID] = time.Now()
+	// Prune entries older than the token lifetime so the map stays bounded.
+	for id, at := range s.acked {
+		if time.Since(at) > interactionTokenTTL {
+			delete(s.acked, id)
+		}
+	}
+	s.mu.Unlock()
+
+	session, err := s.session(identityID)
+	if err != nil {
+		return false
+	}
+	reference := command.Command
+	reference.Deferred = true
+	err = session.InteractionRespond(&discordgo.Interaction{
+		ID: reference.InteractionID, AppID: reference.ApplicationID, Token: reference.Token,
+	}, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredChannelMessageWithSource})
+	return err == nil
 }
 
 // conditionMatches applies the binding's optional guild and channel filters

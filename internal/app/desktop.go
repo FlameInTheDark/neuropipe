@@ -1141,6 +1141,30 @@ func (d *Desktop) RemoveDiscordIdentity(id string) error {
 	return d.discord.RemoveIdentity(d.context(), id)
 }
 
+// ListDiscordGuilds exposes the bot's guilds for the application command
+// scope picker.
+func (d *Desktop) ListDiscordGuilds(identityID string) ([]domain.DiscordGuildLite, error) {
+	return d.discord.ListDiscordGuilds(d.context(), identityID)
+}
+
+// ListDiscordApplicationCommands exposes the commands registered on the
+// bot: global commands for an empty guildID, otherwise that guild's.
+func (d *Desktop) ListDiscordApplicationCommands(identityID, guildID string) ([]domain.DiscordApplicationCommand, error) {
+	return d.discord.ListDiscordApplicationCommands(d.context(), identityID, guildID)
+}
+
+func (d *Desktop) CreateDiscordApplicationCommand(request domain.DiscordCommandRequest) (domain.DiscordApplicationCommand, error) {
+	return d.discord.CreateDiscordApplicationCommand(d.context(), request)
+}
+
+func (d *Desktop) UpdateDiscordApplicationCommand(request domain.DiscordCommandRequest) (domain.DiscordApplicationCommand, error) {
+	return d.discord.UpdateDiscordApplicationCommand(d.context(), request)
+}
+
+func (d *Desktop) DeleteDiscordApplicationCommand(identityID, guildID, commandID string) error {
+	return d.discord.DeleteDiscordApplicationCommand(d.context(), identityID, guildID, commandID)
+}
+
 // ListDiscordTriggers exposes credential-free gateway binding state for the
 // explicit trust/enable controls in Discord settings.
 func (d *Desktop) ListDiscordTriggers() ([]domain.TriggerBinding, error) {

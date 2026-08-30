@@ -24,11 +24,11 @@ Data nodes are pure unless noted. They have no exec pins and calculate only when
 
 ## Cast
 
-**Purpose:** make a type conversion visible. **Pins:** Value input/output. **Configure:** target text, number, or Boolean. **Produces:** converted value. **Capabilities:** none. **Failure:** invalid numeric/Boolean text reports an evaluation error. **Example:** Get Field text → Cast number → Greater Than.
+**Purpose:** make a type conversion visible. **Pins:** Value input/output. **Configure:** target text, number, Boolean, object, list, or bytes. **Produces:** converted value. **Capabilities:** none. **Failure:** invalid numeric/Boolean text and mismatched shapes (a number to object, an object to list) report an evaluation error. **Example:** Pick from Array → Cast object → KV Hash Set Fields.
 
 ## Query JSON
 
-**Purpose:** read one dotted JSON path. **Pins:** Source input, Value output. **Configure:** optional path. **Produces:** Any. **Capabilities:** none. **Failure:** unknown paths return null. **Example:** HTTP Result → Query JSON `json.items` → For Each Loop.
+**Purpose:** read one value from JSON data with a JSONPath expression. **Pins:** Source input, Value output. **Configure:** optional JSON path such as `$.geonames[0].lng` — selectors include indexes, wildcards, slices, unions, recursive descent, and `[?(@.lng > 35)]` filters; plain dotted paths (`geonames.0.lng`) still work. **Produces:** the matched value itself, a list when several values match, null when nothing matches. **Capabilities:** none. **Failure:** unknown or invalid paths return null. **Example:** HTTP Result → Query JSON `$.items[0].name` → For Each Loop.
 
 ## Equals
 

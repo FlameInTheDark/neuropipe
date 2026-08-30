@@ -77,3 +77,32 @@ rather than typing the ID by hand — hand-copied IDs lose digits easily, and a
 current message ID has 19 digits — and wire the trigger's Channel ID output
 into the node's Channel ID input as well, so the reply always lands in the
 channel the message actually came from.
+
+## Application commands (slash commands)
+
+Application commands are the `/commands` members type into the message box,
+plus the user and message entries in the context menu. Register them once on
+the Discord page of the Integrations view: pick the bot, choose the scope
+(global, or one of the bot's servers), and use the command editor to build
+the command — name, description, and options. Options are the values a
+member types when running the command: text, numbers, users, channels,
+booleans, and more, each optional or required, with selectable choices and
+min/max constraints. Guild commands update instantly; global commands take
+up to an hour to appear everywhere.
+
+Run the **Discord Command Trigger** to answer one: pick the registered
+command, and the trigger grows one typed output pin per option — a
+`/weather city: london days: 3` command exposes City and Days pins — plus
+who invoked it, where, and the Interaction handoff object. The Response mode
+governs the deadlines: **Auto defer** acknowledges the command immediately
+(with a loading state) and gives the pipeline the full 15-minute interaction
+window, which every pipeline that calls an LLM or fetches data should use;
+**Reply within 3 s** keeps the initial callback for the reply node, which
+then must run within three seconds but can send an ephemeral reply only the
+invoking member sees.
+
+Answer with **Reply to Command**: it replaces the loading state (deferred
+mode) or sends the initial response (manual mode), with text, embeds, or
+both. **Followup Command Message** sends additional messages while the token
+lives, and **Edit Command Reply** changes the replied message — the original
+or any followup by id — for 15 minutes after the command ran.

@@ -495,6 +495,9 @@ type DiscordSender interface {
 	AddDiscordReaction(ctx context.Context, request domain.DiscordReactionRequest) (domain.DiscordActionResult, error)
 	EditDiscordMessage(ctx context.Context, request domain.DiscordEditRequest) (domain.DiscordActionResult, error)
 	DeleteDiscordMessage(ctx context.Context, request domain.DiscordDeleteRequest) (domain.DiscordActionResult, error)
+	RespondDiscordInteraction(ctx context.Context, request domain.DiscordCommandReplyRequest) (domain.DiscordMessageResult, error)
+	SendDiscordFollowup(ctx context.Context, request domain.DiscordFollowupRequest) (domain.DiscordMessageResult, error)
+	EditDiscordInteractionMessage(ctx context.Context, request domain.DiscordCommandEditRequest) (domain.DiscordActionResult, error)
 }
 
 // TelegramSender accepts only the actions' typed requests and returns

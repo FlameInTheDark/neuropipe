@@ -30,6 +30,15 @@ func (s *senderStub) EditDiscordMessage(context.Context, domain.DiscordEditReque
 func (s *senderStub) DeleteDiscordMessage(context.Context, domain.DiscordDeleteRequest) (domain.DiscordActionResult, error) {
 	panic("unused")
 }
+func (s *senderStub) RespondDiscordInteraction(context.Context, domain.DiscordCommandReplyRequest) (domain.DiscordMessageResult, error) {
+	panic("unused")
+}
+func (s *senderStub) SendDiscordFollowup(context.Context, domain.DiscordFollowupRequest) (domain.DiscordMessageResult, error) {
+	panic("unused")
+}
+func (s *senderStub) EditDiscordInteractionMessage(context.Context, domain.DiscordCommandEditRequest) (domain.DiscordActionResult, error) {
+	panic("unused")
+}
 
 func TestSenderRequiresProvider(t *testing.T) {
 	if _, err := Sender(nil); err == nil {

@@ -45,9 +45,13 @@ import (
 	sqlnode "github.com/FlameInTheDark/neuropipe/internal/nodes/database/sql"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/date"
 	discordaddreaction "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/addreaction"
+	discordappcommand "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/appcommand"
 	discorddeletemessage "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/deletemessage"
+	discordeditcommandreply "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/editcommandreply"
 	discordeditmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/editmessage"
 	discordevent "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/event"
+	discordfollowupcommand "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/followupcommand"
+	discordreplycommand "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/replycommand"
 	discordsenddm "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/senddm"
 	discordsendmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/sendmessage"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/branch"
@@ -206,9 +210,13 @@ func RegisterAll(registrar nodes.Registrar) error {
 		event.Register,
 		sendchatmessage.Register,
 		discordaddreaction.Register,
+		discordappcommand.Register,
 		discorddeletemessage.Register,
 		discordevent.Register,
+		discordeditcommandreply.Register,
 		discordeditmessage.Register,
+		discordfollowupcommand.Register,
+		discordreplycommand.Register,
 		discordsenddm.Register,
 		discordsendmessage.Register,
 		telegramanswercallback.Register,

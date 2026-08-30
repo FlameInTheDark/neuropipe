@@ -189,11 +189,15 @@
       "path": "guides/discord-bot.md",
       "nodeTypes": [
         "discord:event",
+        "discord:app_command",
         "action:discord_send_message",
         "action:discord_send_dm",
         "action:discord_add_reaction",
         "action:discord_edit_message",
-        "action:discord_delete_message"
+        "action:discord_delete_message",
+        "action:discord_reply_command",
+        "action:discord_followup_command",
+        "action:discord_edit_command_reply"
       ]
     },
     {

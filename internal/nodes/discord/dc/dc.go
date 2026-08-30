@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/FlameInTheDark/neuropipe/internal/discordspec"
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes"
 )
@@ -99,4 +100,42 @@ func RequiredString(invocation nodes.Invocation, pinID, label string) (string, e
 		return "", fmt.Errorf("%s is required", label)
 	}
 	return value, nil
+}
+
+// InteractionRef reads the interaction handoff object from the Command
+// Trigger's Interaction output pin. The pin carries the typed reference
+// directly in-process; a map shape (from JSON round-trips or the Command
+// record pin) is accepted as a degraded but complete fallback so graphs
+// that route the value through generic nodes keep working.
+func InteractionRef(invocation nodes.Invocation) (domain.DiscordInteractionRef, bool) {
+	switch value := invocation.Inputs["interaction"].(type) {
+	case domain.DiscordInteractionRef:
+		return value, true
+	case discordspec.CommandEvent:
+		return value.Command, true
+	case map[string]any:
+		ref := domain.DiscordInteractionRef{
+			InteractionID: textValue(value["interactionId"]),
+			ApplicationID: textValue(value["applicationId"]),
+			Token:         textValue(value["token"]),
+			CommandName:   textValue(value["commandName"]),
+			CommandID:     textValue(value["commandId"]),
+		}
+		if boolValueOf(value["deferred"]) {
+			ref.Deferred = true
+		}
+		return ref, ref.InteractionID != "" || ref.Token != ""
+	default:
+		return domain.DiscordInteractionRef{}, false
+	}
+}
+
+func textValue(value any) string {
+	result, _ := value.(string)
+	return strings.TrimSpace(result)
+}
+
+func boolValueOf(value any) bool {
+	result, _ := value.(bool)
+	return result
 }

@@ -17,16 +17,20 @@ type Node = nodes.Implementation
 var _ nodes.Node = Node{}
 
 func Register(registrar nodes.Registrar) error {
-	return registrar.Register(Node{Metadata: datanodes.Node("data:json_query", "Data", "Query JSON", "Read a dotted path from JSON data.", "scan-search", []domain.NodePort{datanodes.Pin("source", "Source", domain.PinInput, domain.DataAny)}, []domain.NodePort{datanodes.Pin("value", "Value", domain.PinOutput, domain.DataAny)}, []domain.ConfigField{datanodes.Field("path", "JSON path", "string", "", false)}, map[string]any{}), Executor: nodes.Outputs(Evaluate)})
+	return registrar.Register(Node{Metadata: datanodes.Node("data:json_query", "Data", "Query JSON", "Read a value from JSON data with a JSONPath expression such as $.items[0].name; plain dotted paths still work.", "scan-search", []domain.NodePort{datanodes.Pin("source", "Source", domain.PinInput, domain.DataAny)}, []domain.NodePort{datanodes.Pin("value", "Value", domain.PinOutput, domain.DataAny)}, []domain.ConfigField{datanodes.Field("path", "JSON path", "string", "$.geonames[0].lng", false)}, map[string]any{}), Executor: nodes.Outputs(Evaluate)})
 }
 
-// Evaluate follows a dotted path through maps, structs, and lists.
+// Evaluate resolves the configured path against the connected source.
 func Evaluate(_ context.Context, invocation nodes.Invocation, _ nodes.Runtime) (map[string]any, error) {
 	path, _ := invocation.Config["path"].(string)
-	return map[string]any{"value": ValueAt(invocation.Inputs["source"], path)}, nil
+	return map[string]any{"value": Query(invocation.Inputs["source"], path)}, nil
 }
 
-// ValueAt resolves a dotted path through graph-safe structured values.
+// ValueAt resolves a legacy dotted path through graph-safe structured
+// values: each dot-separated part is an object key or, failing that, a
+// non-negative list index. JSONPath expressions live in path.go; Query
+// routes between the two by shape, so paths like `$.items[0]` never reach
+// this fallback.
 func ValueAt(value any, path string) any {
 	if strings.TrimSpace(path) == "" {
 		return value

@@ -1244,6 +1244,120 @@ type DiscordMessageResult struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+/* ------------------------------------------------------------------ */
+/* Discord application commands                                        */
+/* ------------------------------------------------------------------ */
+
+// Discord command types, mirroring Discord's application command type
+// values: chat input (slash), user context menu, message context menu.
+const (
+	DiscordCommandChatInput int = 1
+	DiscordCommandUser      int = 2
+	DiscordCommandMessage   int = 3
+)
+
+// DiscordApplicationCommand mirrors Discord's application command object
+// using the API's own snake_case wire format, so a command fetched from
+// Discord round-trips through the editor without translation.
+type DiscordApplicationCommand struct {
+	ID                      string                            `json:"id,omitempty"`
+	ApplicationID           string                            `json:"application_id,omitempty"`
+	GuildID                 string                            `json:"guild_id,omitempty"`
+	Version                 string                            `json:"version,omitempty"`
+	Type                    int                               `json:"type,omitempty"`
+	Name                    string                            `json:"name"`
+	Description             string                            `json:"description,omitempty"`
+	Options                 []DiscordApplicationCommandOption `json:"options,omitempty"`
+	DefaultMemberPermission *int64                            `json:"default_member_permissions,string,omitempty"`
+	DMPermission            *bool                             `json:"dm_permission,omitempty"`
+	NSFW                    bool                              `json:"nsfw,omitempty"`
+	Contexts                []int                             `json:"contexts,omitempty"`
+}
+
+// DiscordApplicationCommandOption mirrors one slash-command option.
+// Type uses Discord's option type values: 1 subcommand, 2 subcommand
+// group, 3 string, 4 integer, 5 boolean, 6 user, 7 channel, 8 role,
+// 9 mentionable, 10 number, 11 attachment.
+type DiscordApplicationCommandOption struct {
+	Type         int                               `json:"type"`
+	Name         string                            `json:"name"`
+	Description  string                            `json:"description,omitempty"`
+	Required     bool                              `json:"required,omitempty"`
+	Choices      []DiscordApplicationCommandChoice `json:"choices,omitempty"`
+	ChannelTypes []int                             `json:"channel_types,omitempty"`
+	MinValue     *float64                          `json:"min_value,omitempty"`
+	MaxValue     *float64                          `json:"max_value,omitempty"`
+	MinLength    *int                              `json:"min_length,omitempty"`
+	MaxLength    int                               `json:"max_length,omitempty"`
+	Autocomplete bool                              `json:"autocomplete,omitempty"`
+	Options      []DiscordApplicationCommandOption `json:"options,omitempty"`
+}
+
+// DiscordApplicationCommandChoice is one selectable value for STRING,
+// INTEGER, and NUMBER options.
+type DiscordApplicationCommandChoice struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
+}
+
+// DiscordCommandRequest creates or updates one application command on a
+// bot identity. GuildID selects the scope: empty means global.
+type DiscordCommandRequest struct {
+	IdentityID string                    `json:"identityId,omitempty"`
+	GuildID    string                    `json:"guildId,omitempty"`
+	Command    DiscordApplicationCommand `json:"command"`
+}
+
+// DiscordGuildLite is one guild of a bot, reduced to what the command
+// scope picker needs.
+type DiscordGuildLite struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Icon string `json:"icon,omitempty"`
+}
+
+// DiscordInteractionRef is the handoff object between the application
+// command trigger and the reply nodes. The token lives in pipeline
+// memory only, expires after 15 minutes, and never reaches settings or
+// the renderer.
+type DiscordInteractionRef struct {
+	InteractionID string `json:"interactionId"`
+	ApplicationID string `json:"applicationId"`
+	Token         string `json:"token"`
+	CommandName   string `json:"commandName,omitempty"`
+	CommandID     string `json:"commandId,omitempty"`
+	Deferred      bool   `json:"deferred"`
+}
+
+// DiscordCommandReplyRequest answers one interaction: manual mode sends
+// the initial callback, deferred mode edits the loading placeholder.
+type DiscordCommandReplyRequest struct {
+	IdentityID  string                `json:"identityId,omitempty"`
+	Interaction DiscordInteractionRef `json:"interaction"`
+	Message     string                `json:"message"`
+	Embeds      []*DiscordEmbed       `json:"embeds,omitempty"`
+	Ephemeral   bool                  `json:"ephemeral,omitempty"`
+}
+
+// DiscordFollowupRequest sends one additional followup message while the
+// interaction token is still valid.
+type DiscordFollowupRequest struct {
+	IdentityID  string                `json:"identityId,omitempty"`
+	Interaction DiscordInteractionRef `json:"interaction"`
+	Message     string                `json:"message"`
+	Embeds      []*DiscordEmbed       `json:"embeds,omitempty"`
+}
+
+// DiscordCommandEditRequest edits the original interaction reply (empty
+// MessageID) or a followup message by id.
+type DiscordCommandEditRequest struct {
+	IdentityID  string                `json:"identityId,omitempty"`
+	Interaction DiscordInteractionRef `json:"interaction"`
+	MessageID   string                `json:"messageId,omitempty"`
+	Message     string                `json:"message"`
+	Embeds      []*DiscordEmbed       `json:"embeds,omitempty"`
+}
+
 type DiscordActionResult struct {
 	Done   bool   `json:"done"`
 	Reason string `json:"reason,omitempty"`

@@ -11,6 +11,9 @@ import (
 )
 
 func TestCatalogIsUniqueAndValid(t *testing.T) {
+	// Interactions are delivered by the gateway without any intents, so
+	// the application.command event legitimately carries an empty bitmask.
+	intentFree := map[string]bool{"application.command": true}
 	seen := map[string]bool{}
 	for _, descriptor := range discordspec.Catalog() {
 		if descriptor.Type == "" || seen[descriptor.Type] {
@@ -20,7 +23,7 @@ func TestCatalogIsUniqueAndValid(t *testing.T) {
 		if descriptor.GatewayEvent == "" {
 			t.Fatalf("%s has no gateway event", descriptor.Type)
 		}
-		if descriptor.Intents == 0 {
+		if descriptor.Intents == 0 && !intentFree[descriptor.Type] {
 			t.Fatalf("%s requires no intents", descriptor.Type)
 		}
 	}
@@ -33,8 +36,17 @@ func TestCatalogIsUniqueAndValid(t *testing.T) {
 	if err := typespec.ValidateSpec(discordspec.AuthorType()); err != nil {
 		t.Fatalf("author contract: %v", err)
 	}
+	if err := typespec.ValidateSpec(discordspec.CommandEventType()); err != nil {
+		t.Fatalf("command event contract: %v", err)
+	}
+	if err := typespec.ValidateSpec(discordspec.InteractionRefType()); err != nil {
+		t.Fatalf("interaction ref contract: %v", err)
+	}
 	if discordspec.RequiredIntents([]string{"message.create", "guild.member.add"}) != (discordspec.IntentGuildMessages | discordspec.IntentDirectMessages | discordspec.IntentMessageContent | discordspec.IntentGuildMembers) {
 		t.Fatal("intent union is wrong")
+	}
+	if discordspec.RequiredIntents([]string{"application.command"}) != 0 {
+		t.Fatal("application commands must not require gateway intents")
 	}
 }
 

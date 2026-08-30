@@ -126,6 +126,10 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
   const has = value !== undefined && value !== null;
   const stats = useMemo(() => (has ? dataStats(value) : null), [has, value]);
   const isInput = side === "input";
+  /** primitive payloads are wrapped as { value } purely so the tree can render
+      them (see the JsonView value below) — null when the payload renders
+      natively, otherwise the artificial wrap key */
+  const wrapKey = has && !isStructured(value) ? "value" : null;
 
   const copy = async () => {
     try {
@@ -140,14 +144,19 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
 
   /** Hover actions rendered next to every JSON node: copy the element's value
       (the library's built-in handler, surfaced through the Copied section's
-      render override) and copy the dotted path to the node. `keys` is the full
-      key chain from the tree root including the node's own key. */
+      render override) and copy the node's JSONPath expression. `keys` is the
+      full key chain from the tree root including the node's own key; the root
+      row carries no keys and copies "$", so every row offers a path. */
   const renderNodeTools = (
     props: React.SVGProps<SVGSVGElement>,
     result: { keys?: ReadonlyArray<string | number> },
   ) => {
     const elementCopied = Boolean((props as { "data-copied"?: unknown })["data-copied"]);
-    const path = result.keys?.length ? jsonPathToString(result.keys) : "";
+    const keys = result.keys ?? [];
+    // a wrapped primitive's single row IS the whole payload — its JSONPath is
+    // the root itself, not the artificial "$.value" the wrap key would give
+    const isWrappedRoot = wrapKey !== null && keys.length === 1 && keys[0] === wrapKey;
+    const path = isWrappedRoot ? "$" : jsonPathToString(keys);
     return (
       <span className="ml-1.5 inline-flex translate-y-[1px] items-center gap-1 align-middle">
         <NodeToolButton
@@ -157,7 +166,7 @@ function DataPane({ side, value }: { side: "input" | "output"; value: unknown })
           icon={elementCopied ? "Check" : "Copy"}
           iconClass={elementCopied ? "text-success-fg" : undefined}
         />
-        {path && <CopyPathButton path={path} label={t("jsonViewer.copyPath")} />}
+        <CopyPathButton path={path} label={t("jsonViewer.copyPath")} />
       </span>
     );
   };
@@ -325,8 +334,9 @@ function NodeToolButton({
   );
 }
 
-/** Copies the dotted JSON path of one node. Self-contained so clicking it
-    never re-renders the (potentially huge) tree: feedback lives in local state.
+/** Copies the JSONPath expression of one node ($-rooted, ready to paste into
+    the Query JSON node's path field). Self-contained so clicking it never
+    re-renders the (potentially huge) tree: feedback lives in local state.
     stopPropagation is mandatory — object/array rows sit inside the expand
     toggle, and without it a copy would also fold the node. */
 function CopyPathButton({ path, label }: { path: string; label: string }) {

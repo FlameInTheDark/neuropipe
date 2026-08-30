@@ -24,6 +24,14 @@ export default defineConfig({
     },
   },
   server: {
+    // Wails v3's dev asset proxy force-dials IPv4 (tcp4) when the dev server
+    // host is localhost/127.0.0.1 (wails v3 internal/assetserver/build_dev.go,
+    // "Force IPv4 for localhost connections to avoid IPv6 issues on Windows").
+    // Vite's default `localhost` host can instead bind IPv6-only ([::1]) on
+    // Windows with Node >= 17, leaving 127.0.0.1 refused and the app window
+    // blank with "[ExternalAssetHandler] Proxy error ... connectex" while the
+    // browser still loads fine. Pin IPv4 loopback so both sides always meet.
+    host: "127.0.0.1",
     port,
     strictPort: true,
   },

@@ -4,7 +4,10 @@
 // @ts-expect-error minimal DOM stub for SSR
 globalThis.document = {
   documentElement: { lang: "en" },
-  body: {},
+  // nodeType 1 = ELEMENT_NODE: react-dom 19.2's createPortal validates the
+  // container eagerly (even inside renderToString), so the body stub has to
+  // look like a real element or every portal-owning component throws
+  body: { nodeType: 1 },
   createElement: () => ({
     style: {},
     setAttribute() {},

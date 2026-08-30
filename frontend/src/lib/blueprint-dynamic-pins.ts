@@ -105,6 +105,30 @@ function dataTypeForTypeSpec(type: TypeSpec): DataType {
   }
 }
 
+/** Cast targets cover the concrete data types; the Go resolver is the twin. */
+function castTargetDataType(target: unknown): DataType {
+  switch (target) {
+    case "text":
+    case "number":
+    case "boolean":
+    case "object":
+    case "list":
+    case "bytes":
+      return target;
+    default:
+      return "any";
+  }
+}
+
+/** Objects cast into the graph-wide map<string, any> shape so the output
+ *  connects to first-party object inputs (KV hash fields, SQL rows, storage). */
+function castTypeSpec(dataType: DataType): TypeSpec {
+  if (dataType === "object") {
+    return { kind: "map", key: { kind: "string" }, value: { kind: "any" } };
+  }
+  return typeSpecFromDataType(dataType);
+}
+
 type TextBytesRepresentation = "text" | "bytes";
 
 function textBytesRepresentation(value: unknown): TextBytesRepresentation {
@@ -354,6 +378,26 @@ export function resolveConfigDrivenInputs(
     // the Source dropdown gates the upload pins (Go resolver twin)
     return filterUploadSourcePins(inputs, config.source ?? definition.defaultConfig?.source);
   }
+  if (
+    definition.type === "action:discord_reply_command" ||
+    definition.type === "action:discord_followup_command" ||
+    definition.type === "action:discord_edit_command_reply"
+  ) {
+    // dynamic input pins mirror the embed document's variables (Go resolver twin)
+    const doc = normalizeEmbedDoc(config.embeds ?? definition.defaultConfig?.embeds);
+    const declared: NodePort[] = doc.pins.map((pin) => ({
+      id: pin.name,
+      label: pin.name,
+      kind: "data",
+      direction: "input",
+      dataType: drawPinDataType(pin.type),
+      type: drawPinTypeSpec(pin.type),
+      color: dataPinColor(drawPinDataType(pin.type)),
+      maxConnections: 1,
+      default: pin.type === "text" && pin.default !== "" ? pin.default : undefined,
+    }));
+    return [...inputs, ...declared];
+  }
   if (definition.type === "action:javascript") {
     return resolveJavaScriptInputs({ ...definition, inputs }, config);
   }
@@ -426,6 +470,10 @@ export function resolveConfigDrivenOutputs(
   if (definition.type === "action:javascript") {
     return resolveJavaScriptOutputs({ ...definition, outputs }, config);
   }
+  if (definition.type === "discord:app_command") {
+    // one output pin per command option, mirroring the Go resolver twin
+    return [...outputs, ...commandOptionPorts(config.command ?? definition.defaultConfig?.command)];
+  }
   if (
     definition.type === "data:base64_encode" ||
     definition.type === "data:base64_decode" ||
@@ -484,9 +532,11 @@ export function resolveConfigDrivenOutputs(
   }
   if (definition.type === "data:cast") {
     const target = config.target ?? definition.defaultConfig?.target;
-    const dataType: DataType = target === "text" || target === "number" || target === "boolean" ? target : "any";
+    const dataType = castTargetDataType(target);
     return outputs.map((pin) =>
-      pin.id === "value" ? { ...pin, dataType, type: typeSpecFromDataType(dataType), color: dataPinColor(dataType) } : pin,
+      pin.id === "value"
+        ? { ...pin, dataType, type: castTypeSpec(dataType), color: dataPinColor(dataType) }
+        : pin,
     );
   }
   if (definition.type === "data:type_assert") {
@@ -640,6 +690,39 @@ function uploadSourceMode(value: unknown): string {
 /** Upload File pin gating: the Source dropdown keeps only the pins its mode
  * uses (localPath / data / base64); Auto keeps everything so graphs saved
  * before the selector keep their wires. Go resolver twin. */
+/** commandOptionPorts grows one typed data pin per stored command option:
+ * booleans become boolean pins, integers and numbers become number pins,
+ * everything else stays text — exactly what the Go resolver emits. */
+function commandOptionPorts(value: unknown): NodePort[] {
+  const selection = (value ?? {}) as Record<string, unknown>;
+  const options = Array.isArray(selection.options) ? (selection.options as Array<Record<string, unknown>>) : [];
+  return options
+    .filter((option) => typeof option.name === "string" && option.name !== "")
+    .map((option) => {
+      const type = Number(option.type ?? 3);
+      const dataType: DataType = type === 5 ? "boolean" : type === 4 || type === 10 ? "number" : "text";
+      const typeSpec: TypeSpec =
+        type === 5
+          ? { kind: "bool" }
+          : type === 4
+            ? { kind: "int" }
+            : type === 10
+              ? { kind: "float" }
+              : { kind: "string" };
+      return {
+        id: String(option.name),
+        label: String(option.name),
+        kind: "data" as const,
+        direction: "output" as const,
+        dataType,
+        type: typeSpec,
+        color: dataPinColor(dataType),
+        required: Boolean(option.required),
+        maxConnections: 1,
+      };
+    });
+}
+
 function filterUploadSourcePins(inputs: NodePort[], configured: unknown): NodePort[] {
   const mode = uploadSourceMode(configured);
   if (mode === "") return inputs;

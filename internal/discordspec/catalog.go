@@ -125,6 +125,56 @@ type Interaction struct {
 	Options     map[string]string `json:"options"`
 }
 
+// CommandEvent is the typed payload behind the application.command event.
+// It carries everything the Command Trigger exposes as pins: the invoked
+// command, the user's typed inputs, who invoked it, and the interaction
+// reference the reply nodes need. The token inside the reference expires
+// 15 minutes after Discord created the interaction.
+type CommandEvent struct {
+	Command         domain.DiscordInteractionRef `json:"interaction"`
+	CommandID       string                       `json:"commandId"`
+	CommandName     string                       `json:"commandName"`
+	CommandType     int                          `json:"commandType"`
+	Options         map[string]string            `json:"options"`
+	TargetUserID    string                       `json:"targetUserId,omitempty"`
+	TargetUsername  string                       `json:"targetUsername,omitempty"`
+	TargetMessageID string                       `json:"targetMessageId,omitempty"`
+	UserID          string                       `json:"userId"`
+	Username        string                       `json:"username"`
+	Nickname        string                       `json:"nickname,omitempty"`
+	ChannelID       string                       `json:"channelId"`
+	GuildID         string                       `json:"guildId"`
+	Locale          string                       `json:"locale,omitempty"`
+}
+
+// CommandEventType is the record contract of the CommandEvent payload.
+func CommandEventType() domain.TypeSpec {
+	key, value := typespec.String(), typespec.String()
+	options := domain.TypeSpec{Kind: domain.TypeMap, Key: &key, Value: &value}
+	return domain.TypeSpec{Kind: domain.TypeRecord, Name: "DiscordCommandEvent", Fields: []domain.TypeFieldSpec{
+		{ID: "interactionId", Name: "interactionId", Type: typespec.String()},
+		{ID: "commandId", Name: "commandId", Type: typespec.String()},
+		{ID: "commandName", Name: "commandName", Type: typespec.String()},
+		{ID: "commandType", Name: "commandType", Type: typespec.Int()},
+		{ID: "options", Name: "options", Type: options},
+		{ID: "userId", Name: "userId", Type: typespec.String()},
+		{ID: "username", Name: "username", Type: typespec.String()},
+		{ID: "channelId", Name: "channelId", Type: typespec.String()},
+		{ID: "guildId", Name: "guildId", Type: typespec.String()},
+	}}
+}
+
+// InteractionRefType is the record contract of the interaction reference
+// consumed by the reply, followup, and edit nodes.
+func InteractionRefType() domain.TypeSpec {
+	return domain.TypeSpec{Kind: domain.TypeRecord, Name: "DiscordInteractionRef", Fields: []domain.TypeFieldSpec{
+		{ID: "interactionId", Name: "interactionId", Type: typespec.String()},
+		{ID: "applicationId", Name: "applicationId", Type: typespec.String()},
+		{ID: "commandName", Name: "commandName", Type: typespec.String()},
+		{ID: "deferred", Name: "deferred", Type: typespec.Bool()},
+	}}
+}
+
 // Member describes the member-specific portion of guild member deliveries.
 type Member struct {
 	UserID   string `json:"userId"`
@@ -157,6 +207,7 @@ func Catalog() []domain.DiscordEventDescriptor {
 		event("guild.ban.add", "GUILD_BAN_ADD", "Member banned", "A member is banned from a server.", IntentGuildModeration, false, false, guildFilter),
 		event("guild.ban.remove", "GUILD_BAN_REMOVE", "Ban removed", "A ban is removed from a server.", IntentGuildModeration, false, false, guildFilter),
 		event("interaction.create", "INTERACTION_CREATE", "Interaction created", "A member uses an application command (slash command).", IntentGuilds, false, false, guildFilter),
+		event("application.command", "INTERACTION_CREATE", "Application command used", "A member runs one of the bot's application commands (slash, user, or message command). The command's options arrive as typed pins, and the interaction can be answered for 15 minutes.", 0, false, false, channelFilter),
 		event("voice.state.update", "VOICE_STATE_UPDATE", "Voice state updated", "A member joins, leaves, or moves between voice channels.", IntentGuildVoiceStates, false, false, guildFilter),
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Type < entries[j].Type })
