@@ -30,6 +30,11 @@
   Do not reimplement cursor placement, viewport clamping, outside-click/Escape
   dismissal, or focus restoration in an individual view; supply only that
   view's menu actions through the shared component.
+- The webview's native context menu is suppressed app-wide in release builds
+  (`frontend/src/lib/context-menu.ts`, installed from `main.tsx` before the
+  first render); dev builds keep it for web inspection. Custom menus are
+  unaffected — the suppression only cancels the default action and never
+  stops propagation.
 
 ## Architecture and quality
 
