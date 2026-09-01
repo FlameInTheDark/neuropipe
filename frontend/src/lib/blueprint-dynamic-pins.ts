@@ -132,26 +132,8 @@ function castTargetDataType(target: unknown): DataType {
   }
 }
 
-/** JSON roots cover the structural and scalar types; bytes never appears.
- *  Unlike Cast, a blank value deliberately ignores the definition default and
- *  resolves to any: graphs saved before the Root type field existed keep their
- *  untyped contract on both canvas and validator. */
-function jsonRootType(value: unknown): DataType {
-  switch (value) {
-    case "object":
-    case "list":
-    case "text":
-    case "number":
-    case "boolean":
-      return value;
-    default:
-      return "any";
-  }
-}
-
 /** Objects cast into the graph-wide map<string, any> shape so the output
- *  connects to first-party object inputs (KV hash fields, SQL rows, storage).
- *  Parse JSON's object root uses the same shape. */
+ *  connects to first-party object inputs (KV hash fields, SQL rows, storage). */
 function castTypeSpec(dataType: DataType): TypeSpec {
   if (dataType === "object") {
     return { kind: "map", key: { kind: "string" }, value: { kind: "any" } };
@@ -586,18 +568,6 @@ export function resolveConfigDrivenOutputs(
   if (definition.type === "data:cast") {
     const target = config.target ?? definition.defaultConfig?.target;
     const dataType = castTargetDataType(target);
-    return outputs.map((pin) =>
-      pin.id === "value"
-        ? { ...pin, dataType, type: castTypeSpec(dataType), color: dataPinColor(dataType) }
-        : pin,
-    );
-  }
-  if (definition.type === "data:json_parse") {
-    // Root type refines the value pin. Blank config — graphs saved before the
-    // field existed — stays any so legacy wires keep validating; the Go
-    // resolver twin applies the same rule, so the canvas never shows a typed
-    // pin the validator would reject.
-    const dataType = jsonRootType(config.type);
     return outputs.map((pin) =>
       pin.id === "value"
         ? { ...pin, dataType, type: castTypeSpec(dataType), color: dataPinColor(dataType) }

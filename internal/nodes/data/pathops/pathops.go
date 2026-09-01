@@ -1,12 +1,18 @@
 // Package pathops registers pure path-utility Blueprint nodes:
 //   - data:get_path_part — split a path into dir/base/name/ext/volume
 //   - data:build_path     — join a list of path parts
-//   - data:clean_path     — normalize a path with filepath.Clean
+//   - data:clean_path     — normalize a path
+//
+// All three nodes use slash-only path semantics so one pipeline produces the
+// same text on every platform: backslash separators are folded into forward
+// slashes on input and results always use forward slashes. Forward-slash
+// paths are accepted by the Windows file APIs, so the normalized output
+// stays directly usable on every supported OS.
 package pathops
 
 import (
 	"context"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
@@ -67,10 +73,10 @@ func getPathPartDefinition() domain.NodeDefinition {
 }
 
 func executeGetPathPart(_ context.Context, invocation nodes.Invocation, _ nodes.Runtime) (nodes.ExecutionResult, error) {
-	path, _ := invocation.Inputs["path"].(string)
-	path = strings.TrimSpace(path)
-	dir, base := filepath.Split(path)
-	ext := filepath.Ext(path)
+	input, _ := invocation.Inputs["path"].(string)
+	value := normalizeSeparators(strings.TrimSpace(input))
+	dir, base := splitPath(value)
+	ext := pathExt(base)
 	name := strings.TrimSuffix(base, ext)
 	return nodes.ExecutionResult{Outputs: map[string]any{
 		"result": map[string]any{
@@ -78,7 +84,7 @@ func executeGetPathPart(_ context.Context, invocation nodes.Invocation, _ nodes.
 			"base":   base,
 			"name":   name,
 			"ext":    ext,
-			"volume": filepath.VolumeName(path),
+			"volume": volumeName(value),
 		},
 	}}, nil
 }
@@ -129,7 +135,11 @@ func executeBuildPath(_ context.Context, invocation nodes.Invocation, _ nodes.Ru
 	if len(parts) == 0 {
 		return nodes.ExecutionResult{}, nil
 	}
-	return nodes.ExecutionResult{Outputs: map[string]any{"result": filepath.Join(parts...)}}, nil
+	normalized := make([]string, len(parts))
+	for index, part := range parts {
+		normalized[index] = normalizeSeparators(part)
+	}
+	return nodes.ExecutionResult{Outputs: map[string]any{"result": path.Join(normalized...)}}, nil
 }
 
 func toStringList(value any) []string {
@@ -198,6 +208,49 @@ func cleanPathDefinition() domain.NodeDefinition {
 }
 
 func executeCleanPath(_ context.Context, invocation nodes.Invocation, _ nodes.Runtime) (nodes.ExecutionResult, error) {
-	path, _ := invocation.Inputs["path"].(string)
-	return nodes.ExecutionResult{Outputs: map[string]any{"result": filepath.Clean(strings.TrimSpace(path))}}, nil
+	input, _ := invocation.Inputs["path"].(string)
+	value := normalizeSeparators(strings.TrimSpace(input))
+	return nodes.ExecutionResult{Outputs: map[string]any{"result": path.Clean(value)}}, nil
+}
+
+// ---------- slash-only path helpers ----------
+
+// normalizeSeparators folds Windows separators into forward slashes so the
+// nodes behave identically on every platform.
+func normalizeSeparators(value string) string {
+	return strings.ReplaceAll(value, "\\", "/")
+}
+
+// splitPath splits value into its directory (including the trailing
+// separator) and base name using slash semantics.
+func splitPath(value string) (dir, base string) {
+	index := strings.LastIndex(value, "/")
+	if index < 0 {
+		return "", value
+	}
+	return value[:index+1], value[index+1:]
+}
+
+// pathExt returns the suffix of base beginning at its final dot, mirroring
+// filepath.Ext for slash-separated paths.
+func pathExt(base string) string {
+	index := strings.LastIndex(base, ".")
+	if index < 0 {
+		return ""
+	}
+	return base[index:]
+}
+
+// volumeName returns the Windows drive-letter prefix (such as "C:") when
+// value starts with one, so Windows-style paths split the same way on every
+// platform.
+func volumeName(value string) string {
+	if len(value) < 2 || value[1] != ':' || !isASCIILetter(value[0]) {
+		return ""
+	}
+	return value[:2]
+}
+
+func isASCIILetter(char byte) bool {
+	return 'a' <= char && char <= 'z' || 'A' <= char && char <= 'Z'
 }

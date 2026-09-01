@@ -222,8 +222,6 @@ func enrichNodeMarkdown(markdown string, definition domain.NodeDefinition) strin
 		builder.WriteString("Each row in **Items** creates one input pin typed by **Element type**; its stable ID keeps connected wires intact when you rename or reorder it, and a constant fills the element without a wire. Every pin, constant, and the Array output share that one type — choose **any** to allow mixed elements.\n")
 	} else if definition.Type == "data:build_map" {
 		builder.WriteString("Each row in **Entries** creates one input pin typed by **Value type**; its stable ID keeps connected wires intact when you rename or reorder it, keys are used verbatim, and a constant fills the entry without a wire. Every pin, constant, and the Map output share that one type — choose **any** to allow mixed values.\n")
-	} else if definition.Type == "data:json_parse" {
-		builder.WriteString("The **Value** output is typed by **Root type**: object (the default) carries the graph-wide map<string, any> shape so it connects to first-party object inputs without a Cast, and every other root type carries its own contract. A parsed root that does not match the declared type fails with both kinds named; **any** accepts every root.\n")
 	} else if len(definition.Outputs) == 0 {
 		builder.WriteString("This node produces no downstream value.\n")
 	} else {

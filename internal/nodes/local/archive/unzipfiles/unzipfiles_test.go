@@ -237,7 +237,7 @@ func TestZipSlipEntriesAreRefused(t *testing.T) {
 	target := filepath.Join(directory, "out")
 	module := registeredModule(t)
 	definition := module.Definition()
-	for _, entry := range []string{"../evil.txt", "/absolute/evil.txt", "sub/../../evil.txt"} {
+	for _, entry := range []string{"../evil.txt", "/absolute/evil.txt", "sub/../../evil.txt", "..\\evil.txt", "C:\\evil.txt", "C:evil.txt"} {
 		archivePath := filepath.Join(directory, "hostile.zip")
 		writeZip(t, archivePath, []zipEntry{{name: entry, content: "malicious"}})
 		_, err := module.Execute(context.Background(), invocation(definition, map[string]any{}, map[string]any{

@@ -44,7 +44,7 @@ Data nodes are pure unless noted. They have no exec pins and calculate only when
 
 ## Parse JSON
 
-**Purpose:** parse JSON text into a typed value. **Pins:** Text input, Value output. **Configure:** Root type (object default; list, text, number, boolean, or any). **Produces:** the declared root type. **Capabilities:** none. **Failure:** malformed JSON or a root that does not match the declared type stops the requesting path with both kinds named. **Example:** Read File content → Parse JSON (object) → Word Template Fill Values.
+**Purpose:** parse JSON text. **Pins:** Text input, Value output. **Configure:** none. **Produces:** object or list. **Capabilities:** none. **Failure:** malformed JSON stops the requesting path. **Example:** Read File content → Parse JSON → Query JSON.
 
 ## Get Variable
 

@@ -155,9 +155,12 @@ check(
 );
 check(
   "sync keeps an uninstalled default model selectable",
-  /if model := strings\.TrimSpace\(provider\.Model\); model != "" \{\s*\n\s*if _, exists := seen\[model\]; !exists \{/.test(
-    desktop,
-  ),
+  /selected := strings\.TrimSpace\(provider\.Model\)/.test(desktop) &&
+    /if selected != "" \{\s*\n\s*if _, exists := seen\[selected\]; !exists \{/.test(desktop),
+);
+check(
+  "sync keeps uninstalled models that carry per-model overrides",
+  /if entry\.Parameters == nil && id != selected \{\s*\n\s*continue/.test(desktop),
 );
 
 /* lazy routing: start or switch the managed runtime per request */

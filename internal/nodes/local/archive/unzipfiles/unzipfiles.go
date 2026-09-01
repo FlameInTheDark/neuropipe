@@ -95,8 +95,14 @@ func execute(ctx context.Context, invocation nodes.Invocation, _ nodes.Runtime) 
 			return nodes.ExecutionResult{}, fmt.Errorf("unzip files cancelled: %w", err)
 		}
 		name := filepath.FromSlash(file.Name)
-		// Reject absolute paths and parent traversal (zip-slip).
-		if filepath.IsAbs(name) || strings.HasPrefix(filepath.Clean(name), "..") {
+		// Reject absolute paths and parent traversal (zip-slip). The check is
+		// deliberately platform independent: entry names are inspected with
+		// both separators treated as separators and Windows drive-letter
+		// prefixes refused, so hostile archives get the same verdict on every
+		// OS. filepath.IsAbs alone misses rooted names such as
+		// "/absolute/evil.txt" on Windows, where a path without a volume is
+		// not considered absolute.
+		if isUnsafeEntryPath(file.Name) {
 			return nodes.ExecutionResult{}, fmt.Errorf("refuse unsafe entry path: %q", file.Name)
 		}
 		destPath := filepath.Join(targetDir, name)
@@ -157,6 +163,37 @@ func extractFile(file *zip.File, destPath string) error {
 		return err
 	}
 	return dst.Sync()
+}
+
+// isUnsafeEntryPath reports whether a zip entry name tries to escape the
+// target directory: rooted names (a leading "/" or "\"), Windows
+// drive-letter prefixes, or any ".." component. Both separators are treated
+// as separators so the verdict never depends on the host OS.
+func isUnsafeEntryPath(name string) bool {
+	slash := strings.ReplaceAll(name, "\\", "/")
+	if strings.HasPrefix(slash, "/") {
+		return true
+	}
+	for index, part := range strings.Split(slash, "/") {
+		if part == ".." {
+			return true
+		}
+		if index == 0 && hasVolumePrefix(part) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasVolumePrefix reports whether part starts with a Windows drive-letter
+// prefix such as "C:" or "D:", which would redirect the entry to another
+// drive when extracted on Windows.
+func hasVolumePrefix(part string) bool {
+	return len(part) >= 2 && part[1] == ':' && isDriveLetter(part[0])
+}
+
+func isDriveLetter(char byte) bool {
+	return 'a' <= char && char <= 'z' || 'A' <= char && char <= 'Z'
 }
 
 func boolValue(value any, configValue any, fallback bool) bool {

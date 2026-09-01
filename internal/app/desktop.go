@@ -1953,7 +1953,9 @@ func bindManagedLlamaProvider(settings *domain.Settings, model, endpoint string)
 // can only serve those files, so the list is derived, never hand-maintained:
 // every settings read and save refreshes it. A default model that is no longer
 // installed stays in the list so an existing selection never silently
-// disappears from pickers. Per-model generation overrides survive the rebuild.
+// disappears from pickers, and other uninstalled models that carry per-model
+// generation overrides stay too, so tuned parameters survive a model being
+// removed and reinstalled.
 //
 // The entry itself is materialized whenever local models exist, so the
 // Providers tab always offers the managed llama.cpp provider it can serve;
@@ -1985,8 +1987,9 @@ func syncManagedLlamaModels(settings *domain.Settings, files []domain.LocalModel
 		index = len(settings.Providers) - 1
 	}
 	provider := settings.Providers[index]
-	models := make([]domain.ModelConfig, 0, len(files)+1)
-	seen := make(map[string]struct{}, len(files)+1)
+	previous := provider.Models
+	models := make([]domain.ModelConfig, 0, len(files)+len(previous)+1)
+	seen := make(map[string]struct{}, len(files)+len(previous)+1)
 	for _, file := range files {
 		name := strings.TrimSpace(file.Name)
 		if name == "" {
@@ -1998,9 +2001,28 @@ func syncManagedLlamaModels(settings *domain.Settings, files []domain.LocalModel
 		models = append(models, domain.ModelConfig{ID: name, Name: name, Parameters: overrides[name]})
 		seen[name] = struct{}{}
 	}
-	if model := strings.TrimSpace(provider.Model); model != "" {
-		if _, exists := seen[model]; !exists {
-			models = append(models, domain.ModelConfig{ID: model, Parameters: overrides[model]})
+	// Uninstalled entries survive the rebuild when they still matter: the
+	// selected model stays so an existing choice never silently disappears
+	// from pickers, and entries with per-model overrides stay so tuned
+	// parameters survive a model being removed and reinstalled.
+	selected := strings.TrimSpace(provider.Model)
+	for _, entry := range previous {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		if entry.Parameters == nil && id != selected {
+			continue
+		}
+		models = append(models, domain.ModelConfig{ID: id, Name: strings.TrimSpace(entry.Name), Parameters: entry.Parameters})
+		seen[id] = struct{}{}
+	}
+	if selected != "" {
+		if _, exists := seen[selected]; !exists {
+			models = append(models, domain.ModelConfig{ID: selected, Parameters: overrides[selected]})
 		}
 	}
 	provider.Models = models
@@ -2222,16 +2244,31 @@ func resolveManagedLlamaModel(files []domain.LocalModel, target string) (domain.
 
 // managedModelContextSize resolves the context window configured for one
 // managed llama.cpp model: the model entry's override wins over the
-// provider-level value. Zero means "not configured".
+// provider-level value. Only models present in the synced list can be served
+// by the managed runtime, so anything else reports zero instead of borrowing
+// the provider-level value. Zero means "not configured".
 func (d *Desktop) managedModelContextSize(model string) int {
-	settings := d.GetSettings()
-	for _, provider := range settings.Providers {
+	return managedModelContextSizeFromProviders(d.GetSettings().Providers, model)
+}
+
+// managedModelContextSizeFromProviders is the pure resolver behind
+// managedModelContextSize: it scans a provider list that has already been
+// synced with the installed GGUF files.
+func managedModelContextSizeFromProviders(providers []domain.ProviderConfig, model string) int {
+	for _, provider := range providers {
 		if provider.ID != managedLlamaProviderID {
 			continue
 		}
-		params := provider.EffectiveParameters(model)
-		if params.ContextSize != nil {
-			return *params.ContextSize
+		target := strings.TrimSpace(model)
+		for index := range provider.Models {
+			if !strings.EqualFold(strings.TrimSpace(provider.Models[index].ID), target) {
+				continue
+			}
+			params := provider.EffectiveParameters(model)
+			if params.ContextSize != nil {
+				return *params.ContextSize
+			}
+			return 0
 		}
 		return 0
 	}

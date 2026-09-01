@@ -94,8 +94,9 @@ func TestGetPathPartSplitsCorrectly(t *testing.T) {
 	}
 }
 
-// The exact split expectations below use forward-slash paths, which the
-// filepath package accepts on every platform this suite runs on.
+// The exact split expectations pin the node's slash-only contract: inputs
+// may use either separator, and the results are identical on every platform
+// this suite runs on.
 func TestGetPathPartSplitsEveryComponent(t *testing.T) {
 	module := NewGetPathPart()
 	tests := []struct {
@@ -104,6 +105,7 @@ func TestGetPathPartSplitsEveryComponent(t *testing.T) {
 		want map[string]any
 	}{
 		{"regular file", "/Work/file.txt", map[string]any{"dir": "/Work/", "base": "file.txt", "name": "file", "ext": ".txt", "volume": ""}},
+		{"windows drive path folds separators", "C:\\Work\\file.txt", map[string]any{"dir": "C:/Work/", "base": "file.txt", "name": "file", "ext": ".txt", "volume": "C:"}},
 		{"double extension keeps the last", "dir/file.tar.gz", map[string]any{"dir": "dir/", "base": "file.tar.gz", "name": "file.tar", "ext": ".gz", "volume": ""}},
 		{"trailing slash has no base", "a/b/", map[string]any{"dir": "a/b/", "base": "", "name": "", "ext": "", "volume": ""}},
 		{"hidden file keeps its dot as extension", "a/.gitignore", map[string]any{"dir": "a/", "base": ".gitignore", "name": "", "ext": ".gitignore", "volume": ""}},
@@ -168,6 +170,7 @@ func TestBuildPathJoinsAndCleansParts(t *testing.T) {
 		want  string
 	}{
 		{"joins with separators", []any{"a", "b", "c"}, "a/b/c"},
+		{"windows separators are normalized", []any{"C:\\Work", "subfolder", "file.txt"}, "C:/Work/subfolder/file.txt"},
 		{"absolute parts", []any{"/var", "log", "syslog"}, "/var/log/syslog"},
 		{"cleans dot segments", []any{"a", "b", ".", "c"}, "a/b/c"},
 		{"resolves parent segments", []any{"a", "b", "..", "c"}, "a/c"},
@@ -232,6 +235,7 @@ func TestCleanPathNormalizesExactly(t *testing.T) {
 		want string
 	}{
 		{"removes dot and parent segments", "a/./b/../b/c/", "a/b/c"},
+		{"windows separators are normalized", "C:\\Work\\..\\Work\\.\\file.txt", "C:/Work/file.txt"},
 		{"collapses doubled separators and up-levels", "/var/log/../..//tmp/.", "/tmp"},
 		{"already clean path", "/Work/file.txt", "/Work/file.txt"},
 		{"trims surrounding whitespace", "  /Work/file.txt  ", "/Work/file.txt"},
