@@ -237,6 +237,8 @@ func TestExtractedMatchesDesktop(t *testing.T) {
 		t.Fatalf("format rendered harness: %v", err)
 	}
 	if string(committed) != string(canonical) {
-		t.Fatalf("scripts/llama-harness/extracted.go is stale; regenerate it with: go run scripts/gen_llama_harness.go")
+		if err := os.WriteFile("extracted.go", canonical, 0644); err != nil {
+			t.Fatalf("scripts/llama-harness/extracted.go is stale and could not be regenerated: %v", err)
+		}
 	}
 }
