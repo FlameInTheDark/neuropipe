@@ -74,11 +74,11 @@ func TestMathNodesUseOnlyNumberDataPins(t *testing.T) {
 }
 
 func TestMathNodeUsesManualValuesWhenPinsAreUnconnected(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("first", "data:constant", map[string]any{"value": 0}),
-		v2Node("sum", "math:add", map[string]any{"a": 2.5, "b": 3.5}),
-		v2Node("loop", "flow:for_loop", nil),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("first", "data:constant", map[string]any{"type": "number", "value": 0}),
+		cfgNode("sum", "math:add", map[string]any{"a": 2.5, "b": 3.5}),
+		cfgNode("loop", "flow:for_loop", nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-loop", "start", "out", "loop", "in"),
 		dataEdge("first-loop", "first", "value", "loop", "first"),

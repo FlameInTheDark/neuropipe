@@ -3,13 +3,10 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Icon } from "./icons";
 import { cn } from "../utils/cn";
+import { filterDropdownOptions, type DropdownOption } from "../lib/dropdownFilter";
 
-export interface DropdownOption {
-  value: string;
-  label: string;
-  icon?: string;
-  hint?: string;
-}
+export type { DropdownOption };
+export { filterDropdownOptions };
 
 export function Dropdown({
   value,
@@ -106,16 +103,14 @@ function Menu({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
   const [query, setQuery] = useState("");
   const { t } = useTranslation();
-  const filtered = useMemo(() => {
-    if (!searchable || !query.trim()) return options;
-    const needle = query.trim().toLowerCase();
-    return options.filter(
-      (o) => o.label.toLowerCase().includes(needle) || (o.hint ?? "").toLowerCase().includes(needle),
-    );
-  }, [options, query, searchable]);
+  const filtered = useMemo(
+    () => (searchable ? filterDropdownOptions(options, query) : options),
+    [options, query, searchable],
+  );
   const [hi, setHi] = useState(() => Math.max(0, options.findIndex((o) => o.value === value)));
 
   // A new filter invalidates the highlight: point it at the first match.
@@ -123,23 +118,44 @@ function Menu({
     setHi(0);
   }, [query]);
 
-  // Keep the highlight inside the (possibly filtered) list and bring it
-  // into view while walking with the arrow keys.
+  // Keep the highlight inside the (possibly filtered) list.
   useEffect(() => {
     if (hi > filtered.length - 1) setHi(Math.max(0, filtered.length - 1));
   }, [filtered.length, hi]);
+
+  // Bring the highlighted option into view: while walking with the arrow/Home/
+  // End keys, and right after opening, when the highlight may start deep in a
+  // long list (the currently selected model).
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${hi}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [hi, filtered]);
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const el = ref.current;
     if (!anchor || !el) return;
     const a = anchor.getBoundingClientRect();
-    const m = el.getBoundingClientRect();
+    // offsetWidth/offsetHeight are the layout box: unlike
+    // getBoundingClientRect they ignore the .timeline-menu entry animation's
+    // scale(0.96), which under-measured the menu and let its right edge slip
+    // past the viewport.
+    const mw = el.offsetWidth;
+    const mh = el.offsetHeight;
+    const vw = document.documentElement.clientWidth;
+    const vh = window.innerHeight;
+    // The final menu width is floored at the anchor's width (style minWidth)
+    // and hard-capped at the viewport so an unbreakable model key can never
+    // push the menu off-screen either.
+    const width = Math.min(Math.max(mw, a.width), vw - 12);
     let top = a.bottom + 5;
-    if (top + m.height > window.innerHeight - 8) top = Math.max(8, a.top - m.height - 5);
-    const left = Math.min(Math.max(6, a.left), window.innerWidth - Math.max(m.width, a.width) - 6);
-    setPos({ left, top, width: a.width });
-  }, [anchorRef]);
+    if (top + mh > vh - 8) top = Math.max(8, a.top - mh - 5);
+    const left = Math.min(Math.max(6, a.left), Math.max(6, vw - width - 6));
+    setPos({ left, top, width });
+    // Re-runs when the option list or a filter changes its size: the menu is
+    // re-clamped against the viewport, which is what keeps long model lists
+    // that arrive after opening (provider/discovery load) on-screen.
+  }, [anchorRef, filtered.length, options.length]);
 
   useEffect(() => {
     // With a search box the input is the focus target so typing filters
@@ -169,7 +185,11 @@ function Menu({
       ref={ref}
       role="listbox"
       tabIndex={-1}
-      style={pos ? { left: pos.left, top: pos.top, minWidth: pos.width } : { left: -9999, top: -9999 }}
+      style={
+        pos
+          ? { left: pos.left, top: pos.top, minWidth: pos.width, maxWidth: "calc(100vw - 12px)" }
+          : { left: -9999, top: -9999 }
+      }
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           // Clearing the filter first matches every searchable picker the
@@ -185,6 +205,12 @@ function Menu({
         } else if (e.key === "ArrowUp") {
           e.preventDefault();
           setHi((h) => Math.max(h - 1, 0));
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          setHi(0);
+        } else if (e.key === "End") {
+          e.preventDefault();
+          setHi(Math.max(0, filtered.length - 1));
         } else if (e.key === "Enter") {
           e.preventDefault();
           const o = filtered[hi];
@@ -202,11 +228,19 @@ function Menu({
             onChange={(e) => setQuery(e.target.value)}
             placeholder={searchPlaceholder ?? t("common.search")}
             spellCheck={false}
-            className="h-full w-full bg-transparent text-[12px] text-fg placeholder:text-fg-faint focus:outline-none"
+            className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-fg placeholder:text-fg-faint focus:outline-none"
           />
+          {query.trim() ? (
+            <span className="shrink-0 font-mono text-[10px] text-fg-faint" aria-live="polite">
+              {filtered.length}/{options.length}
+            </span>
+          ) : null}
         </div>
       ) : null}
-      <div className="max-h-[264px] overflow-y-auto">
+      <div
+        ref={listRef}
+        className={cn("overflow-y-auto", searchable ? "max-h-[340px]" : "max-h-[264px]")}
+      >
         {filtered.length === 0 ? (
           <p className="px-2 py-2 text-center text-[11.5px] text-fg-faint">{t("common.noMatches")}</p>
         ) : (
@@ -214,6 +248,7 @@ function Menu({
             <button
               key={o.value}
               role="option"
+              data-idx={i}
               aria-selected={o.value === value}
               onMouseEnter={() => setHi(i)}
               onClick={() => onPick(o.value)}

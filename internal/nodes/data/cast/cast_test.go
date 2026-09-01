@@ -2,6 +2,7 @@ package cast
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -283,5 +284,127 @@ func TestObjectOutputConnectsToFirstPartyObjectPins(t *testing.T) {
 	listConsumer := typespec.FromDataType(domain.DataList)
 	if !typespec.Assignable(listSpec, listConsumer) {
 		t.Fatal("list cast output is not assignable to a list<any> pin")
+	}
+}
+
+func TestRegisterMetadata(t *testing.T) {
+	definition := registeredModule(t).Definition()
+	if definition.Type != "data:cast" || definition.Mode != domain.NodePure || definition.Category != "Data" {
+		t.Fatalf("definition header = %#v", definition)
+	}
+	if got := definition.Inputs[0]; got.ID != "value" || got.DataType != domain.DataAny || got.Direction != domain.PinInput {
+		t.Fatalf("value input = %#v", got)
+	}
+	if got := definition.Outputs[0]; got.ID != "value" || got.DataType != domain.DataAny || got.Direction != domain.PinOutput {
+		t.Fatalf("value output = %#v", got)
+	}
+	if !reflect.DeepEqual(definition.DefaultConfig, map[string]any{"target": "text"}) {
+		t.Fatalf("default config = %#v, want target text", definition.DefaultConfig)
+	}
+}
+
+func TestCastNumberConversionsExact(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  float64
+	}{
+		{"text float", "3.5", 3.5},
+		{"padded text", "  42  ", 42.0},
+		{"int passthrough", 7, 7.0},
+		{"int64 passthrough", int64(-3), -3.0},
+		{"float32 passthrough", float32(2.5), 2.5},
+		{"json number text", json.Number("2.5"), 2.5},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := castValue(t, "number", test.value)
+			if err != nil {
+				t.Fatalf("number cast of %#v error = %v", test.value, err)
+			}
+			if !reflect.DeepEqual(result, test.want) {
+				t.Fatalf("number cast of %#v = %#v, want %#v", test.value, result, test.want)
+			}
+		})
+	}
+}
+
+func TestCastNumberRejectsNonNumbers(t *testing.T) {
+	for _, value := range []any{"nope", true, nil, map[string]any{"a": 1.0}, []any{}} {
+		if _, err := castValue(t, "number", value); err == nil || !strings.Contains(err.Error(), "cannot cast") {
+			t.Fatalf("number cast of %#v error = %v, want cannot cast failure", value, err)
+		}
+	}
+}
+
+func TestCastBooleanConversions(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  bool
+	}{
+		{"bool passthrough false", false, false},
+		{"uppercase text", "TRUE", true},
+		{"one text", "1", true},
+		{"zero text", "0", false},
+		{"int one renders parseable text", 1, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := castValue(t, "boolean", test.value)
+			if err != nil {
+				t.Fatalf("boolean cast of %#v error = %v", test.value, err)
+			}
+			if result != test.want {
+				t.Fatalf("boolean cast of %#v = %#v, want %v", test.value, result, test.want)
+			}
+		})
+	}
+}
+
+func TestCastBooleanRejectsUnparseableText(t *testing.T) {
+	for _, value := range []any{"yes", 2, nil} {
+		if _, err := castValue(t, "boolean", value); err == nil || !strings.Contains(err.Error(), "cannot cast") {
+			t.Fatalf("boolean cast of %#v error = %v, want cannot cast failure", value, err)
+		}
+	}
+}
+
+func TestCastTextRendersScalarsWithSprint(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"float", 2.5, "2.5"},
+		{"whole float drops decimals", 12.0, "12"},
+		{"int", 7, "7"},
+		{"true", true, "true"},
+		{"false", false, "false"},
+		{"nil", nil, "<nil>"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := castValue(t, "text", test.value)
+			if err != nil {
+				t.Fatalf("text cast of %#v error = %v", test.value, err)
+			}
+			if result != test.want {
+				t.Fatalf("text cast of %#v = %#v, want %q", test.value, result, test.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateTrimsTarget(t *testing.T) {
+	result, err := Evaluate(context.Background(), nodes.Invocation{
+		Config: map[string]any{"target": "  number  "},
+		Inputs: map[string]any{"value": "5"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if !reflect.DeepEqual(result["value"], 5.0) {
+		t.Fatalf("trimmed target result = %#v, want 5", result["value"])
 	}
 }

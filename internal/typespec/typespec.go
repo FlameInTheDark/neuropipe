@@ -71,8 +71,8 @@ func comparableMapKey(kind domain.TypeKind) bool {
 	return kind == domain.TypeBool || kind == domain.TypeString || kind == domain.TypeInt || kind == domain.TypeFloat
 }
 
-// FromDataType is the deterministic V2-to-V3 mapping used while migrating
-// catalog metadata. Number becomes float because V2 JSON numbers are decoded
+// FromDataType is the deterministic mapping from a DataType display label to
+// its wire contract. Number becomes float because JSON numbers are decoded
 // as float64; V3 modules may declare int explicitly where required.
 func FromDataType(dataType domain.DataType) domain.TypeSpec {
 	switch dataType {

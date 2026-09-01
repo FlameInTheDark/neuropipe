@@ -22,10 +22,10 @@ import {
    count badge. Row state is kept locally so blank mid-edit rows survive the
    round-trip through the persisted (filtered) payload. */
 
-const inputCls =
+export const inputCls =
   "h-7 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-2 font-mono text-[11.5px] text-fg transition focus:border-ink-500 focus:outline-none";
 
-function EditorLabel({ children, count }: { children: React.ReactNode; count?: number }) {
+export function EditorLabel({ children, count }: { children: React.ReactNode; count?: number }) {
   return (
     <div className="flex items-center justify-between">
       <span className="block text-[11px] font-medium text-fg-subtle">{children}</span>
@@ -34,7 +34,7 @@ function EditorLabel({ children, count }: { children: React.ReactNode; count?: n
   );
 }
 
-function ColumnHeads({ left, right }: { left: string; right?: string }) {
+export function ColumnHeads({ left, right }: { left: string; right?: string }) {
   return (
     <div className="flex items-center gap-1.5 px-0.5 text-[10px] tracking-wide text-fg-faint uppercase">
       <span className="flex-1">{left}</span>
@@ -47,7 +47,7 @@ function ColumnHeads({ left, right }: { left: string; right?: string }) {
   );
 }
 
-function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
+export function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -60,7 +60,7 @@ function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function EmptyHint({ text }: { text: string }) {
+export function EmptyHint({ text }: { text: string }) {
   return (
     <p className="rounded-md border border-dashed border-ink-700 px-2.5 py-2 text-[11px] text-fg-faint">{text}</p>
   );
@@ -73,7 +73,7 @@ function EmptyHint({ text }: { text: string }) {
  * editor instance — are adopted only when they do not match what this editor
  * last emitted, so typing never fights the persisted config.
  */
-function useDraftRows<T>(
+export function useDraftRows<T>(
   value: unknown,
   parse: (raw: unknown) => T[],
   build: (rows: T[]) => unknown,

@@ -432,8 +432,7 @@ func executeTTL(ctx context.Context, invocation nodes.Invocation, runtime nodes.
 /* ---------------- shared helpers ---------------- */
 
 // keyList reads the keys pin when wired, falling back to the inspector list
-// field otherwise. The field has been persisted as a newline-separated string
-// (legacy textarea) and as an array (visual list editor); both shapes parse.
+// field (the visual list editor's array of values) otherwise.
 func keyList(invocation nodes.Invocation) ([]string, error) {
 	if invocation.ConnectedInputs["keys"] {
 		wired, err := kvnodes.Strings(invocation, "keys")

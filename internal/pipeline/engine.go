@@ -99,15 +99,6 @@ func (e *Engine) executeNode(ctx context.Context, node domain.FlowNode, input Pa
 		return e.executeChatStatus(ctx, config, input)
 	case "action:git":
 		return executeGit(ctx, config, input)
-	case "action:subpipeline":
-		target := ""
-		if value, ok := config["pipelineId"].(string); ok {
-			target = strings.TrimSpace(value)
-		}
-		if override, ok := input["pipelineId"].(string); ok && strings.TrimSpace(override) != "" {
-			target = strings.TrimSpace(override)
-		}
-		return nil, fmt.Errorf("running pipeline %q is not available in this release", target)
 	case "action:list_pipelines":
 		if e.pipelines == nil {
 			return nil, fmt.Errorf("the pipeline catalogue is unavailable for this execution")
@@ -407,7 +398,7 @@ func (e *Engine) executeLLM(ctx context.Context, node domain.FlowNode, config ma
 	if err := reportModelStatus(status, chatStatusThinking); err != nil {
 		return nil, err
 	}
-	request := ChatRequest{Prompt: promptWithInput(prompt, input), Model: text(config, "model"), Metrics: e.llmMetricContext(node)}
+	request := ChatRequest{Prompt: promptWithInput(prompt, input), ProviderID: text(config, "providerId"), Model: text(config, "model"), Metrics: e.llmMetricContext(node)}
 	if node.Type == "llm:extract" {
 		request.Schema = jsonObject(config["schema"])
 	}
@@ -438,9 +429,10 @@ func (e *Engine) converseAgent(ctx context.Context, node domain.FlowNode, config
 		return nil, err
 	}
 	response, err := assistant.Converse(ctx, domain.AssistantChatRequest{
-		Messages: agentHistoryMessages(prompt, history),
-		Model:    text(config, "model"),
-		Metrics:  e.llmMetricContext(node),
+		Messages:   agentHistoryMessages(prompt, history),
+		ProviderID: text(config, "providerId"),
+		Model:      text(config, "model"),
+		Metrics:    e.llmMetricContext(node),
 	})
 	if err != nil {
 		return nil, err
@@ -459,7 +451,7 @@ func (e *Engine) executeBoolean(ctx context.Context, node domain.FlowNode, confi
 	if err := reportModelStatus(status, chatStatusThinking); err != nil {
 		return nil, err
 	}
-	response, err := e.llm.Chat(ctx, ChatRequest{Prompt: promptWithInput(text(config, "prompt"), input), ToolName: "route", ToolChoices: []string{"true", "false"}, Metrics: e.llmMetricContext(node)})
+	response, err := e.llm.Chat(ctx, ChatRequest{Prompt: promptWithInput(text(config, "prompt"), input), ProviderID: text(config, "providerId"), Model: text(config, "model"), ToolName: "route", ToolChoices: []string{"true", "false"}, Metrics: e.llmMetricContext(node)})
 	if err != nil {
 		return nil, err
 	}
@@ -488,6 +480,8 @@ func (e *Engine) executeChoice(ctx context.Context, node domain.FlowNode, config
 	}
 	response, err := e.llm.Chat(ctx, ChatRequest{
 		Prompt:                 promptWithInput(text(config, "prompt"), input),
+		ProviderID:             text(config, "providerId"),
+		Model:                  text(config, "model"),
 		ToolName:               "choose",
 		ToolChoices:            options,
 		ToolChoiceDescriptions: choiceGuidance(optionsConfig),

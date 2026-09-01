@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"regexp"
 	goruntime "runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,18 +27,66 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 )
 
-const officialLlamaReleasesURL = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=16"
+const (
+	officialLlamaReleasesURL = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=16"
+	// officialLlamaWebBase is the repository's public website. When the REST
+	// API is rate-limited or blocked, the catalog falls back to this site's
+	// Atom feed and per-release asset pages — the exact pages a browser
+	// opens, so the release list stays live whenever github.com is reachable.
+	officialLlamaWebBase = "https://github.com/ggml-org/llama.cpp"
+
+	// githubAPIFetchTimeout bounds one unauthenticated API lookup so a
+	// black-holed connection still leaves time for the web fallback.
+	githubAPIFetchTimeout = 15 * time.Second
+	// webRequestTimeout bounds each individual github.com page fetch.
+	webRequestTimeout = 20 * time.Second
+	// webReleaseFetchLimit bounds the web fallback: Atom feed pages return
+	// ten entries and llama.cpp publishes several builds a day, so twenty
+	// entries cover roughly the last week of releases.
+	webReleaseFetchLimit = 20
+	// webAssetConcurrency bounds concurrent asset-page fetches so the
+	// fallback stays a polite github.com citizen.
+	webAssetConcurrency = 5
+	// releaseCacheFreshFor suppresses repeat web lookups while the API is
+	// down: a listing younger than this is served straight from the cache.
+	releaseCacheFreshFor = 30 * time.Minute
+	// outboundUserAgent identifies the app to GitHub and Hugging Face.
+	outboundUserAgent = "Neuropipe/0.1"
+
+	// releaseSourceAPI, releaseSourceWeb, and releaseSourceCache name where
+	// a release listing came from; the Runtime page explains the non-API
+	// sources to the user.
+	releaseSourceAPI   = "github-api"
+	releaseSourceWeb   = "github-web"
+	releaseSourceCache = "cache"
+)
 
 var (
 	llamaVersionPattern = regexp.MustCompile(`^b[0-9]+$`)
 	cpuAssetPattern     = regexp.MustCompile(`^llama-(b[0-9]+)-bin-win-cpu-x64\.zip$`)
-	cudaAssetPattern    = regexp.MustCompile(`^llama-(b[0-9]+)-bin-win-cuda-(12\.4|13\.3)-x64\.zip$`)
-	cudartAssetPattern  = regexp.MustCompile(`^cudart-llama-bin-win-cuda-(12\.4|13\.3)-x64\.zip$`)
-	vulkanAssetPattern  = regexp.MustCompile(`^llama-(b[0-9]+)-bin-win-vulkan-x64\.zip$`)
-	hipAssetPattern     = regexp.MustCompile(`^llama-(b[0-9]+)-bin-win-hip-radeon-x64\.zip$`)
+	// cudaAssetPattern accepts any CUDA toolkit version so future build
+	// renames cannot silently empty the release list again; toolkit
+	// preference is resolved by pickCudaToolkit at classify time.
+	cudaAssetPattern   = regexp.MustCompile(`^llama-(b[0-9]+)-bin-win-cuda-([0-9]+\.[0-9]+)-x64\.zip$`)
+	cudartAssetPattern = regexp.MustCompile(`^cudart-llama-bin-win-cuda-([0-9]+\.[0-9]+)-x64\.zip$`)
+	vulkanAssetPattern = regexp.MustCompile(`^llama-(b[0-9]+)-bin-win-vulkan-x64\.zip$`)
+	// hipAssetPattern covers both AMD build spellings: the older
+	// hip-radeon assets and the rocm-<version> assets of current releases.
+	hipAssetPattern     = regexp.MustCompile(`^llama-(b[0-9]+)-bin-win-(?:hip-radeon|rocm-[0-9][0-9.]*)-x64\.zip$`)
 	validRepository     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	quantizationPattern = regexp.MustCompile(`(?i)(?:^|[._-])(IQ[1-4]_[A-Z]{2}|Q[2-8](?:_[A-Z0-9]+){0,2}|F16|F32)(?:[._-]|$)`)
 	profileAvatarURL    = regexp.MustCompile(`https://cdn-avatars\.huggingface\.co/[^\s"'<>]+`)
+	// expandedAssetAnchorPattern extracts download links from the HTML
+	// fragment github.com serves for a release's asset list:
+	// <a href="/owner/repo/releases/download/<tag>/<asset>">.
+	expandedAssetAnchorPattern = regexp.MustCompile(`href="(/[^\"]*/releases/download/([^/\"]+)/([^\"]+))"`)
+
+	// preferredCudaToolkits orders known CUDA toolkit builds by driver
+	// compatibility: 12.4 runs on the oldest driver generation llama.cpp
+	// still ships for, 13.3 needs a newer one. Unlisted toolkits are still
+	// accepted — sorted after these by version — so future toolkit names
+	// cannot empty the release list.
+	preferredCudaToolkits = []string{"12.4", "13.3"}
 )
 
 // LlamaCatalog discovers and installs official Windows x64 llama.cpp releases
@@ -45,6 +95,10 @@ type LlamaCatalog struct {
 	root        string
 	http        *http.Client
 	releasesURL string
+	// webBase is the repository website used by the web fallback; tests
+	// point it at a local server.
+	webBase string
+	listMu  sync.Mutex
 }
 
 // ProgressReporter receives throttled install progress on the caller's goroutine.
@@ -57,14 +111,19 @@ type downloadProgress struct {
 	bytesPerSecond  float64
 }
 
-// NewLlamaCatalog creates a catalog rooted in a user-owned app-data directory.
+// NewLlamaCatalog creates a catalog rooted in a user-owned app-data
+// directory. Its HTTP client honors the Windows system proxy so the catalog
+// reaches the same hosts as the user's browser.
 func NewLlamaCatalog(root string) *LlamaCatalog {
-	return &LlamaCatalog{root: root, http: &http.Client{Timeout: 0}, releasesURL: officialLlamaReleasesURL}
+	return &LlamaCatalog{root: root, http: newOutboundHTTPClient(), releasesURL: officialLlamaReleasesURL, webBase: officialLlamaWebBase}
 }
 
+// releaseManifest pairs one official release with its CUDA runtime library
+// artifact. Fields are exported so the on-disk release cache can round-trip
+// the whole manifest, keeping offline CUDA installs complete.
 type releaseManifest struct {
-	release domain.LlamaRuntimeRelease
-	cudart  domain.RuntimeArtifact
+	Release domain.LlamaRuntimeRelease `json:"release"`
+	Cudart  domain.RuntimeArtifact     `json:"cudart"`
 }
 
 // List fetches compatible official Windows x64 releases.
@@ -73,11 +132,44 @@ func (c *LlamaCatalog) List(ctx context.Context) ([]domain.LlamaRuntimeRelease, 
 	if err != nil {
 		return nil, err
 	}
+	return releasesFromManifests(manifests), nil
+}
+
+// ListWithInfo additionally reports which source served the listing and a
+// human-readable notice when it was not the live GitHub API.
+func (c *LlamaCatalog) ListWithInfo(ctx context.Context) (domain.LlamaRuntimeReleaseList, error) {
+	listing, err := c.listReleases(ctx, false)
+	if err != nil {
+		return domain.LlamaRuntimeReleaseList{}, err
+	}
+	return releaseListInfo(listing), nil
+}
+
+// Refresh forces a live re-lookup, skipping the fresh-cache shortcut so the
+// Runtime page's refresh button always hits the network.
+func (c *LlamaCatalog) Refresh(ctx context.Context) (domain.LlamaRuntimeReleaseList, error) {
+	listing, err := c.listReleases(ctx, true)
+	if err != nil {
+		return domain.LlamaRuntimeReleaseList{}, err
+	}
+	return releaseListInfo(listing), nil
+}
+
+func releaseListInfo(listing releaseListing) domain.LlamaRuntimeReleaseList {
+	return domain.LlamaRuntimeReleaseList{
+		Releases:  releasesFromManifests(listing.Manifests),
+		Source:    listing.Source,
+		FetchedAt: listing.FetchedAt,
+		Notice:    strings.TrimSpace(listing.Notice),
+	}
+}
+
+func releasesFromManifests(manifests []releaseManifest) []domain.LlamaRuntimeRelease {
 	releases := make([]domain.LlamaRuntimeRelease, 0, len(manifests))
 	for _, manifest := range manifests {
-		releases = append(releases, manifest.release)
+		releases = append(releases, manifest.Release)
 	}
-	return releases, nil
+	return releases
 }
 
 // Status reports runtime builds already installed locally.
@@ -132,7 +224,7 @@ func (c *LlamaCatalog) InstallWithProgress(ctx context.Context, request domain.L
 	}
 	var selected *releaseManifest
 	for index := range manifests {
-		if manifests[index].release.Version == request.Version {
+		if manifests[index].Release.Version == request.Version {
 			selected = &manifests[index]
 			break
 		}
@@ -219,22 +311,22 @@ type namedArtifact struct {
 func selectedArtifacts(manifest releaseManifest, mode domain.RuntimeMode) ([]namedArtifact, error) {
 	switch mode {
 	case domain.RuntimeCPU:
-		return []namedArtifact{{name: "CPU runtime", artifact: manifest.release.CPU}}, nil
+		return []namedArtifact{{name: "CPU runtime", artifact: manifest.Release.CPU}}, nil
 	case domain.RuntimeCUDA:
-		if manifest.release.CUDA.URL == "" || manifest.cudart.URL == "" {
-			return nil, fmt.Errorf("llama.cpp release %s does not provide a complete CUDA runtime", manifest.release.Version)
+		if manifest.Release.CUDA.URL == "" || manifest.Cudart.URL == "" {
+			return nil, fmt.Errorf("llama.cpp release %s does not provide a complete CUDA runtime", manifest.Release.Version)
 		}
-		return []namedArtifact{{name: "CUDA runtime", artifact: manifest.release.CUDA}, {name: "CUDA libraries", artifact: manifest.cudart}}, nil
+		return []namedArtifact{{name: "CUDA runtime", artifact: manifest.Release.CUDA}, {name: "CUDA libraries", artifact: manifest.Cudart}}, nil
 	case domain.RuntimeVulkan:
-		if manifest.release.Vulkan.URL == "" {
-			return nil, fmt.Errorf("llama.cpp release %s does not provide a Vulkan runtime", manifest.release.Version)
+		if manifest.Release.Vulkan.URL == "" {
+			return nil, fmt.Errorf("llama.cpp release %s does not provide a Vulkan runtime", manifest.Release.Version)
 		}
-		return []namedArtifact{{name: "Vulkan runtime", artifact: manifest.release.Vulkan}}, nil
+		return []namedArtifact{{name: "Vulkan runtime", artifact: manifest.Release.Vulkan}}, nil
 	case domain.RuntimeHIP:
-		if manifest.release.HIP.URL == "" {
-			return nil, fmt.Errorf("llama.cpp release %s does not provide a HIP runtime", manifest.release.Version)
+		if manifest.Release.HIP.URL == "" {
+			return nil, fmt.Errorf("llama.cpp release %s does not provide a HIP runtime", manifest.Release.Version)
 		}
-		return []namedArtifact{{name: "HIP runtime", artifact: manifest.release.HIP}}, nil
+		return []namedArtifact{{name: "HIP runtime", artifact: manifest.Release.HIP}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported llama.cpp runtime mode %q", mode)
 	}
@@ -296,84 +388,587 @@ func (c *LlamaCatalog) publish(request domain.LlamaRuntimeInstallRequest, archiv
 	return nil
 }
 
+// releases resolves compatible official releases for Install.
 func (c *LlamaCatalog) releases(ctx context.Context) ([]releaseManifest, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.releasesURL, nil)
+	listing, err := c.listReleases(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	return listing.Manifests, nil
+}
+
+// releaseListing is a resolved release list plus where it came from.
+type releaseListing struct {
+	Manifests []releaseManifest
+	Source    string
+	FetchedAt time.Time
+	Notice    string
+}
+
+// listReleases resolves installable manifests from three sources in order of
+// preference: the GitHub API, a fresh on-disk cache (so a rate-limited API
+// does not cause repeated scrapes of github.com), and the GitHub releases web
+// feed — the same pages a browser opens, which keeps the list live whenever
+// api.github.com is rate-limited or blocked but github.com itself is
+// reachable. A stale cache is the last resort; only a total failure returns
+// an error, with the concrete failure of every source attached. The lookup
+// is serialized so a panel refresh and an install never scrape the website
+// twice at once.
+func (c *LlamaCatalog) listReleases(ctx context.Context, force bool) (releaseListing, error) {
+	c.listMu.Lock()
+	defer c.listMu.Unlock()
+
+	apiManifests, apiErr := c.fetchReleases(ctx)
+	if len(apiManifests) > 0 {
+		c.storeReleaseCache(apiManifests, releaseSourceAPI)
+		return releaseListing{Manifests: apiManifests, Source: releaseSourceAPI, FetchedAt: time.Now().UTC()}, nil
+	}
+	apiDetail := releaseErrorDetail(apiErr)
+	if !force {
+		if manifests, record, ok := c.loadReleaseCache(); ok && time.Since(record.FetchedAt) < releaseCacheFreshFor {
+			return releaseListing{
+				Manifests: manifests,
+				Source:    releaseSourceCache,
+				FetchedAt: record.FetchedAt,
+				Notice:    fmt.Sprintf("GitHub API is unavailable (%s); showing the list cached at %s.", apiDetail, record.FetchedAt.Local().Format("15:04")),
+			}, nil
+		}
+	}
+	webManifests, webErr := c.fetchReleasesFromWeb(ctx)
+	if len(webManifests) > 0 {
+		c.storeReleaseCache(webManifests, releaseSourceWeb)
+		return releaseListing{
+			Manifests: webManifests,
+			Source:    releaseSourceWeb,
+			FetchedAt: time.Now().UTC(),
+			Notice:    fmt.Sprintf("Loaded from the GitHub releases page because the API is unavailable (%s).", apiDetail),
+		}, nil
+	}
+	if manifests, record, ok := c.loadReleaseCache(); ok {
+		return releaseListing{
+			Manifests: manifests,
+			Source:    releaseSourceCache,
+			FetchedAt: record.FetchedAt,
+			Notice: fmt.Sprintf("GitHub is unreachable right now (API: %s; releases page: %s). Showing the list cached %s ago.",
+				apiDetail, releaseErrorDetail(webErr), time.Since(record.FetchedAt).Round(time.Minute)),
+		}, nil
+	}
+	message := "no compatible Windows x64 llama.cpp releases are currently available"
+	if apiDetail != "" {
+		message += " — GitHub API: " + apiDetail
+	}
+	if webDetail := releaseErrorDetail(webErr); webDetail != "" {
+		message += "; GitHub releases page: " + webDetail
+	}
+	return releaseListing{}, errors.New(message)
+}
+
+// releaseErrorDetail renders a lookup failure compactly for notices and
+// errors, bounding its length so multi-source messages stay readable.
+func releaseErrorDetail(err error) string {
+	if err == nil {
+		return "unknown failure"
+	}
+	detail := strings.TrimSpace(err.Error())
+	if len(detail) > 240 {
+		detail = detail[:240] + "..."
+	}
+	return detail
+}
+
+// githubAsset and githubRelease mirror the subset of the GitHub API release
+// JSON the catalog consumes.
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+	Digest             string `json:"digest"`
+}
+
+type githubRelease struct {
+	TagName     string        `json:"tag_name"`
+	PublishedAt string        `json:"published_at"`
+	Draft       bool          `json:"draft"`
+	Prerelease  bool          `json:"prerelease"`
+	Assets      []githubAsset `json:"assets"`
+}
+
+// fetchReleases performs the live GitHub API lookup. A non-2xx response, a
+// broken body, or a listing whose releases match no expected Windows x64
+// assets all return an error carrying the concrete HTTP status, rate-limit
+// state, or matching statistics, so the fallback chain and the Runtime page
+// can explain exactly what happened instead of guessing.
+func (c *LlamaCatalog) fetchReleases(ctx context.Context) ([]releaseManifest, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, githubAPIFetchTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, c.releasesURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "Neuropipe/0.1")
+	request.Header.Set("User-Agent", outboundUserAgent)
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("fetch llama.cpp releases: %w", err)
+		return nil, fmt.Errorf("GitHub API: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("llama.cpp release lookup returned %s", response.Status)
+		return nil, fmt.Errorf("GitHub API returned %s%s", response.Status, githubRateLimitDetail(response))
 	}
-	var raw []struct {
-		TagName     string `json:"tag_name"`
-		PublishedAt string `json:"published_at"`
-		Draft       bool   `json:"draft"`
-		Prerelease  bool   `json:"prerelease"`
-		Assets      []struct {
-			Name               string `json:"name"`
-			BrowserDownloadURL string `json:"browser_download_url"`
-			Size               int64  `json:"size"`
-			Digest             string `json:"digest"`
-		} `json:"assets"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
-		return nil, err
+	var raw []githubRelease
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("GitHub API: decode response: %w", err)
 	}
 	manifests := make([]releaseManifest, 0, len(raw))
 	for _, release := range raw {
 		if release.Draft || release.Prerelease || !llamaVersionPattern.MatchString(release.TagName) {
 			continue
 		}
-		manifest := releaseManifest{release: domain.LlamaRuntimeRelease{Version: release.TagName, PublishedAt: release.PublishedAt}}
-		cudaServers := map[string]domain.RuntimeArtifact{}
-		cudaLibraries := map[string]domain.RuntimeArtifact{}
+		assets := make([]llamaAsset, 0, len(release.Assets))
 		for _, asset := range release.Assets {
-			artifact := domain.RuntimeArtifact{URL: asset.BrowserDownloadURL, Size: asset.Size, SHA256: strings.TrimPrefix(asset.Digest, "sha256:")}
-			switch {
-			case matchVersion(cpuAssetPattern, asset.Name, release.TagName):
-				manifest.release.CPU = artifact
-			case cudaAssetPattern.MatchString(asset.Name):
-				matches := cudaAssetPattern.FindStringSubmatch(asset.Name)
-				if matches[1] == release.TagName {
-					cudaServers[matches[2]] = artifact
-				}
-			case cudartAssetPattern.MatchString(asset.Name):
-				matches := cudartAssetPattern.FindStringSubmatch(asset.Name)
-				cudaLibraries[matches[1]] = artifact
-			case matchVersion(vulkanAssetPattern, asset.Name, release.TagName):
-				manifest.release.Vulkan = artifact
-			case matchVersion(hipAssetPattern, asset.Name, release.TagName):
-				manifest.release.HIP = artifact
-			}
+			assets = append(assets, llamaAsset{
+				Name:   asset.Name,
+				URL:    asset.BrowserDownloadURL,
+				Size:   asset.Size,
+				SHA256: strings.TrimPrefix(asset.Digest, "sha256:"),
+			})
 		}
-		for _, toolkit := range []string{"12.4", "13.3"} {
-			if server, serverOK := cudaServers[toolkit]; serverOK {
-				if libraries, librariesOK := cudaLibraries[toolkit]; librariesOK {
-					manifest.release.CUDA, manifest.cudart = server, libraries
-					break
-				}
-			}
-		}
-		if manifest.release.CPU.URL != "" {
+		if manifest, ok := classifyLlamaRelease(release.TagName, release.PublishedAt, assets); ok {
 			manifests = append(manifests, manifest)
 		}
 	}
 	if len(manifests) == 0 {
-		return nil, errors.New("no compatible Windows x64 llama.cpp releases are currently available")
+		return nil, fmt.Errorf("GitHub API: %s", describeUnmatchedAPIListing(raw))
 	}
+	sortReleaseManifests(manifests)
 	return manifests, nil
+}
+
+// githubRateLimitDetail appends the unauthenticated rate-limit state to a
+// failed API response, including when the quota resets.
+func githubRateLimitDetail(response *http.Response) string {
+	remaining := response.Header.Get("X-RateLimit-Remaining")
+	reset := response.Header.Get("X-RateLimit-Reset")
+	if remaining == "" && reset == "" {
+		return ""
+	}
+	detail := fmt.Sprintf(" (rate limit remaining %s", remaining)
+	if reset != "" {
+		if seconds, err := strconv.ParseInt(reset, 10, 64); err == nil {
+			detail += ", resets " + time.Unix(seconds, 0).UTC().Format("15:04 UTC")
+		}
+	}
+	return detail + ")"
+}
+
+// describeUnmatchedAPIListing explains a 2xx listing that matched nothing,
+// naming what the newest release actually shipped so asset-name drift is
+// obvious from the error alone.
+func describeUnmatchedAPIListing(raw []githubRelease) string {
+	if len(raw) == 0 {
+		return "the response contained no releases"
+	}
+	names := make([]string, 0, 3)
+	for _, asset := range raw[0].Assets {
+		if len(names) == 3 {
+			break
+		}
+		names = append(names, asset.Name)
+	}
+	detail := fmt.Sprintf("the response contained %d releases but none matched the expected Windows x64 assets", len(raw))
+	if len(names) > 0 {
+		detail += fmt.Sprintf(" (newest %s ships %s)", raw[0].TagName, strings.Join(names, ", "))
+	}
+	return detail
+}
+
+// llamaAsset is one downloadable release asset, normalized across the GitHub
+// API and the web fallback. Web-sourced assets carry no size or checksum;
+// downloads then rely on Content-Length and skip checksum verification.
+type llamaAsset struct {
+	Name   string
+	URL    string
+	Size   int64
+	SHA256 string
+}
+
+// classifyLlamaRelease maps one release's assets onto the manifest shape
+// Install consumes. A release qualifies only when it ships a Windows x64 CPU
+// build; GPU builds are optional extras.
+func classifyLlamaRelease(tag, publishedAt string, assets []llamaAsset) (releaseManifest, bool) {
+	manifest := releaseManifest{Release: domain.LlamaRuntimeRelease{Version: tag, PublishedAt: publishedAt}}
+	cudaServers := map[string]domain.RuntimeArtifact{}
+	cudaLibraries := map[string]domain.RuntimeArtifact{}
+	for _, asset := range assets {
+		artifact := domain.RuntimeArtifact{URL: asset.URL, Size: asset.Size, SHA256: asset.SHA256}
+		switch {
+		case matchVersion(cpuAssetPattern, asset.Name, tag):
+			manifest.Release.CPU = artifact
+		case cudaAssetPattern.MatchString(asset.Name):
+			if matches := cudaAssetPattern.FindStringSubmatch(asset.Name); matches[1] == tag {
+				cudaServers[matches[2]] = artifact
+			}
+		case cudartAssetPattern.MatchString(asset.Name):
+			if matches := cudartAssetPattern.FindStringSubmatch(asset.Name); len(matches) > 1 {
+				cudaLibraries[matches[1]] = artifact
+			}
+		case matchVersion(vulkanAssetPattern, asset.Name, tag):
+			manifest.Release.Vulkan = artifact
+		case matchVersion(hipAssetPattern, asset.Name, tag):
+			manifest.Release.HIP = artifact
+		}
+	}
+	manifest.Release.CUDA, manifest.Cudart = pickCudaToolkit(cudaServers, cudaLibraries)
+	if manifest.Release.CPU.URL == "" {
+		return manifest, false
+	}
+	return manifest, true
+}
+
+// pickCudaToolkit pairs a CUDA server build with its cudart library, ranking
+// toolkits by driver compatibility (preferred list first, then version
+// descending) so exactly one CUDA flavor is offered per release.
+func pickCudaToolkit(servers, libraries map[string]domain.RuntimeArtifact) (domain.RuntimeArtifact, domain.RuntimeArtifact) {
+	toolkits := make([]string, 0, len(servers))
+	for toolkit := range servers {
+		if _, ok := libraries[toolkit]; ok {
+			toolkits = append(toolkits, toolkit)
+		}
+	}
+	if len(toolkits) == 0 {
+		return domain.RuntimeArtifact{}, domain.RuntimeArtifact{}
+	}
+	sort.Slice(toolkits, func(i, j int) bool {
+		return cudaToolkitRank(toolkits[i]) > cudaToolkitRank(toolkits[j])
+	})
+	return servers[toolkits[0]], libraries[toolkits[0]]
+}
+
+// cudaToolkitRank orders CUDA toolkit versions: the preferred list wins in
+// listed order (12.4 targets the widest installed-driver base), and unknown
+// toolkits follow by version so future build names still resolve.
+func cudaToolkitRank(toolkit string) int {
+	for index, preferred := range preferredCudaToolkits {
+		if toolkit == preferred {
+			return 2000 - index
+		}
+	}
+	major, minor, ok := splitToolkitVersion(toolkit)
+	if !ok {
+		return -1
+	}
+	return major*100 + minor
+}
+
+func splitToolkitVersion(toolkit string) (int, int, bool) {
+	majorText, minorText, ok := strings.Cut(toolkit, ".")
+	if !ok {
+		return 0, 0, false
+	}
+	major, majorErr := strconv.Atoi(majorText)
+	minor, minorErr := strconv.Atoi(minorText)
+	if majorErr != nil || minorErr != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
+}
+
+// sortReleaseManifests orders listings newest-build first regardless of
+// which source produced them.
+func sortReleaseManifests(manifests []releaseManifest) {
+	sort.Slice(manifests, func(i, j int) bool {
+		return llamaBuildNumber(manifests[i].Release.Version) > llamaBuildNumber(manifests[j].Release.Version)
+	})
+}
+
+func llamaBuildNumber(version string) int {
+	number, err := strconv.Atoi(strings.TrimPrefix(version, "b"))
+	if err != nil {
+		return -1
+	}
+	return number
 }
 
 func matchVersion(pattern *regexp.Regexp, name, version string) bool {
 	matches := pattern.FindStringSubmatch(name)
 	return len(matches) > 1 && matches[1] == version
+}
+
+// releaseCacheRecord is the on-disk fallback listing of official releases.
+// Manifests are stored whole so a cached CUDA entry keeps the cudart library
+// artifact Install needs. Source records which lookup produced the listing.
+type releaseCacheRecord struct {
+	FetchedAt time.Time         `json:"fetchedAt"`
+	Source    string            `json:"source,omitempty"`
+	Manifests []releaseManifest `json:"manifests"`
+}
+
+// releaseCachePath names the cache file inside the user-owned runtime root.
+// Status() only inspects version-named directories, so the file is invisible
+// to installed-runtime scans.
+func (c *LlamaCatalog) releaseCachePath() string {
+	return filepath.Join(c.root, "releases-cache.json")
+}
+
+// storeReleaseCache persists a successful listing atomically. Failures are
+// ignored: the cache is an optimization, never a hard dependency.
+func (c *LlamaCatalog) storeReleaseCache(manifests []releaseManifest, source string) {
+	if len(manifests) == 0 {
+		return
+	}
+	if err := os.MkdirAll(c.root, 0o700); err != nil {
+		return
+	}
+	payload, err := json.Marshal(releaseCacheRecord{FetchedAt: time.Now().UTC(), Source: source, Manifests: manifests})
+	if err != nil {
+		return
+	}
+	temp, err := os.CreateTemp(c.root, ".releases-cache-*")
+	if err != nil {
+		return
+	}
+	path := temp.Name()
+	if _, err := temp.Write(payload); err != nil {
+		_ = temp.Close()
+		_ = os.Remove(path)
+		return
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(path)
+		return
+	}
+	if err := os.Rename(path, c.releaseCachePath()); err != nil {
+		_ = os.Remove(path)
+	}
+}
+
+// loadReleaseCache returns the last successful listing together with its
+// record when it is readable and structurally sound. Entries without a
+// version are dropped.
+func (c *LlamaCatalog) loadReleaseCache() ([]releaseManifest, releaseCacheRecord, bool) {
+	payload, err := os.ReadFile(c.releaseCachePath())
+	if err != nil {
+		return nil, releaseCacheRecord{}, false
+	}
+	var record releaseCacheRecord
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return nil, releaseCacheRecord{}, false
+	}
+	manifests := make([]releaseManifest, 0, len(record.Manifests))
+	for _, manifest := range record.Manifests {
+		if manifest.Release.Version == "" {
+			continue
+		}
+		manifests = append(manifests, manifest)
+	}
+	if len(manifests) == 0 {
+		return nil, releaseCacheRecord{}, false
+	}
+	return manifests, record, true
+}
+
+// fetchReleasesFromWeb lists releases exactly the way a browser does: the
+// public Atom feed provides release tags, and each release's expanded-assets
+// page provides its downloadable files. api.github.com is never touched, so
+// the listing stays live while the API is rate-limited or blocked as long as
+// github.com itself is reachable.
+func (c *LlamaCatalog) fetchReleasesFromWeb(ctx context.Context) ([]releaseManifest, error) {
+	tags, err := c.fetchReleaseTagsFromWeb(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("releases feed: %w", err)
+	}
+	if len(tags) == 0 {
+		return nil, errors.New("releases feed: no llama.cpp builds were listed")
+	}
+	type tagResult struct {
+		manifest releaseManifest
+		ok       bool
+		err      error
+	}
+	results := make([]tagResult, len(tags))
+	var group sync.WaitGroup
+	slots := make(chan struct{}, webAssetConcurrency)
+	for index := range tags {
+		group.Add(1)
+		go func(index int, tag webReleaseTag) {
+			defer group.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			manifest, ok, err := c.fetchTagAssetsFromWeb(ctx, tag)
+			results[index] = tagResult{manifest: manifest, ok: ok, err: err}
+		}(index, tags[index])
+	}
+	group.Wait()
+	manifests := make([]releaseManifest, 0, len(results))
+	var firstErr error
+	for _, result := range results {
+		if result.ok {
+			manifests = append(manifests, result.manifest)
+			continue
+		}
+		if result.err != nil && firstErr == nil {
+			firstErr = result.err
+		}
+	}
+	if len(manifests) == 0 {
+		if firstErr != nil {
+			return nil, firstErr
+		}
+		return nil, errors.New("none of the releases listed on the GitHub releases page matched the expected Windows x64 assets")
+	}
+	sortReleaseManifests(manifests)
+	return manifests, nil
+}
+
+// webReleaseTag is one release tag from the public Atom feed.
+type webReleaseTag struct {
+	Tag         string
+	PublishedAt string
+}
+
+// fetchReleaseTagsFromWeb walks the Atom feed, following ?after= pagination,
+// until the fetch limit. Partial results survive a mid-walk failure: some
+// live releases beat none.
+func (c *LlamaCatalog) fetchReleaseTagsFromWeb(ctx context.Context) ([]webReleaseTag, error) {
+	tags := make([]webReleaseTag, 0, webReleaseFetchLimit)
+	seen := map[string]bool{}
+	feedURL := c.webBase + "/releases.atom"
+	for len(tags) < webReleaseFetchLimit {
+		entries, oldest, err := c.fetchAtomFeed(ctx, feedURL)
+		if err != nil {
+			if len(tags) > 0 {
+				return tags, nil
+			}
+			return nil, err
+		}
+		added := 0
+		for _, entry := range entries {
+			if !llamaVersionPattern.MatchString(entry.Title) || seen[entry.Title] {
+				continue
+			}
+			seen[entry.Title] = true
+			tags = append(tags, webReleaseTag{Tag: entry.Title, PublishedAt: entry.Updated})
+			added++
+			if len(tags) >= webReleaseFetchLimit {
+				break
+			}
+		}
+		if oldest == "" || added == 0 {
+			break
+		}
+		feedURL = c.webBase + "/releases.atom?after=" + url.QueryEscape(oldest)
+	}
+	return tags, nil
+}
+
+// atomFeed and atomEntry parse the subset of the Atom XML the fallback
+// needs. Tags without a namespace match namespaced elements, so both the
+// real feed and plain test fixtures decode.
+type atomFeed struct {
+	Entries []atomEntry `xml:"entry"`
+}
+
+type atomEntry struct {
+	Title   string `xml:"title"`
+	Updated string `xml:"updated"`
+}
+
+// fetchAtomFeed loads one feed page and reports the oldest build tag on it,
+// which drives ?after= pagination.
+func (c *LlamaCatalog) fetchAtomFeed(ctx context.Context, feedURL string) ([]atomEntry, string, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, webRequestTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, feedURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	request.Header.Set("User-Agent", outboundUserAgent)
+	request.Header.Set("Accept", "application/atom+xml, application/xml, text/xml, */*")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode/100 != 2 {
+		return nil, "", fmt.Errorf("the feed returned %s", response.Status)
+	}
+	var feed atomFeed
+	if err := xml.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&feed); err != nil {
+		return nil, "", fmt.Errorf("parse the feed: %w", err)
+	}
+	oldest := ""
+	oldestBuild := 0
+	for _, entry := range feed.Entries {
+		if !llamaVersionPattern.MatchString(entry.Title) {
+			continue
+		}
+		if build := llamaBuildNumber(entry.Title); oldest == "" || build < oldestBuild {
+			oldest, oldestBuild = entry.Title, build
+		}
+	}
+	return feed.Entries, oldest, nil
+}
+
+// fetchTagAssetsFromWeb loads one release's expanded-assets page and
+// classifies its download links.
+func (c *LlamaCatalog) fetchTagAssetsFromWeb(ctx context.Context, tag webReleaseTag) (releaseManifest, bool, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, webRequestTimeout)
+	defer cancel()
+	assetsURL := c.webBase + "/releases/expanded_assets/" + url.PathEscape(tag.Tag)
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, assetsURL, nil)
+	if err != nil {
+		return releaseManifest{}, false, err
+	}
+	request.Header.Set("User-Agent", outboundUserAgent)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return releaseManifest{}, false, fmt.Errorf("assets for %s: %w", tag.Tag, err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode/100 != 2 {
+		return releaseManifest{}, false, fmt.Errorf("assets for %s returned %s", tag.Tag, response.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	if err != nil {
+		return releaseManifest{}, false, fmt.Errorf("assets for %s: %w", tag.Tag, err)
+	}
+	assets, err := parseExpandedAssets(body, c.webBase)
+	if err != nil {
+		return releaseManifest{}, false, fmt.Errorf("assets for %s: %w", tag.Tag, err)
+	}
+	manifest, ok := classifyLlamaRelease(tag.Tag, tag.PublishedAt, assets)
+	return manifest, ok, nil
+}
+
+// parseExpandedAssets extracts download links from the expanded-assets HTML
+// fragment github.com serves for a release:
+// <a href="/owner/repo/releases/download/<tag>/<asset>">.
+func parseExpandedAssets(body []byte, webBase string) ([]llamaAsset, error) {
+	origin := webOrigin(webBase)
+	seen := map[string]bool{}
+	assets := make([]llamaAsset, 0, 8)
+	for _, match := range expandedAssetAnchorPattern.FindAllStringSubmatch(string(body), -1) {
+		name := match[3]
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		assets = append(assets, llamaAsset{Name: name, URL: origin + match[1]})
+	}
+	if len(assets) == 0 {
+		return nil, errors.New("no download links were listed")
+	}
+	return assets, nil
+}
+
+// webOrigin reduces a repository web base to its scheme://host origin so
+// relative anchor paths become absolute download URLs.
+func webOrigin(webBase string) string {
+	parsed, err := url.Parse(webBase)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return webBase
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 // ModelCatalog discovers public GGUF model repositories and installs a selected file.
@@ -387,7 +982,56 @@ type ModelCatalog struct {
 
 // NewModelCatalog creates a model catalog rooted in user-owned app data.
 func NewModelCatalog(root string) *ModelCatalog {
-	return &ModelCatalog{root: root, http: &http.Client{Timeout: 0}, hubURL: "https://huggingface.co", avatarURL: make(map[string]string)}
+	return &ModelCatalog{root: root, http: newOutboundHTTPClient(), hubURL: "https://huggingface.co", avatarURL: make(map[string]string)}
+}
+
+// InstalledFiles lists completed GGUF files with only their filesystem
+// identity: no metadata sidecars are read and no avatar lookups are made, so
+// the call stays cheap and side-effect free. It backs surfaces that re-list
+// local models on every read, such as the managed llama.cpp provider's model
+// list in Settings.
+func (c *ModelCatalog) InstalledFiles(ctx context.Context) ([]domain.LocalModel, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(c.root); errors.Is(err, os.ErrNotExist) {
+		return []domain.LocalModel{}, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("inspect model folder: %w", err)
+	}
+
+	models := make([]domain.LocalModel, 0)
+	err := filepath.WalkDir(c.root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() || !entry.Type().IsRegular() || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("inspect model %q: %w", path, err)
+		}
+		relative, err := filepath.Rel(c.root, path)
+		if err != nil {
+			return fmt.Errorf("make model path relative: %w", err)
+		}
+		models = append(models, domain.LocalModel{
+			ID:   strings.TrimSuffix(filepath.ToSlash(relative), filepath.Ext(relative)),
+			Name: filepath.Base(path),
+			Path: path,
+			Size: info.Size(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list installed GGUF models: %w", err)
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
+	return models, nil
 }
 
 // Installed returns completed GGUF files from the configured Neuropipe model

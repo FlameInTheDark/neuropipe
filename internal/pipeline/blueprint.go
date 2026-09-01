@@ -17,10 +17,9 @@ import (
 
 const maxBlueprintLoopIterations = 10_000
 
-// Execute runs only the versioned Blueprint graph format. Legacy graphs are
-// preserved by persistence but intentionally cannot reach this interpreter.
+// Execute runs only the versioned Blueprint graph format.
 func (e *Engine) Execute(ctx context.Context, definition domain.FlowDefinition, triggerNodeID string, initial Packet) (RunResult, error) {
-	if definition.SchemaVersion != domain.GraphSchemaV2 && definition.SchemaVersion != domain.GraphSchemaV3 {
+	if definition.SchemaVersion != domain.GraphSchemaV3 {
 		return RunResult{}, ValidationError{Message: "this is a legacy pipeline. Rebuild it as a Blueprint v3 graph before running."}
 	}
 	if err := Validate(definition, e.registry); err != nil {
@@ -369,8 +368,10 @@ func (s *blueprintState) executeImpure(node domain.FlowNode, definition domain.N
 		return map[string]any{"result": cloneValues(inputs)}, nil, nil, nil
 	}
 
-	// Existing impure nodes retain their hardened implementation. Data-pin values
-	// replace their fields before the legacy action logic is invoked.
+	// Engine-implemented action nodes (HTTP, terminal, notifications, reports,
+	// chat delivery, Git, and the LLM nodes) keep their hardened executors in
+	// the engine. Data-pin values replace their fields before the engine's
+	// action dispatch is invoked.
 	config := cloneValues(definition.DefaultConfig)
 	for key, value := range configFor(node) {
 		config[key] = value
@@ -432,14 +433,14 @@ func (s *blueprintState) resolveInputs(node domain.FlowNode, definition domain.N
 		if !found && pin.Required {
 			return result, fmt.Errorf("node %q requires data pin %q", node.ID, pin.Label)
 		}
-		if found && fromConfiguration && s.definition.SchemaVersion >= domain.GraphSchemaV3 && pin.Type != nil {
+		if found && fromConfiguration && pin.Type != nil {
 			var canonicalErr error
 			value, canonicalErr = canonicalConfigurationValue(value, *pin.Type)
 			if canonicalErr != nil {
 				return result, fmt.Errorf("node %q pin %q: %w", node.ID, pin.Label, canonicalErr)
 			}
 		}
-		if found && s.definition.SchemaVersion >= domain.GraphSchemaV3 && pin.Type != nil {
+		if found && pin.Type != nil {
 			if err := typespec.ValidateValue(value, *pin.Type); err != nil {
 				return result, fmt.Errorf("node %q pin %q: %w", node.ID, pin.Label, err)
 			}
@@ -828,12 +829,8 @@ func (s *blueprintState) resolveFunctionOutputs(node domain.FlowNode, frame *blu
 		if !found {
 			return result, fmt.Errorf("function return is missing output pin %q", pin.Name)
 		}
-		if s.definition.SchemaVersion >= domain.GraphSchemaV3 {
-			if err := typespec.ValidateValue(value, functionPinType(pin)); err != nil {
-				return result, fmt.Errorf("function return pin %q: %w", pin.Name, err)
-			}
-		} else if !matchesDataType(value, pin.DataType) {
-			return result, fmt.Errorf("function return pin %q requires %s data", pin.Name, pin.DataType)
+		if err := typespec.ValidateValue(value, functionPinType(pin)); err != nil {
+			return result, fmt.Errorf("function return pin %q: %w", pin.Name, err)
 		}
 		result[pin.ID] = value
 	}

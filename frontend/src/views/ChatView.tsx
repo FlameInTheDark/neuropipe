@@ -380,7 +380,7 @@ export default function ChatView() {
     setConversations(convs);
     setPipelines(pipes);
     const provider = settings.providers.find((p) => p.id === settings.defaultProviderId);
-    setModelLabel(provider ? `${provider.name} · ${provider.model}` : null);
+    setModelLabel(provider ? (provider.model ? `${provider.name} · ${provider.model}` : provider.name) : null);
     return convs;
   }, []);
 

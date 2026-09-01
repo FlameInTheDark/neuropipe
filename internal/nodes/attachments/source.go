@@ -17,7 +17,7 @@ const (
 )
 
 // SourceOptions lists the dropdown options for a source selector. Auto keeps
-// legacy graphs fully functional because it is the value their config lacks.
+// graphs fully functional because it is the value an unconfigured node lacks.
 func SourceOptions() []domain.Option {
 	return []domain.Option{
 		{Value: "", Label: "Auto — use whatever is set"},

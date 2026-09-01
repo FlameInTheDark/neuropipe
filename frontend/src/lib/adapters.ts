@@ -178,6 +178,10 @@ const COMPLEX_FIELD_KINDS = new Set([
   "kv-string-list",
   "kv-hash-fields",
   "kv-scored-entries",
+  "pin-bindings",
+  "pin-bindings-output",
+  "array-items",
+  "map-entries",
   "image-editor",
   "embed-editor",
 ]);
@@ -247,7 +251,7 @@ export function visibleFields(fields: ConfigField[], values: Record<string, unkn
  *   - `name`       — visible when the value is truthy
  *   - `!name`      — visible when the value is falsy
  *   - `name=value` — visible when the value equals the string ("" matches
- *                    undefined too, so legacy graphs fall in the Auto bucket)
+ *                    undefined too, so unconfigured nodes fall in the Auto bucket)
  *   - `name!=value`— visible when the value differs from the string
  */
 export function matchesVisibleWhen(
@@ -629,7 +633,6 @@ export interface UiPipeline {
   version: string;
   triggers: number;
   updated: string;
-  migrationIssue?: string;
   running?: boolean;
   /** Set when the pipeline targets a remote executor. */
   executorId?: string;
@@ -646,7 +649,6 @@ export function pipelineFromBackend(p: Omit<import("./types").PipelineSummary, "
     version: p.publishedRevision > 0 ? `v${p.publishedRevision}` : i18n.t("pipelines.draft"),
     triggers: p.triggerCount ?? 0,
     updated: formatDateTime(p.updatedAt),
-    migrationIssue: p.migrationIssue,
     executorId: p.executorId || undefined,
     executorName: p.executorName || undefined,
   };

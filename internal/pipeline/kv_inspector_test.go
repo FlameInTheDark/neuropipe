@@ -25,8 +25,8 @@ func (r *kvCommandRecorder) ExecuteCommand(_ context.Context, request domain.KVC
 func TestKVSetRunsFromInspectorConfigAlone(t *testing.T) {
 	recorder := &kvCommandRecorder{}
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("set", "action:kv_set", map[string]any{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("set", "action:kv_set", map[string]any{
 			"databaseId": "db-1",
 			"key":        "user:42:name",
 			"value":      "Ada Lovelace",
@@ -52,8 +52,8 @@ func TestKVSetRunsFromInspectorConfigAlone(t *testing.T) {
 func TestKVHashSetAcceptsInspectorObject(t *testing.T) {
 	recorder := &kvCommandRecorder{}
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("hset", "action:kv_hash_set", map[string]any{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("hset", "action:kv_hash_set", map[string]any{
 			"databaseId": "db-1",
 			"key":        "user:42",
 			"fields":     map[string]any{"email": "ada@example.com"},
@@ -77,8 +77,8 @@ func TestKVHashSetAcceptsInspectorObject(t *testing.T) {
 func TestKVListPushAcceptsInspectorList(t *testing.T) {
 	recorder := &kvCommandRecorder{}
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("push", "action:kv_list_push", map[string]any{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("push", "action:kv_list_push", map[string]any{
 			"databaseId": "db-1",
 			"key":        "queue:jobs",
 			"values":     []any{"first", "second"},

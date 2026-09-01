@@ -92,11 +92,10 @@ func dataPin(id, label string, direction domain.PinDirection) domain.NodePort {
 	return domain.NodePort{ID: id, Label: label, Kind: domain.PinData, Direction: direction, DataType: domain.DataAny, Type: &typeSpec, Color: "#a1a1aa", MaxConnections: 1}
 }
 
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }
 
 func dataTypeForSpec(typeSpec domain.TypeSpec) domain.DataType {

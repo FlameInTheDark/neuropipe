@@ -3,30 +3,15 @@ import type { TypeSpec } from "@/lib/types";
 /**
  * Shared models for the KV node's visual field editors. Rows are the
  * user-facing view; payloads are what the Go side unmarshals from node
- * config. Every parser accepts both the array/object shape the new editors
- * emit and the legacy JSON/textarea strings older pipelines still carry, so
- * saved flows keep working unchanged.
+ * config. Editors always persist the structured array/object shapes.
  */
 
 /* ---------------- string lists (kv-string-list) ---------------- */
 
-/** Parses an array of values, or a legacy newline-separated textarea string. */
+/** Parses the string array the visual list editor persists. */
 export function parseKvStringList(raw: unknown): string[] {
-  let list: unknown = raw;
-  if (typeof raw === "string") {
-    try {
-      // The JSON editor persisted `["a", "b"]` as a string before this editor.
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) list = parsed;
-    } catch {
-      /* plain textarea content */
-    }
-  }
-  if (typeof list === "string") {
-    return list.split("\n").map((line) => line.trim()).filter((line) => line !== "");
-  }
-  if (!Array.isArray(list)) return [];
-  return list.map((item) => {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
     if (item === null || item === undefined) return "";
     if (typeof item === "object") {
       try {
@@ -51,18 +36,10 @@ export interface KvHashFieldRow {
   value: string;
 }
 
-/** Parses a {field: value} object or a legacy JSON string. */
+/** Parses the {field: value} object the visual editor persists. */
 export function parseKvHashFields(raw: unknown): KvHashFieldRow[] {
-  let object: unknown = raw;
-  if (typeof raw === "string") {
-    try {
-      object = JSON.parse(raw);
-    } catch {
-      return [];
-    }
-  }
-  if (!object || typeof object !== "object" || Array.isArray(object)) return [];
-  return Object.entries(object as Record<string, unknown>).map(([field, value]) => ({
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  return Object.entries(raw as Record<string, unknown>).map(([field, value]) => ({
     field,
     value: value === null || value === undefined ? "" : String(value),
   }));
@@ -86,18 +63,10 @@ export interface KvScoredEntryRow {
   score: string;
 }
 
-/** Parses an array of {member, score} objects or a legacy JSON string. */
+/** Parses the {member, score} array the visual editor persists. */
 export function parseKvScoredEntries(raw: unknown): KvScoredEntryRow[] {
-  let list: unknown = raw;
-  if (typeof raw === "string") {
-    try {
-      list = JSON.parse(raw);
-    } catch {
-      return [];
-    }
-  }
-  if (!Array.isArray(list)) return [];
-  return list
+  if (!Array.isArray(raw)) return [];
+  return raw
     .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
     .map((item) => ({
       member: item.member === null || item.member === undefined ? "" : String(item.member),
@@ -166,18 +135,10 @@ function kindFromSpec(spec: TypeSpec | undefined): KvArgKind {
   }
 }
 
-/** Parses the persisted KVArgument contract (array or JSON string). */
+/** Parses the persisted KVArgument contract. */
 export function parseKvArguments(raw: unknown): KvArgumentRow[] {
-  let list: unknown = raw;
-  if (typeof raw === "string") {
-    try {
-      list = JSON.parse(raw);
-    } catch {
-      return [];
-    }
-  }
-  if (!Array.isArray(list)) return [];
-  return list
+  if (!Array.isArray(raw)) return [];
+  return raw
     .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
     .map((p) => ({
       name: typeof p.name === "string" ? p.name : typeof p.id === "string" ? p.id : "",

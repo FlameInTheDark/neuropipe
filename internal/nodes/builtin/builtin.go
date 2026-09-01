@@ -7,10 +7,17 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/code/javascript"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arrayappend"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arrayget"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arrayreverse"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arrayslice"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arraysort"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arraysplit"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/arrayunique"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/base64decode"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/base64encode"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/base64ext"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/breakobject"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/buildarray"
+	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/buildmap"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/buildobject"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/cast"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/chathistory"
@@ -31,7 +38,6 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexmatch"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexreplace"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/regexsplit"
-	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/reroute"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/data/typeassert"
 	uuidnode "github.com/FlameInTheDark/neuropipe/internal/nodes/data/uuid"
 	kvcommand "github.com/FlameInTheDark/neuropipe/internal/nodes/database/kv/command"
@@ -54,6 +60,8 @@ import (
 	discordreplycommand "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/replycommand"
 	discordsenddm "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/senddm"
 	discordsendmessage "github.com/FlameInTheDark/neuropipe/internal/nodes/discord/sendmessage"
+	docxnodes "github.com/FlameInTheDark/neuropipe/internal/nodes/documents/docx"
+	excelnodes "github.com/FlameInTheDark/neuropipe/internal/nodes/documents/excel"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/branch"
 	breaknode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/break"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/doonce"
@@ -62,7 +70,6 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/forloop"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/gate"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/multigate"
-	flowreroute "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/reroute"
 	returnnode "github.com/FlameInTheDark/neuropipe/internal/nodes/flow/return"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/sequence"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes/flow/setglobalvariable"
@@ -156,6 +163,8 @@ func RegisterAll(registrar nodes.Registrar) error {
 		formattext.Register,
 		getfield.Register,
 		buildobject.Register,
+		buildarray.Register,
+		buildmap.Register,
 		breakobject.Register,
 		cast.Register,
 		typeassert.Register,
@@ -167,9 +176,13 @@ func RegisterAll(registrar nodes.Registrar) error {
 		getvariable.Register,
 		getglobalvariable.Register,
 		chathistory.Register,
-		reroute.Register,
 		arrayappend.Register,
 		arrayget.Register,
+		arrayreverse.Register,
+		arrayslice.Register,
+		arraysort.Register,
+		arraysplit.Register,
+		arrayunique.Register,
 		base64encode.Register,
 		base64decode.Register,
 		gettype.Register,
@@ -189,7 +202,6 @@ func RegisterAll(registrar nodes.Registrar) error {
 		gate.Register,
 		flipflop.Register,
 		multigate.Register,
-		flowreroute.Register,
 		breaknode.Register,
 		setvariable.Register,
 		setglobalvariable.Register,
@@ -238,6 +250,20 @@ func RegisterAll(registrar nodes.Registrar) error {
 		endswith.Register,
 		indexof.Register,
 		substring.Register,
+		// Documents
+		docxnodes.RegisterReadText,
+		docxnodes.RegisterCreate,
+		docxnodes.RegisterTemplateFill,
+		docxnodes.RegisterAppendText,
+		docxnodes.RegisterReplaceText,
+		excelnodes.RegisterReadRows,
+		excelnodes.RegisterAppendRows,
+		excelnodes.RegisterUpdateRow,
+		excelnodes.RegisterDeleteRow,
+		excelnodes.RegisterReadCell,
+		excelnodes.RegisterWriteCell,
+		excelnodes.RegisterListWorksheets,
+		excelnodes.RegisterAddWorksheet,
 		// Archive
 		zipfiles.Register,
 		unzipfiles.Register,

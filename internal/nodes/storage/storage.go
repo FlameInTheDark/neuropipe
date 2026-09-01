@@ -164,16 +164,11 @@ func Base64Text(text string) ([]byte, error) {
 	return decoded, nil
 }
 
-// configValue reads one key from a flow node's configuration. The editor
-// stores config under Data["config"]; resolvers must accept both shapes so
-// hand-written graphs keep resolving.
+// configValue reads one key from a flow node's configuration. Blueprint v3
+// stores config under Data["config"].
 func configValue(node domain.FlowNode, key string) any {
 	config := map[string]any{}
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		config = value
-	} else if len(node.Data) > 0 {
-		config = node.Data
-	}
+	config, _ = node.Data["config"].(map[string]any)
 	return config[key]
 }
 

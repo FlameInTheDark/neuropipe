@@ -2,9 +2,9 @@ package catalog
 
 import "github.com/FlameInTheDark/neuropipe/internal/domain"
 
-// blueprintBuiltins are the explicit value and control nodes used by graph v2.
-// Existing first-party nodes are also normalised into Blueprint pins, but these
-// nodes make common data and control-flow work discoverable without templates.
+// blueprintBuiltins are the chat and function boundary nodes defined by the
+// catalog itself. Existing first-party nodes are normalised into Blueprint
+// pins, but these nodes make chat delivery and function boundaries discoverable.
 func blueprintBuiltins() []domain.NodeDefinition {
 	definitions := blueprintChatBuiltins()
 	return append(definitions, blueprintFunctionBuiltins()...)
@@ -30,8 +30,8 @@ func dataPin(id, label string, direction domain.PinDirection, dataType domain.Da
 	return domain.NodePort{ID: id, Label: label, Kind: domain.PinData, Direction: direction, DataType: dataType, Type: typeSpecForDataType(dataType), Color: dataColor(dataType), MaxConnections: 1}
 }
 
-// typeSpecForDataType gives existing built-ins a V3 contract while their
-// persisted DataType remains available for v2 migration diagnostics.
+// typeSpecForDataType gives catalog built-ins a wire contract from their
+// persisted DataType display label.
 func typeSpecForDataType(dataType domain.DataType) *domain.TypeSpec {
 	var spec domain.TypeSpec
 	switch dataType {

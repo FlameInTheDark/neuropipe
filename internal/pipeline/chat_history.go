@@ -11,22 +11,17 @@ import (
 // its model-mode conversations, so pipeline agents see the same context window.
 const agentChatHistoryLimit = 200
 
-// ChatMode selects how an agent receives its conversation. Graphs saved with
-// the earlier Use-chat-history toggle keep working through pullChatHistory.
+// ChatMode selects how an agent receives its conversation.
 const (
 	chatModeMessage = "message"
 	chatModeHistory = "history"
 )
 
 // chatHistoryMode reports whether the agent continues a chat conversation
-// instead of answering one composed message. The default one-message value
-// never masks the earlier toggle, so graphs saved with pullChatHistory
-// enabled keep their behaviour until the mode is re-saved.
+// instead of answering one composed message.
 func chatHistoryMode(config map[string]any) bool {
-	if mode, ok := config["chatMode"].(string); ok && mode == chatModeHistory {
-		return true
-	}
-	return boolValue(config["pullChatHistory"])
+	mode, ok := config["chatMode"].(string)
+	return ok && mode == chatModeHistory
 }
 
 // agentChatHistory reads the conversation a chat-mode agent continues. The

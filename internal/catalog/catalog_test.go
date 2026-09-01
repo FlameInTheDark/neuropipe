@@ -337,3 +337,55 @@ func TestLLMChatStatusToggleStaysConfigurationScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestLLMNodesExposeProviderAndModelSelection(t *testing.T) {
+	registry := New()
+	for _, nodeType := range []string{"llm:prompt", "llm:extract", "llm:boolean", "llm:choice", "llm:summarize", "llm:agent", "llm:coding_agent"} {
+		definition, ok := registry.Get(nodeType)
+		if !ok {
+			t.Fatalf("%s definition is missing", nodeType)
+		}
+		providerField := false
+		modelField := false
+		for _, configField := range definition.Fields {
+			if configField.Name == "providerId" {
+				providerField = true
+				if configField.Kind != "llm-provider" {
+					t.Fatalf("%s providerId kind = %q, want llm-provider", nodeType, configField.Kind)
+				}
+			}
+			if configField.Name == "model" {
+				modelField = true
+				if configField.Kind != "llm-model" {
+					t.Fatalf("%s model kind = %q, want llm-model", nodeType, configField.Kind)
+				}
+			}
+		}
+		if !providerField || !modelField {
+			t.Fatalf("%s is missing the provider or model selection field", nodeType)
+		}
+		modelPin := false
+		for _, input := range definition.Inputs {
+			if input.ID == "providerId" {
+				t.Fatalf("%s leaked provider selection as a data pin", nodeType)
+			}
+			if input.ID == "model" {
+				modelPin = true
+				if input.Required || input.DataType != domain.DataText {
+					t.Fatalf("%s model pin = %#v, want optional Text input", nodeType, input)
+				}
+			}
+		}
+		// The model pin stays available so legacy graphs with a wired model
+		// override keep validating, and dynamic model routing keeps working.
+		if !modelPin {
+			t.Fatalf("%s lost its model input pin", nodeType)
+		}
+		if value, exists := definition.DefaultConfig["providerId"]; !exists || value != "" {
+			t.Fatalf("%s default providerId = %#v, want an empty default that follows the app default provider", nodeType, value)
+		}
+		if value, exists := definition.DefaultConfig["model"]; !exists || value != "" {
+			t.Fatalf("%s default model = %#v, want an empty default that follows the provider default model", nodeType, value)
+		}
+	}
+}

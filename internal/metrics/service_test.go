@@ -17,7 +17,7 @@ func TestOverviewRecordsExecutionQueueTimingAndPriceEstimate(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
-	pipeline, err := store.CreatePipeline(ctx, "Measured pipeline", "", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2})
+	pipeline, err := store.CreatePipeline(ctx, "Measured pipeline", "", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3})
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}
@@ -60,7 +60,7 @@ func TestPurgeCompactsDetailedFactsIntoDailyRollups(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
-	pipeline, err := store.CreatePipeline(ctx, "Historical pipeline", "", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2})
+	pipeline, err := store.CreatePipeline(ctx, "Historical pipeline", "", domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3})
 	if err != nil {
 		t.Fatalf("CreatePipeline() error = %v", err)
 	}

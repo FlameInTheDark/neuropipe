@@ -44,7 +44,7 @@ func (s *blueprintState) executeConnectedToolAgent(node domain.FlowNode, config,
 	}
 
 	// A wired data pin always overrides the inspector value, matching every
-	// other impure node (see the legacy merge in blueprint.go).
+	// other impure node (see the config merge in blueprint.go).
 	merged := cloneValues(config)
 	for key, value := range inputs {
 		merged[key] = value
@@ -85,10 +85,11 @@ func (s *blueprintState) executeConnectedToolAgent(node domain.FlowNode, config,
 			return nil, err
 		}
 		response, err := assistant.Converse(s.ctx, domain.AssistantChatRequest{
-			Messages: messages,
-			Tools:    definitions,
-			Model:    text(config, "model"),
-			Metrics:  s.engine.llmMetricContext(node),
+			Messages:   messages,
+			Tools:      definitions,
+			ProviderID: text(merged, "providerId"),
+			Model:      text(merged, "model"),
+			Metrics:    s.engine.llmMetricContext(node),
 		})
 		if err != nil {
 			return nil, err

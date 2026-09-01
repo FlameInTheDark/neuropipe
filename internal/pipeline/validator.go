@@ -10,11 +10,11 @@ import (
 )
 
 // Validate ensures a supported Blueprint graph has safe control flow and typed
-// pin connections before it is run or published. V3 adds strict TypeSpec
-// contracts; V2 remains readable until its persistence migration runs.
+// pin connections before it is run or published. V3's strict TypeSpec
+// contracts are always enforced.
 func Validate(definition domain.FlowDefinition, registry *catalog.Registry) error {
-	if definition.SchemaVersion != domain.GraphSchemaV2 && definition.SchemaVersion != domain.GraphSchemaV3 {
-		return ValidationError{Message: "legacy graph: rebuild this pipeline with Blueprint v3 pins"}
+	if definition.SchemaVersion != domain.GraphSchemaV3 {
+		return ValidationError{Message: "unsupported graph schema: rebuild this pipeline as a Blueprint v3 graph"}
 	}
 	if len(definition.Nodes) == 0 {
 		return ValidationError{Message: "a pipeline needs at least one node"}
@@ -29,11 +29,10 @@ func Validate(definition domain.FlowDefinition, registry *catalog.Registry) erro
 		if _, exists := nodes[node.ID]; exists {
 			return ValidationError{Message: fmt.Sprintf("node ID %q is duplicated", node.ID)}
 		}
-		// Reroutes are presentation-only wire waypoints in current Blueprint
-		// graphs. V2 registrations remain solely to execute immutable legacy
-		// revisions until they are reopened and migrated.
-		if definition.SchemaVersion >= domain.GraphSchemaV3 && (node.Type == "flow:reroute" || node.Type == "data:reroute") {
-			return ValidationError{Message: fmt.Sprintf("node %q is a legacy reroute; reopen the draft to migrate it to a wire waypoint", node.ID)}
+		// Reroutes are presentation-only wire waypoints in Blueprint graphs;
+		// the node form is not a valid V3 node.
+		if node.Type == "flow:reroute" || node.Type == "data:reroute" {
+			return ValidationError{Message: fmt.Sprintf("node %q is a legacy reroute; convert it to a wire waypoint", node.ID)}
 		}
 		definition, exists := registry.Get(node.Type)
 		if !exists {
@@ -85,7 +84,7 @@ func Validate(definition domain.FlowDefinition, registry *catalog.Registry) erro
 		if sourcePin.Kind != kind || targetPin.Kind != kind {
 			return ValidationError{Message: fmt.Sprintf("edge %q must connect matching %s pins", edge.ID, kind)}
 		}
-		if kind == domain.PinData && !pinsCompatibleForSchema(definition.SchemaVersion, sourcePin, targetPin) {
+		if kind == domain.PinData && !pinsCompatible(sourcePin, targetPin) {
 			return ValidationError{Message: fmt.Sprintf("edge %q cannot connect %s data to %s", edge.ID, pinTypeName(sourcePin), pinTypeName(targetPin))}
 		}
 		key := edge.Target + ":" + targetHandle
@@ -132,13 +131,6 @@ func typesCompatible(source, target domain.DataType) bool {
 func pinsCompatible(source, target domain.NodePort) bool {
 	if source.Type != nil && target.Type != nil {
 		return typespec.Assignable(*source.Type, *target.Type)
-	}
-	return typesCompatible(source.DataType, target.DataType)
-}
-
-func pinsCompatibleForSchema(schemaVersion int, source, target domain.NodePort) bool {
-	if schemaVersion >= domain.GraphSchemaV3 {
-		return pinsCompatible(source, target)
 	}
 	return typesCompatible(source.DataType, target.DataType)
 }

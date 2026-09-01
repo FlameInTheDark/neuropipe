@@ -26,7 +26,7 @@ func Evaluate(_ context.Context, invocation nodes.Invocation, _ nodes.Runtime) (
 	return map[string]any{"value": Query(invocation.Inputs["source"], path)}, nil
 }
 
-// ValueAt resolves a legacy dotted path through graph-safe structured
+// ValueAt resolves a plain dotted path through graph-safe structured
 // values: each dot-separated part is an object key or, failing that, a
 // non-negative list index. JSONPath expressions live in path.go; Query
 // routes between the two by shape, so paths like `$.items[0]` never reach

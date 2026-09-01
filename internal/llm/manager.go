@@ -30,9 +30,22 @@ type UsageRecorder interface {
 // ManagerOption adds optional infrastructure without widening provider calls.
 type ManagerOption func(*Manager)
 
+// LlamaRouter resolves a live endpoint, plus the canonical model name being
+// served, for Neuropipe's managed llama.cpp runtime. Routers may start or
+// switch the local llama-server process, so a call can take as long as
+// loading a model file.
+type LlamaRouter func(ctx context.Context, model string) (endpoint string, canonical string, err error)
+
 // WithUsageRecorder enables local LLM observability.
 func WithUsageRecorder(recorder UsageRecorder) ManagerOption {
 	return func(manager *Manager) { manager.usage = recorder }
+}
+
+// WithLlamaRouter routes managed llama.cpp provider requests through the
+// app-owned runtime instead of a persisted loopback URL. Without a router the
+// provider fails fast with an actionable message when its endpoint is empty.
+func WithLlamaRouter(router LlamaRouter) ManagerOption {
+	return func(manager *Manager) { manager.llamaRouter = router }
 }
 
 // ModelInfo is the provider-neutral model picker item.
@@ -49,6 +62,9 @@ type Manager struct {
 	http     *http.Client
 	limiter  *limiter
 	usage    UsageRecorder
+	// llamaRouter, when installed, owns the managed llama.cpp endpoint and
+	// serves requests through the runtime started by the application.
+	llamaRouter LlamaRouter
 }
 
 // NewManager creates a provider manager from persisted settings.
@@ -75,7 +91,8 @@ func (m *Manager) Providers() []domain.ProviderConfig {
 	return append([]domain.ProviderConfig(nil), m.settings.Providers...)
 }
 
-// Chat implements pipeline.LLMRunner using the configured default provider.
+// Chat implements pipeline.LLMRunner using the request's provider, falling
+// back to the configured default provider.
 func (m *Manager) Chat(ctx context.Context, request pipeline.ChatRequest) (response pipeline.ChatResponse, err error) {
 	m.mu.RLock()
 	limiter := m.limiter
@@ -86,19 +103,20 @@ func (m *Manager) Chat(ctx context.Context, request pipeline.ChatRequest) (respo
 	}
 	defer limiter.Release()
 	queueWait := time.Since(queued)
-	provider, err := m.activeProvider()
+	provider, err := m.resolveProvider(request.ProviderID)
 	if err != nil {
 		return pipeline.ChatResponse{}, err
 	}
-	model := strings.TrimSpace(request.Model)
-	if model == "" {
-		model = strings.TrimSpace(provider.Model)
+	model, err := m.resolveModel(provider, request.Model)
+	if err != nil {
+		return pipeline.ChatResponse{}, err
 	}
-	if model == "" {
-		return pipeline.ChatResponse{}, fmt.Errorf("select a default model for %s in Settings", provider.Name)
-	}
-	if provider.Kind == domain.ProviderLlamaCPP && strings.TrimSpace(provider.BaseURL) == "" {
-		return pipeline.ChatResponse{}, fmt.Errorf("start managed llama.cpp in Settings before running AI nodes")
+	if provider.Kind == domain.ProviderLlamaCPP {
+		endpoint, canonical, err := m.routeLlama(ctx, provider, model)
+		if err != nil {
+			return pipeline.ChatResponse{}, err
+		}
+		provider.BaseURL, model = endpoint, canonical
 	}
 	started := time.Now()
 	switch provider.Kind {
@@ -106,6 +124,8 @@ func (m *Manager) Chat(ctx context.Context, request pipeline.ChatRequest) (respo
 		response, err = m.chatOllama(ctx, provider, model, request)
 	case domain.ProviderLlamaCPP, domain.ProviderOpenAICompatible:
 		response, err = m.chatOpenAICompatible(ctx, provider, model, request)
+	case domain.ProviderAnthropic:
+		response, err = m.chatAnthropic(ctx, provider, model, request)
 	default:
 		err = fmt.Errorf("unsupported provider kind %q", provider.Kind)
 	}
@@ -127,19 +147,20 @@ func (m *Manager) Converse(ctx context.Context, request domain.AssistantChatRequ
 	}
 	defer limiter.Release()
 	queueWait := time.Since(queued)
-	provider, err := m.activeProvider()
+	provider, err := m.resolveProvider(request.ProviderID)
 	if err != nil {
 		return domain.AssistantChatResponse{}, err
 	}
-	model := strings.TrimSpace(request.Model)
-	if model == "" {
-		model = strings.TrimSpace(provider.Model)
+	model, err := m.resolveModel(provider, request.Model)
+	if err != nil {
+		return domain.AssistantChatResponse{}, err
 	}
-	if model == "" {
-		return domain.AssistantChatResponse{}, fmt.Errorf("select a default model for %s in Settings", provider.Name)
-	}
-	if provider.Kind == domain.ProviderLlamaCPP && strings.TrimSpace(provider.BaseURL) == "" {
-		return domain.AssistantChatResponse{}, fmt.Errorf("start managed llama.cpp in Settings before chatting")
+	if provider.Kind == domain.ProviderLlamaCPP {
+		endpoint, canonical, err := m.routeLlama(ctx, provider, model)
+		if err != nil {
+			return domain.AssistantChatResponse{}, err
+		}
+		provider.BaseURL, model = endpoint, canonical
 	}
 	started := time.Now()
 	switch provider.Kind {
@@ -147,6 +168,8 @@ func (m *Manager) Converse(ctx context.Context, request domain.AssistantChatRequ
 		response, err = m.converseOllama(ctx, provider, model, request)
 	case domain.ProviderLlamaCPP, domain.ProviderOpenAICompatible:
 		response, err = m.converseOpenAICompatible(ctx, provider, model, request)
+	case domain.ProviderAnthropic:
+		response, err = m.converseAnthropic(ctx, provider, model, request)
 	default:
 		err = fmt.Errorf("unsupported provider kind %q", provider.Kind)
 	}
@@ -186,11 +209,67 @@ func (m *Manager) ListModels(ctx context.Context, providerID string) ([]ModelInf
 		return m.listOllama(ctx, provider)
 	case domain.ProviderLlamaCPP, domain.ProviderOpenAICompatible:
 		return m.listOpenAICompatible(ctx, provider)
+	case domain.ProviderAnthropic:
+		return m.listAnthropic(ctx, provider)
 	default:
 		return nil, fmt.Errorf("unsupported provider kind %q", provider.Kind)
 	}
 }
 
+// resolveProvider returns the provider for one call: an explicit ID selects
+// that provider, an empty ID falls back to the configured default. Both paths
+// require the provider to exist and be enabled so a misrouted node fails fast
+// with an actionable message.
+func (m *Manager) resolveProvider(providerID string) (domain.ProviderConfig, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	id := strings.TrimSpace(providerID)
+	if id == "" {
+		id = strings.TrimSpace(m.settings.DefaultProviderID)
+	}
+	for _, provider := range m.settings.Providers {
+		if provider.ID == id {
+			if !provider.Enabled {
+				return domain.ProviderConfig{}, fmt.Errorf("provider %s is disabled in Settings", provider.Name)
+			}
+			return provider, nil
+		}
+	}
+	if strings.TrimSpace(providerID) == "" {
+		return domain.ProviderConfig{}, fmt.Errorf("choose an enabled default LLM provider in Settings")
+	}
+	return domain.ProviderConfig{}, fmt.Errorf("LLM provider %q is not configured; pick a configured provider on the node", providerID)
+}
+
+// routeLlama resolves the managed llama.cpp endpoint for one request. The
+// installed router may start the local llama-server process or switch it to
+// the requested model; without a router the provider must already carry a
+// live persisted endpoint.
+func (m *Manager) routeLlama(ctx context.Context, provider domain.ProviderConfig, model string) (string, string, error) {
+	if m.llamaRouter == nil {
+		if strings.TrimSpace(provider.BaseURL) == "" {
+			return "", "", fmt.Errorf("start managed llama.cpp in Settings before running AI nodes")
+		}
+		return provider.BaseURL, model, nil
+	}
+	return m.llamaRouter(ctx, model)
+}
+
+// resolveModel applies the model precedence: an explicit node model first,
+// then the provider's configured default model.
+func (m *Manager) resolveModel(provider domain.ProviderConfig, requested string) (string, error) {
+	model := strings.TrimSpace(requested)
+	if model == "" {
+		model = strings.TrimSpace(provider.Model)
+	}
+	if model == "" {
+		return "", fmt.Errorf("select a default model for %s in Settings", provider.Name)
+	}
+	return model, nil
+}
+
+// activeProvider returns the configured default provider. Retained for the
+// settings surface that reports the active selection.
 func (m *Manager) activeProvider() (domain.ProviderConfig, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -219,6 +298,9 @@ func (m *Manager) chatOllama(ctx context.Context, provider domain.ProviderConfig
 	if request.Schema != nil || len(request.ToolChoices) > 0 {
 		payload["format"] = "json"
 	}
+	if options := ollamaOptions(provider.EffectiveParameters(model)); len(options) > 0 {
+		payload["options"] = options
+	}
 	var response struct {
 		Response        string `json:"response"`
 		Error           string `json:"error"`
@@ -243,6 +325,7 @@ func (m *Manager) chatOpenAICompatible(ctx context.Context, provider domain.Prov
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
 		"temperature": 0.2,
 	}
+	applyOpenAIParameters(payload, provider.EffectiveParameters(model))
 	if request.Schema != nil || len(request.ToolChoices) > 0 {
 		payload["response_format"] = map[string]string{"type": "json_object"}
 	}
@@ -277,6 +360,7 @@ func (m *Manager) chatOpenAICompatible(ctx context.Context, provider domain.Prov
 
 func (m *Manager) converseOpenAICompatible(ctx context.Context, provider domain.ProviderConfig, model string, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
 	payload := map[string]any{"model": model, "messages": assistantMessages(request.Messages), "temperature": 0.2}
+	applyOpenAIParameters(payload, provider.EffectiveParameters(model))
 	if len(request.Tools) > 0 {
 		payload["tools"] = openAITools(request.Tools)
 	}
@@ -320,6 +404,9 @@ func (m *Manager) converseOpenAICompatible(ctx context.Context, provider domain.
 
 func (m *Manager) converseOllama(ctx context.Context, provider domain.ProviderConfig, model string, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
 	payload := map[string]any{"model": model, "messages": assistantMessages(request.Messages), "stream": false}
+	if options := ollamaOptions(provider.EffectiveParameters(model)); len(options) > 0 {
+		payload["options"] = options
+	}
 	if len(request.Tools) > 0 {
 		payload["tools"] = openAITools(request.Tools)
 	}
@@ -357,6 +444,49 @@ func (m *Manager) converseOllama(ctx context.Context, provider domain.ProviderCo
 
 func usageFromCounts(prompt, completion int64) domain.LLMUsage {
 	return domain.LLMUsage{PromptTokens: prompt, CompletionTokens: completion, TokensReported: prompt > 0 || completion > 0}
+}
+
+// ollamaOptions maps configured generation parameters to Ollama's options
+// object. Only explicitly configured fields are sent so Ollama keeps its own
+// defaults for the rest.
+func ollamaOptions(params domain.GenerationParameters) map[string]any {
+	options := map[string]any{}
+	if params.Temperature != nil {
+		options["temperature"] = *params.Temperature
+	}
+	if params.TopK != nil {
+		options["top_k"] = *params.TopK
+	}
+	if params.TopP != nil {
+		options["top_p"] = *params.TopP
+	}
+	if params.MaxTokens != nil {
+		options["num_predict"] = *params.MaxTokens
+	}
+	if params.ContextSize != nil {
+		options["num_ctx"] = *params.ContextSize
+	}
+	return options
+}
+
+// applyOpenAIParameters writes configured generation parameters into an
+// OpenAI-compatible request payload. Only explicitly configured fields are
+// sent: a configured temperature replaces the low-variance 0.2 default, and
+// top_k / top_p / max_tokens appear only when the user set them, because
+// hosted OpenAI endpoints reject parameters they do not implement.
+func applyOpenAIParameters(payload map[string]any, params domain.GenerationParameters) {
+	if params.Temperature != nil {
+		payload["temperature"] = *params.Temperature
+	}
+	if params.TopP != nil {
+		payload["top_p"] = *params.TopP
+	}
+	if params.TopK != nil {
+		payload["top_k"] = *params.TopK
+	}
+	if params.MaxTokens != nil {
+		payload["max_tokens"] = *params.MaxTokens
+	}
 }
 
 func (m *Manager) completeUsage(provider domain.ProviderConfig, model string, context domain.LLMMetricContext, usage domain.LLMUsage, queueWait, duration time.Duration, err error) domain.LLMUsage {
@@ -522,7 +652,12 @@ func (m *Manager) postJSON(ctx context.Context, provider domain.ProviderConfig, 
 	return nil
 }
 
+// authorize attaches provider-kind-appropriate credentials. OpenAI-compatible
+// endpoints use bearer auth; Anthropic uses its x-api-key header pair.
 func (m *Manager) authorize(request *http.Request, provider domain.ProviderConfig) error {
+	if provider.Kind == domain.ProviderAnthropic {
+		return anthropicAuthorize(request, provider, m.secrets)
+	}
 	if provider.APIKeyRef == "" {
 		return nil
 	}

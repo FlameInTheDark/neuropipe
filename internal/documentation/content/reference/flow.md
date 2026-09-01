@@ -36,9 +36,9 @@ Cases are evaluated from top to bottom. The first true comparison wins; no later
 
 **Purpose:** retain local control state. **Pins:** each accepts an exec pulse; Gate also has Open/Close/Toggle, Do Once/MultiGate have Reset. **Configure:** Gate Start Open and MultiGate Loop. **Produces:** the allowed output. **Capabilities:** none. **Failure:** state resets at the run boundary. **Example:** Button Trigger → Do Once → HTTP Request.
 
-## Flow Reroute, Break, and Return
+## Break and Return
 
-**Purpose:** reroute an exec wire, break the innermost loop, or finish a function/pipeline. **Pins:** exec input and, for Reroute, Then output. **Configure:** none. **Produces:** control flow only. **Capabilities:** none. **Failure:** Break outside a loop is an execution error. **Example:** Branch False → Break inside For Each.
+**Purpose:** break the innermost loop or finish a function/pipeline. **Pins:** exec input. **Configure:** none. **Produces:** control flow only. **Capabilities:** none. **Failure:** Break outside a loop is an execution error. **Example:** Branch False → Break inside For Each. Long exec wires can be reshaped with drag waypoints directly on the wire.
 
 ## Set Variable
 

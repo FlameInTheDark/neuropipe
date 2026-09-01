@@ -205,38 +205,34 @@ func builtins() []domain.NodeDefinition {
 			[]domain.ConfigField{field("title", "Report title", "string", "Pipeline report", true), field("tags", "Tags", "tags", "Daily, Operations", false), field("markdown", "Markdown", "textarea", "# Report", true)}, map[string]any{}),
 		node("action:git", "Local", "Git", "Run a focused local Git operation in an approved repository.", "git-branch", "#c4b5fd", flowInput, flowOutput,
 			[]domain.ConfigField{selectField("operation", "Operation", []string{"status", "diff", "log", "fetch", "pull"}), field("repository", "Repository", "string", "C:\\Work\\repo", true)}, map[string]any{"operation": "status"}, domain.CapabilityGit),
-		node("action:subpipeline", "Actions", "Run Pipeline", "Run another published pipeline with the current packet.", "workflow", "#60a5fa",
-			append(append([]domain.NodePort{}, flowInput...), domain.NodePort{ID: "pipelineId", Label: "Pipeline ID", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataText, Color: "#e879f9", MaxConnections: 1}),
-			flowOutput,
-			[]domain.ConfigField{{Name: "pipelineId", Label: "Pipeline", Kind: "pipeline-select", Required: true, Dynamic: "pipelines"}}, map[string]any{}),
 		pipelinesListNode(),
 
 		node("llm:prompt", "AI", "LLM Prompt", "Generate text with the selected provider and model.", "sparkles", "#f472b6", flowInput, flowOutput,
-			[]domain.ConfigField{field("prompt", "Prompt", "textarea", "Summarise the connected input.", true), field("model", "Model override", "string", "", false), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"updateChatStatus": false, "chatRunId": ""}),
+			[]domain.ConfigField{field("prompt", "Prompt", "textarea", "Summarise the connected input.", true), llmProviderField(), llmModelField(), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"providerId": "", "model": "", "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:extract", "AI", "Structured Extract", "Extract schema-shaped JSON from the current packet.", "braces", "#f472b6", flowInput, flowOutput,
-			[]domain.ConfigField{field("prompt", "Instructions", "textarea", "Extract the requested fields.", true), schemaField("schema", "Fields to extract"), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"schema": objectSchema(), "updateChatStatus": false, "chatRunId": ""}),
+			[]domain.ConfigField{field("prompt", "Instructions", "textarea", "Extract the requested fields.", true), llmProviderField(), llmModelField(), schemaField("schema", "Fields to extract"), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"providerId": "", "model": "", "schema": objectSchema(), "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:boolean", "AI", "LLM Boolean Router", "Call a constrained route function and emit exactly one decision branch.", "circle-help", "#f472b6", flowInput, []domain.NodePort{port("true", "True", "flow", "#34d399"), port("false", "False", "flow", "#f87171"), port("error", "Error", "flow", "#fb7185")},
-			[]domain.ConfigField{field("prompt", "Question", "textarea", "Is the connected input ready?", true), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"updateChatStatus": false, "chatRunId": ""}),
+			[]domain.ConfigField{field("prompt", "Question", "textarea", "Is the connected input ready?", true), llmProviderField(), llmModelField(), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"providerId": "", "model": "", "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:choice", "AI", "LLM Choice Router", "Choose one configured option through constrained structured output.", "list-checks", "#f472b6", flowInput, []domain.NodePort{port("error", "Error", "flow", "#fb7185")},
-			[]domain.ConfigField{field("prompt", "Question", "textarea", "Choose the best option.", true), routeOptionsField("options", "Options"), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"options": routeOptions("option-a", "Option A", "option-b", "Option B"), "updateChatStatus": false, "chatRunId": ""}),
+			[]domain.ConfigField{field("prompt", "Question", "textarea", "Choose the best option.", true), llmProviderField(), llmModelField(), routeOptionsField("options", "Options"), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"providerId": "", "model": "", "options": routeOptions("option-a", "Option A", "option-b", "Option B"), "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:summarize", "AI", "Summarize", "Create a concise summary of input data.", "align-left", "#f472b6", flowInput, flowOutput,
-			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Summarise the input for a busy reader.", true), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"updateChatStatus": false, "chatRunId": ""}),
+			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Summarise the input for a busy reader.", true), llmProviderField(), llmModelField(), chatStatusToggleField(), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"providerId": "", "model": "", "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:agent", "AI", "Agent", "A tool-using agent with only explicitly connected tools.", "bot", "#f472b6", append(append([]domain.NodePort{}, flowInput...), llmToolInput), flowOutput,
-			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Complete the task using the connected tools.", true), chatModeField(), field("maxTurns", "Maximum turns", "number", "8", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"maxTurns": 8.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}),
+			[]domain.ConfigField{field("instructions", "Instructions", "textarea", "Complete the task using the connected tools.", true), llmProviderField(), llmModelField(), chatModeField(), field("maxTurns", "Maximum turns", "number", "8", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"providerId": "", "model": "", "maxTurns": 8.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}),
 		node("llm:coding_agent", "AI", "Coding Agent", "An agent preset for scoped file, Git, and terminal workspaces.", "code-2", "#f472b6", append(append([]domain.NodePort{}, flowInput...), llmToolInput), flowOutput,
-			[]domain.ConfigField{field("task", "Task", "textarea", "", true), field("workspace", "Workspace", "string", "C:\\Work\\repo", true), chatModeField(), field("maxTurns", "Maximum turns", "number", "12", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"maxTurns": 12.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}, domain.CapabilityFileRead, domain.CapabilityFileWrite, domain.CapabilityTerminal, domain.CapabilityGit),
+			[]domain.ConfigField{field("task", "Task", "textarea", "", true), field("workspace", "Workspace", "string", "C:\\Work\\repo", true), llmProviderField(), llmModelField(), chatModeField(), field("maxTurns", "Maximum turns", "number", "12", true), unlimitedTurnsToggleField(), chatStatusToggleField(), visibleWhen(field("chatId", "Chat ID", "string", "", false), "chatMode"), visibleWhen(field("chatRunId", "Chat Run ID", "string", "", false), "updateChatStatus")}, map[string]any{"providerId": "", "model": "", "maxTurns": 12.0, "chatMode": "message", "chatId": "", "unlimitedTurns": false, "updateChatStatus": false, "chatRunId": ""}, domain.CapabilityFileRead, domain.CapabilityFileWrite, domain.CapabilityTerminal, domain.CapabilityGit),
 	}
 	return append(definitions, blueprintBuiltins()...)
 }
 
 func node(nodeType, category, label, description, icon, color string, inputs, outputs []domain.NodePort, fields []domain.ConfigField, defaults map[string]any, capabilities ...domain.Capability) domain.NodeDefinition {
-	return normalizeDefinition(domain.NodeDefinition{Type: nodeType, Category: category, Label: label, Description: description, Icon: icon, Color: color, Inputs: inputs, Outputs: outputs, Fields: fields, Capabilities: capabilities, DefaultConfig: defaults, TriggerKind: legacyTriggerKind(nodeType), Source: "builtin"})
+	return normalizeDefinition(domain.NodeDefinition{Type: nodeType, Category: category, Label: label, Description: description, Icon: icon, Color: color, Inputs: inputs, Outputs: outputs, Fields: fields, Capabilities: capabilities, DefaultConfig: defaults, TriggerKind: catalogTriggerKind(nodeType), Source: "builtin"})
 }
 
-// legacyTriggerKind only annotates the remaining pre-module catalog entries.
-// Publishing consumes NodeDefinition.TriggerKind, so no application service
-// duplicates this list and newly modular triggers declare it themselves.
-func legacyTriggerKind(nodeType string) domain.TriggerKind {
+// catalogTriggerKind annotates the pre-module catalog entries. Publishing
+// consumes NodeDefinition.TriggerKind, so no application service duplicates
+// this list and newly modular triggers declare it themselves.
+func catalogTriggerKind(nodeType string) domain.TriggerKind {
 	switch nodeType {
 	case "trigger:button":
 		return domain.TriggerButton
@@ -392,7 +388,7 @@ func fieldDataType(kind string) domain.DataType {
 }
 
 func isConfigurationOnlyField(kind string) bool {
-	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "type-spec" || kind == "wire-representation" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent" || kind == "javascript-editor" || kind == "boolean" || kind == "chat-mode" || kind == "form-builder" || kind == "image-editor" || kind == "embed-editor"
+	return kind == "route-options" || kind == "switch-cases" || kind == "json-schema" || kind == "type-spec" || kind == "wire-representation" || kind == "secret" || kind == "field-outputs" || kind == "object-fields" || kind == "http-headers" || kind == "http-user-agent-toggle" || kind == "http-user-agent" || kind == "javascript-editor" || kind == "boolean" || kind == "chat-mode" || kind == "form-builder" || kind == "image-editor" || kind == "embed-editor" || kind == "llm-provider"
 }
 
 func field(name, label, kind, placeholder string, required bool) domain.ConfigField {
@@ -446,6 +442,19 @@ func unlimitedTurnsToggleField() domain.ConfigField {
 // that triggered it. The revealed Chat Run ID pin carries the run to update.
 func chatStatusToggleField() domain.ConfigField {
 	return domain.ConfigField{Name: "updateChatStatus", Label: "Update chat status", Kind: "boolean"}
+}
+
+// llmProviderField selects the provider for one AI node. An empty value keeps
+// the node on the application's default provider, so changing the default
+// re-routes every node that never made an explicit choice.
+func llmProviderField() domain.ConfigField {
+	return domain.ConfigField{Name: "providerId", Label: "Provider", Kind: "llm-provider"}
+}
+
+// llmModelField selects one of the provider's configured models. An empty
+// value uses the provider's default model.
+func llmModelField() domain.ConfigField {
+	return domain.ConfigField{Name: "model", Label: "Model", Kind: "llm-model"}
 }
 
 func visibleWhen(configField domain.ConfigField, name string) domain.ConfigField {

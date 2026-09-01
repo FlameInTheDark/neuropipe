@@ -16,13 +16,13 @@ You can also [browse every release](https://github.com/FlameInTheDark/neuropipe/
 
 - Button boards, cron schedules, file watchers, hotkeys, chat, and HMAC-protected local webhooks.
 - Blueprint-style pipelines where exec pins control actions and typed data pins resolve values on demand.
-- Local LLM workflows using Ollama or managed `llama.cpp`, plus one configurable OpenAI-compatible provider.
+- LLM workflows using Ollama, managed `llama.cpp`, Anthropic, or any OpenAI-compatible endpoint — with several providers configured side by side.
 - HTTP, local files, PowerShell, processes, clipboard, notifications, Git, reports, reusable functions, and AI agents.
 - Markdown reports, local chat conversations, and a privacy-safe metrics dashboard.
 
 ## Getting started
 
-1. Open **Settings** and choose a provider. For managed `llama.cpp`, select a runtime and an installed GGUF model.
+1. Open **Settings → Provider** and configure one or more providers (pick a default; add models per provider). For managed `llama.cpp`, select a runtime and an installed GGUF model.
 2. Create a pipeline, add a trigger, then connect exec and data pins in the editor.
 3. Configure its nodes, save the draft, and publish the revision after reviewing requested capabilities.
 4. Run it from the editor or the Trigger board. Schedules and webhooks need an explicit trust grant before they run unattended.

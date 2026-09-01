@@ -307,7 +307,7 @@ func (s *Service) RunDraft(ctx context.Context, pipelineID, triggerNodeID string
 }
 
 // QueuePublished creates an execution record immediately and lets an owned
-// worker start the newest published Blueprint-v2 revision. It intentionally
+// worker start the newest published Blueprint revision. It intentionally
 // does not require unattended trust: an authenticated API call is an explicit
 // run request, unlike a timer or webhook delivery.
 func (s *Service) QueuePublished(ctx context.Context, pipelineID, triggerNodeID string, input pipeline.Packet) (domain.Execution, error) {

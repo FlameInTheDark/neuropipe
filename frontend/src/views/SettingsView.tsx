@@ -5,12 +5,16 @@ import i18n from "@/i18n";
 import { desktop } from "@/lib/bridge";
 import type {
   APIStatus,
+  GenerationParameters,
   InstallProgress,
+  InstalledLlamaRuntime,
   LlamaRuntimeCatalogStatus,
   LlamaRuntimeRelease,
+  LlamaRuntimeReleaseList,
   LlamaRuntimeSettings,
   LlamaRuntimeStatus,
   LocalModel,
+  ModelConfig,
   ModelDetail,
   ModelSearchRequest,
   ModelSearchResult,
@@ -27,7 +31,7 @@ import { useThemeStore } from "@/stores/theme";
 import { Card, ViewShell, EmptyState } from "../components/ViewShell";
 import { Button, Toggle } from "../components/ui";
 import { Icon } from "../components/icons";
-import { Dropdown } from "../components/Dropdown";
+import { Dropdown, type DropdownOption } from "../components/Dropdown";
 import { Modal, ModalActions } from "../components/primitives/Modal";
 import { Field, TextInput, TextArea } from "../components/primitives/Field";
 import { RemoteExecutorsPanel } from "./RemoteExecutorsPanel";
@@ -75,7 +79,9 @@ export function mergeIdentitySlice<S extends IdentitySlice<{ id: string }>>(draf
 /** Normalises a loaded Settings object before it enters the editor draft.
  *  Shared with the Integrations view, which edits the same draft shape. */
 export function normalizeSettings(input: Settings): Settings {
-  const providers = input.providers.length > 0 ? input.providers : [defaultProvider("openai-compatible")];
+  const providers = input.providers.length > 0 ? input.providers : [defaultProvider("ollama")];
+  const defaultProviderId =
+    providers.some((p) => p.id === input.defaultProviderId) ? input.defaultProviderId : (providers.find((p) => p.enabled) ?? providers[0]).id;
   return {
     ...input,
     language: ["en", "de", "fr", "ru"].includes(input.language) ? input.language : "en",
@@ -99,19 +105,34 @@ export function normalizeSettings(input: Settings): Settings {
     discord: { ...input.discord, identities: input.discord?.identities ?? [] },
     telegram: { ...input.telegram, identities: input.telegram?.identities ?? [] },
     providers,
+    defaultProviderId,
+    managedLlamaRemoved: input.managedLlamaRemoved ?? false,
   };
 }
 
-function defaultProvider(kind: ProviderConfig["kind"]): ProviderConfig {
+function defaultProvider(kind: ProviderConfig["kind"], existing: ProviderConfig[] = []): ProviderConfig {
   switch (kind) {
     case "ollama":
-      return { id: "ollama-local", name: "Ollama (local)", kind, baseUrl: "http://127.0.0.1:11434", model: "", enabled: true };
+      return { id: uniqueProviderId("ollama-local", existing), name: "Ollama (local)", kind, baseUrl: "http://127.0.0.1:11434", model: "", models: [], enabled: true };
+    case "anthropic":
+      // No example URL here on purpose: the backend fills the official
+      // endpoint on save, and an empty field must never look pre-validated.
+      return { id: uniqueProviderId("anthropic", existing), name: "Anthropic", kind, baseUrl: "", model: "", models: [], enabled: true };
     case "llamacpp":
-      return { id: "llama-managed", name: "Managed llama.cpp", kind, baseUrl: "", model: "", enabled: true };
+      return { id: "llama-managed", name: "Managed llama.cpp", kind, baseUrl: "", model: "", models: [], enabled: true };
     default:
       // No example URL here on purpose: an empty field plus its placeholder
       // must never look like configuration that was loaded from settings.
-      return { id: "openai-compatible", name: "OpenAI-compatible", kind, baseUrl: "", model: "", enabled: true };
+      return { id: uniqueProviderId("openai-compatible", existing), name: "OpenAI-compatible", kind, baseUrl: "", model: "", models: [], enabled: true };
+  }
+}
+
+function uniqueProviderId(base: string, providers: ProviderConfig[]): string {
+  const taken = new Set(providers.map((p) => p.id));
+  if (!taken.has(base)) return base;
+  for (let counter = 2; ; counter++) {
+    const candidate = `${base}-${counter}`;
+    if (!taken.has(candidate)) return candidate;
   }
 }
 
@@ -221,7 +242,9 @@ export function SettingsView({ workspace }: { workspace: Workspace }) {
         <div className="fade-in min-w-0 flex-1 overflow-y-auto p-5">
           {section === "general" && <GeneralPanel draft={draft} patch={patch} />}
           {section === "provider" && <ProviderPanel draft={draft} patch={patch} notify={workspace.notify} />}
-          {section === "models" && <ModelsPanel draft={draft} patch={patch} notify={workspace.notify} />}
+          {section === "models" && (
+            <ModelsPanel draft={draft} patch={patch} notify={workspace.notify} refreshSettings={workspace.refreshSettings} />
+          )}
           {section === "runtime" && (
             <RuntimePanel
               draft={draft}
@@ -311,6 +334,164 @@ function NumberInput({
       }}
       className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
     />
+  );
+}
+
+/* Optional numeric parameter input: an empty field stays unset, so the
+ * provider keeps its own default for that value. */
+function OptionalNumberInput({
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  placeholder,
+}: {
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() => (value === undefined ? "" : String(value)));
+  useEffect(() => {
+    setText(value === undefined ? "" : String(value));
+  }, [value]);
+  const commit = (raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      if (value !== undefined) onChange(undefined);
+      return;
+    }
+    const n = Number(trimmed);
+    if (Number.isNaN(n)) return;
+    const clamped = Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min ?? Number.MIN_SAFE_INTEGER, n));
+    if (clamped !== value) onChange(clamped);
+    if (String(clamped) !== text) setText(String(clamped));
+  };
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      value={text}
+      min={min}
+      max={max}
+      step={step}
+      placeholder={placeholder}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+      }}
+      className="h-8 w-full rounded-md border border-ink-700 bg-ink-850 px-2.5 text-[12.5px] text-fg focus:border-ink-400 focus:bg-ink-800 focus:outline-none"
+    />
+  );
+}
+
+interface ParamField {
+  key: keyof GenerationParameters;
+  labelKey: "provider.temperature" | "provider.topP" | "provider.topK" | "provider.maxTokens" | "provider.contextSize";
+  step: number;
+  min: number;
+  max?: number;
+}
+
+const PARAM_FIELDS: readonly ParamField[] = [
+  { key: "temperature", labelKey: "provider.temperature", step: 0.1, min: 0, max: 2 },
+  { key: "topP", labelKey: "provider.topP", step: 0.05, min: 0, max: 1 },
+  { key: "topK", labelKey: "provider.topK", step: 1, min: 0 },
+  { key: "maxTokens", labelKey: "provider.maxTokens", step: 1, min: 1 },
+  { key: "contextSize", labelKey: "provider.contextSize", step: 1024, min: 1024 },
+];
+
+/** Counts configured values so collapsed sections can flag themselves. */
+function paramCount(params: GenerationParameters | undefined): number {
+  if (!params) return 0;
+  return PARAM_FIELDS.reduce((n, field) => (params[field.key] !== undefined ? n + 1 : n), 0);
+}
+
+/** Editor for one generation-parameter set: empty fields stay unset and
+ * inherit, so a partial override only sends what the user chose. */
+function GenerationParamsEditor({
+  value,
+  onChange,
+  inherited,
+}: {
+  value: GenerationParameters | undefined;
+  onChange: (next: GenerationParameters | undefined) => void;
+  /** values shown as placeholders because a parent level sets them */
+  inherited?: GenerationParameters;
+}) {
+  const { t } = useTranslation();
+  const set = (key: keyof GenerationParameters, v: number | undefined) => {
+    const next: GenerationParameters = { ...(value ?? {}) };
+    if (v === undefined) delete next[key];
+    else next[key] = v;
+    const remaining = (Object.keys(next) as (keyof GenerationParameters)[]).some((k) => next[k] !== undefined);
+    onChange(remaining ? next : undefined);
+  };
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {PARAM_FIELDS.map((field) => (
+        <Field key={field.key} label={t(field.labelKey)}>
+          <OptionalNumberInput
+            value={value?.[field.key]}
+            onChange={(v) => set(field.key, v)}
+            min={field.min}
+            max={field.max}
+            step={field.step}
+            placeholder={
+              inherited?.[field.key] !== undefined
+                ? t("provider.paramInherited", { value: String(inherited[field.key]) })
+                : t("provider.paramUnset")
+            }
+          />
+        </Field>
+      ))}
+    </div>
+  );
+}
+
+/** Collapsible sub-section used by provider parameters and the model list:
+ * a header row toggles the body, a badge can flag configured content, and an
+ * optional action stays reachable while collapsed. */
+function CollapsibleBlock({
+  title,
+  hint,
+  badge,
+  defaultOpen = false,
+  action,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  badge?: string;
+  defaultOpen?: boolean;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-md border border-ink-700/70 bg-ink-900/50">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:bg-ink-850/60"
+        >
+          <Icon name={open ? "ChevronDown" : "ChevronRight"} className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+          <span className="shrink-0 text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">{title}</span>
+          {badge && (
+            <span className="shrink-0 rounded border border-ink-700 bg-ink-900 px-1.5 py-px text-[10px] text-fg-faint">{badge}</span>
+          )}
+          {hint && !open && <span className="min-w-0 flex-1 truncate text-[10.5px] text-fg-faint">{hint}</span>}
+        </button>
+        {action && <div className="ml-auto shrink-0">{action}</div>}
+      </div>
+      {open && <div className="space-y-2 border-t border-seam px-3 py-2.5">{children}</div>}
+    </div>
   );
 }
 
@@ -409,6 +590,8 @@ function ProviderPanel({
 }) {
   const { t } = useTranslation();
   const [secrets, setSecrets] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [discovering, setDiscovering] = useState<string | null>(null);
 
   useEffect(() => {
     desktop
@@ -418,72 +601,417 @@ function ProviderPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const provider = draft.providers[0];
+  const providers = draft.providers;
+  /* No provider is expanded until one is picked: a long configured list stays
+   * compact and the panel opens collapsed, matching the provider card header
+   * click used to expand it. */
+  const selected = providers.find((p) => p.id === selectedId) ?? null;
+  /* Exactly one managed llama.cpp provider can exist: the backend normalizer
+   * rejects a second entry, so the add menu stops offering it once present. */
+  const canAddManaged = !providers.some((p) => p.kind === "llamacpp");
 
-  const selectProvider = (kind: ProviderConfig["kind"]) => {
-    const next = defaultProvider(kind);
-    patch({ providers: [next], defaultProviderId: next.id });
-  };
+  const updateProviders = (next: ProviderConfig[]) => patch({ providers: next });
 
-  const updateProvider = (key: "baseUrl" | "model" | "apiKeyRef", value: string) => {
+  const patchProvider = (id: string, changes: Partial<ProviderConfig>) =>
+    updateProviders(providers.map((p) => (p.id === id ? { ...p, ...changes } : p)));
+
+  const addProvider = (kind: ProviderConfig["kind"]) => {
+    const provider = defaultProvider(kind, providers);
+    /* Re-adding the managed provider revives it: the removal marker is the
+     * only thing keeping the backend sync from materializing it. */
     patch({
-      providers: draft.providers.map((p) =>
-        p.id === provider.id ? { ...p, [key]: value || undefined } : p,
-      ),
+      providers: [...providers, provider],
+      managedLlamaRemoved: kind === "llamacpp" ? false : draft.managedLlamaRemoved,
     });
+    setSelectedId(provider.id);
   };
 
-  if (!provider) return null;
+  const removeProvider = async (provider: ProviderConfig) => {
+    const ok = await ask({
+      title: t("provider.removeTitle"),
+      description: t("provider.removeDescription", { name: provider.name }),
+      confirmLabel: t("common.delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    const next = providers.filter((p) => p.id !== provider.id);
+    const nextDefault =
+      draft.defaultProviderId === provider.id ? (next.find((p) => p.enabled) ?? next[0])?.id ?? "" : draft.defaultProviderId;
+    /* Removing the managed provider is an explicit choice: mark it so the
+     * backend sync (which materializes the entry whenever local models exist)
+     * leaves it hidden until it is added back. */
+    patch({
+      providers: next,
+      defaultProviderId: nextDefault,
+      managedLlamaRemoved: draft.managedLlamaRemoved || provider.kind === "llamacpp",
+    });
+    if (selectedId === provider.id) setSelectedId(null);
+  };
+
+  const discoverModels = async (provider: ProviderConfig) => {
+    setDiscovering(provider.id);
+    try {
+      const discovered = await desktop.listProviderModels(provider.id);
+      const seen = new Set((provider.models ?? []).map((m) => m.id));
+      if (provider.model) seen.add(provider.model);
+      const additions = discovered
+        .filter((m) => !seen.has(m.id))
+        .map((m) => ({ id: m.id, name: m.name || "" }));
+      if (additions.length === 0) {
+        notify(t("provider.discoveryUpToDate"), "Sparkles");
+        return;
+      }
+      patchProvider(provider.id, { models: [...(provider.models ?? []), ...additions] });
+      notify(t("provider.modelsDiscovered", { count: additions.length }), "Sparkles");
+    } catch {
+      notify(t("provider.discoveryFailed"), "AlertTriangle");
+    } finally {
+      setDiscovering(null);
+    }
+  };
+
+  /* The kind switcher offers remote kinds only: switching an existing provider
+   * into the managed llama.cpp slot would collide with the single managed entry
+   * the backend enforces. Managed llama.cpp is added through the add menu. */
+  const remoteKindOptions: { value: string; label: string }[] = [
+    { value: "openai-compatible", label: t("provider.openaiCompatible") },
+    { value: "ollama", label: t("provider.ollama") },
+    { value: "anthropic", label: t("provider.anthropic") },
+  ];
+  const addKindOptions: { value: string; label: string }[] = canAddManaged
+    ? [...remoteKindOptions, { value: "llamacpp", label: t("provider.managedLlamaCpp") }]
+    : remoteKindOptions;
 
   return (
-    <div className="mx-auto max-w-[720px]">
-      <SectionCard title={t("settings.providerHelp")}>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={t("provider.kind")}>
-            <Dropdown
-              value={provider.kind}
-              onChange={(v) => selectProvider(v as ProviderConfig["kind"])}
-              options={[
-                { value: "openai-compatible", label: t("provider.openaiCompatible") },
-                { value: "ollama", label: t("provider.ollama") },
-                { value: "llamacpp", label: t("provider.managedLlamaCpp") },
-              ]}
-            />
-          </Field>
-          {provider.kind !== "llamacpp" ? (
-            <>
-              <Field label={t("provider.baseUrl")}>
-                <TextInput
-                  value={provider.baseUrl}
-                  onChange={(v) => updateProvider("baseUrl", v)}
-                  mono
-                  placeholder={provider.kind === "ollama" ? "http://127.0.0.1:11434" : "https://api.example.com/v1"}
-                />
-              </Field>
-              <Field label={t("provider.model")}>
-                <TextInput value={provider.model} onChange={(v) => updateProvider("model", v)} />
-              </Field>
-              {provider.kind === "openai-compatible" && (
-                <Field label={t("provider.apiKeyRef")} hint={t("settings.apiKeyHelp")}>
-                  <Dropdown
-                    value={provider.apiKeyRef ?? ""}
-                    onChange={(v) => updateProvider("apiKeyRef", v)}
-                    placeholder={t("settings.noApiKey")}
-                    options={[
-                      { value: "", label: t("settings.noApiKey") },
-                      ...secrets.map((name) => ({ value: name, label: name, icon: "KeyRound" })),
-                    ]}
-                  />
-                </Field>
-              )}
-            </>
-          ) : (
-            <p className="col-span-2 self-end rounded-md border border-ink-700 bg-ink-900/60 px-3 py-2 text-[11.5px] leading-relaxed text-fg-subtle">
-              {t("provider.llamacppNote")}
-            </p>
-          )}
+    <div className="mx-auto max-w-[760px]">
+      <SectionCard
+        title={t("settings.providerHelp")}
+        action={
+          <Dropdown
+            value={""}
+            onChange={(v) => addProvider(v as ProviderConfig["kind"])}
+            placeholder={t("provider.addProvider")}
+            options={addKindOptions}
+          />
+        }
+      >
+        <div className="space-y-2">
+          {providers.map((provider) => {
+            const isDefault = provider.id === draft.defaultProviderId;
+            const expanded = selected?.id === provider.id;
+            const managed = provider.kind === "llamacpp";
+            return (
+              <div
+                key={provider.id}
+                className={cn(
+                  "rounded-lg border transition",
+                  expanded ? "border-ink-500 bg-ink-850/80" : "border-ink-700/70 bg-ink-850/40",
+                )}
+              >
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(expanded ? null : provider.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <Icon
+                      name={expanded ? "ChevronDown" : "ChevronRight"}
+                      className="h-3.5 w-3.5 shrink-0 text-fg-faint"
+                    />
+                    <span className={cn("truncate text-[12.5px]", provider.enabled ? "text-fg" : "text-fg-faint line-through")}>
+                      {provider.name || provider.id}
+                    </span>
+                    <span className="shrink-0 rounded border border-ink-700 bg-ink-900 px-1.5 py-px font-mono text-[10px] text-fg-faint">
+                      {managed ? t("provider.managedLlamaCpp") : provider.kind}
+                    </span>
+                    {provider.model && (
+                      <span className="hidden truncate font-mono text-[10.5px] text-fg-faint sm:inline">{provider.model}</span>
+                    )}
+                  </button>
+                  {isDefault && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-md border border-ink-500 bg-ink-750 px-1.5 py-px text-[10px] font-medium text-fg">
+                      <Icon name="Star" className="h-3 w-3" />
+                      {t("provider.default")}
+                    </span>
+                  )}
+                  {!isDefault && (
+                    <button
+                      type="button"
+                      onClick={() => patch({ defaultProviderId: provider.id })}
+                      className="shrink-0 rounded-md px-1.5 py-1 text-[10.5px] text-fg-faint transition hover:bg-ink-750 hover:text-fg"
+                    >
+                      {t("provider.makeDefault")}
+                    </button>
+                  )}
+                  <Toggle on={provider.enabled} onChange={(v) => patchProvider(provider.id, { enabled: v })} />
+                  <button
+                    type="button"
+                    onClick={() => void removeProvider(provider)}
+                    aria-label={t("common.delete")}
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-faint transition hover:bg-danger/15 hover:text-danger-fg"
+                  >
+                    <Icon name="Trash2" className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {expanded && (
+                  <div className="space-y-3 border-t border-seam px-3 py-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label={t("provider.name")}>
+                        <TextInput value={provider.name} onChange={(v) => patchProvider(provider.id, { name: v })} />
+                      </Field>
+                      {managed ? (
+                        <Field label={t("provider.kind")}>
+                          <TextInput value={t("provider.managedLlamaCpp")} onChange={() => undefined} disabled />
+                        </Field>
+                      ) : (
+                        <Field label={t("provider.kind")}>
+                          <Dropdown
+                            value={provider.kind}
+                            onChange={(v) =>
+                              patchProvider(provider.id, {
+                                kind: v as ProviderConfig["kind"],
+                                baseUrl:
+                                  v === "ollama" && !provider.baseUrl
+                                    ? "http://127.0.0.1:11434"
+                                    : provider.baseUrl,
+                              })
+                            }
+                            options={remoteKindOptions}
+                          />
+                        </Field>
+                      )}
+                      {provider.kind !== "llamacpp" && (
+                        <Field label={t("provider.baseUrl")}>
+                          <TextInput
+                            value={provider.baseUrl}
+                            onChange={(v) => patchProvider(provider.id, { baseUrl: v })}
+                            mono
+                            placeholder={
+                              provider.kind === "ollama"
+                                ? "http://127.0.0.1:11434"
+                                : provider.kind === "anthropic"
+                                  ? "https://api.anthropic.com"
+                                  : "https://api.example.com/v1"
+                            }
+                          />
+                        </Field>
+                      )}
+                      {provider.kind !== "llamacpp" && provider.kind !== "ollama" && (
+                        <Field label={t("provider.apiKeyRef")} hint={t("settings.apiKeyHelp")}>
+                          <Dropdown
+                            value={provider.apiKeyRef ?? ""}
+                            onChange={(v) => patchProvider(provider.id, { apiKeyRef: v || undefined })}
+                            placeholder={t("settings.noApiKey")}
+                            options={[
+                              { value: "", label: t("settings.noApiKey") },
+                              ...secrets.map((name) => ({ value: name, label: name, icon: "KeyRound" })),
+                            ]}
+                          />
+                        </Field>
+                      )}
+                    </div>
+                    {managed && (
+                      <p className="rounded-md border border-ink-700 bg-ink-900/60 px-3 py-2 text-[11.5px] leading-relaxed text-fg-subtle">
+                        {t("provider.llamacppNote")}
+                      </p>
+                    )}
+
+                    <ModelListEditor
+                      provider={provider}
+                      patchProvider={patchProvider}
+                      discovering={discovering === provider.id}
+                      onDiscover={() => void discoverModels(provider)}
+                      managed={managed}
+                    />
+
+                    <CollapsibleBlock
+                      title={t("provider.parameters")}
+                      badge={paramCount(provider.parameters) > 0 ? String(paramCount(provider.parameters)) : undefined}
+                      hint={t("provider.parametersHelp")}
+                    >
+                      <GenerationParamsEditor
+                        value={provider.parameters}
+                        onChange={(next) => patchProvider(provider.id, { parameters: next })}
+                      />
+                    </CollapsibleBlock>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {providers.length === 0 && <p className="text-[12px] text-fg-faint">{t("provider.empty")}</p>}
         </div>
       </SectionCard>
+    </div>
+  );
+}
+
+/** Configured model list of one provider: manual entries plus discovery.
+ * Managed llama.cpp providers are read-only here: their list mirrors the GGUF
+ * files of the Models tab and is synced by the backend on every save. The
+ * list itself collapses behind a header row so long catalogs stop eating the
+ * page, and every row carries its own generation-parameter overrides. */
+function ModelListEditor({
+  provider,
+  patchProvider,
+  discovering,
+  onDiscover,
+  managed,
+}: {
+  provider: ProviderConfig;
+  patchProvider: (id: string, changes: Partial<ProviderConfig>) => void;
+  discovering: boolean;
+  onDiscover: () => void;
+  managed?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [key, setKey] = useState("");
+  const [title, setTitle] = useState("");
+
+  const models = provider.models ?? [];
+  const options = [
+    { value: "", label: provider.model ? t("provider.defaultModelNamed", { model: provider.model }) : t("provider.defaultModel") },
+    ...models.map((m) => ({ value: m.id, label: m.name || m.id })),
+  ];
+
+  const addModel = () => {
+    const id = key.trim();
+    if (!id || models.some((m) => m.id === id)) return;
+    patchProvider(provider.id, { models: [...models, { id, name: title.trim() }] });
+    setKey("");
+    setTitle("");
+  };
+
+  return (
+    <div className="space-y-2">
+      <Field label={t("provider.defaultModelLabel")}>
+        <Dropdown
+          value={provider.model}
+          onChange={(v) => patchProvider(provider.id, { model: v })}
+          options={options}
+          searchable
+          searchPlaceholder={t("common.searchModels")}
+          placeholder={t("provider.defaultModel")}
+        />
+      </Field>
+      <CollapsibleBlock
+        title={t("provider.models")}
+        badge={models.length > 0 ? String(models.length) : undefined}
+        hint={managed ? t("provider.llamacppModelsNote") : t("provider.modelsHelp")}
+        defaultOpen={models.length > 0 && models.length <= 8}
+        action={
+          !managed && (
+            <Button icon="Search" disabled={discovering} onClick={onDiscover}>
+              {discovering ? t("provider.discovering") : t("provider.discover")}
+            </Button>
+          )
+        }
+      >
+        <div className="space-y-1.5">
+          {models.length === 0 && <p className="px-0.5 text-[11.5px] text-fg-faint">{t("provider.noModels")}</p>}
+          {models.map((model) => (
+            <ModelListRow
+              key={model.id}
+              model={model}
+              provider={provider}
+              patchProvider={patchProvider}
+              managed={managed}
+              parentParams={provider.parameters}
+            />
+          ))}
+        </div>
+        {!managed && (
+          <div className="flex items-center gap-2 border-t border-seam pt-2">
+            <TextInput size="sm" value={key} onChange={setKey} placeholder={t("provider.modelKey")} mono />
+            <TextInput size="sm" value={title} onChange={setTitle} placeholder={t("provider.modelTitle")} />
+            <Button icon="Plus" disabled={!key.trim()} onClick={addModel}>
+              {t("common.add")}
+            </Button>
+          </div>
+        )}
+      </CollapsibleBlock>
+    </div>
+  );
+}
+
+/** One model entry of the configured list. Identity fields follow the
+ * provider's editability; the generation-parameter overrides stay editable
+ * for managed rows too, because local GGUF files carry no discovered values
+ * (max tokens, context) to fall back on. */
+function ModelListRow({
+  model,
+  provider,
+  patchProvider,
+  managed,
+  parentParams,
+}: {
+  model: ModelConfig;
+  provider: ProviderConfig;
+  patchProvider: (id: string, changes: Partial<ProviderConfig>) => void;
+  managed?: boolean;
+  parentParams?: GenerationParameters;
+}) {
+  const { t } = useTranslation();
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const models = provider.models ?? [];
+  const updateModel = (changes: Partial<ModelConfig>) =>
+    patchProvider(provider.id, { models: models.map((m) => (m.id === model.id ? { ...m, ...changes } : m)) });
+  const count = paramCount(model.parameters);
+
+  return (
+    <div className="rounded-md border border-ink-700/60 bg-ink-900/40">
+      <div className="flex items-center gap-2 px-2 py-1">
+        <span className="w-[42%] shrink-0 truncate rounded-md border border-ink-700 bg-ink-850 px-2 py-1 font-mono text-[11px] text-fg">
+          {model.id}
+        </span>
+        {managed ? (
+          <span className="min-w-0 flex-1 truncate px-1 text-[11.5px] text-fg-faint">{model.name || model.id}</span>
+        ) : (
+          <>
+            <TextInput size="sm" value={model.name ?? ""} onChange={(v) => updateModel({ name: v })} placeholder={t("provider.modelTitle")} />
+            {provider.model !== model.id && (
+              <button
+                type="button"
+                onClick={() => patchProvider(provider.id, { model: model.id })}
+                className="shrink-0 rounded-md px-1.5 py-1 text-[10.5px] text-fg-faint transition hover:bg-ink-750 hover:text-fg"
+              >
+                {t("provider.makeDefault")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => patchProvider(provider.id, { models: models.filter((m) => m.id !== model.id) })}
+              aria-label={t("common.delete")}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-fg-faint transition hover:bg-danger/15 hover:text-danger-fg"
+            >
+              <Icon name="Trash2" className="h-3.5 w-3.5" />
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => setParamsOpen((o) => !o)}
+          aria-label={t("provider.modelParameters")}
+          title={t("provider.modelParameters")}
+          aria-expanded={paramsOpen}
+          className={cn(
+            "grid h-7 w-7 shrink-0 place-items-center rounded-md transition hover:bg-ink-750 hover:text-fg",
+            count > 0 ? "text-fg" : "text-fg-faint",
+          )}
+        >
+          <span className="relative inline-flex">
+            <Icon name="SlidersHorizontal" className="h-3.5 w-3.5" />
+            {count > 0 && <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-success" />}
+          </span>
+        </button>
+      </div>
+      {paramsOpen && (
+        <div className="border-t border-seam px-2.5 py-2">
+          <p className="mb-1.5 text-[10.5px] text-fg-faint">{t("provider.modelParametersHelp")}</p>
+          <GenerationParamsEditor value={model.parameters} onChange={(next) => updateModel({ parameters: next })} inherited={parentParams} />
+        </div>
+      )}
     </div>
   );
 }
@@ -496,10 +1024,15 @@ function ModelsPanel({
   draft,
   patch,
   notify,
+  refreshSettings,
 }: {
   draft: Settings;
   patch: (p: Partial<Settings>) => void;
   notify: (text: string, icon?: string) => void;
+  /** Re-reads persisted settings so backend-written provider state (the
+   * managed llama.cpp entry and its model list) flows into the Providers
+   * tab without a manual reload. */
+  refreshSettings: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"catalog" | "installed">("catalog");
@@ -575,6 +1108,9 @@ function ModelsPanel({
     try {
       await desktop.installLlamaModel({ repository: detail.id, file: selectedFile });
       await refreshInstalled();
+      /* Installing selects the model server-side: the managed provider and
+       * its model list change with it. */
+      await refreshSettings();
       notify(t("models.installed"), "Check");
     } catch {
       notify(t("models.installFailed"), "AlertTriangle");
@@ -587,6 +1123,7 @@ function ModelsPanel({
   const selectInstalled = async (path: string) => {
     await desktop.selectInstalledLlamaModel(path).catch(() => undefined);
     patch({ llamaRuntime: { ...draft.llamaRuntime, modelPath: path } });
+    await refreshSettings();
   };
 
   const deleteInstalled = async (model: LocalModel) => {
@@ -600,6 +1137,7 @@ function ModelsPanel({
     await desktop.deleteInstalledLlamaModel(model.path).catch(() => undefined);
     setInfoModel((cur) => (cur?.path === model.path ? null : cur));
     await refreshInstalled();
+    await refreshSettings();
   };
 
   const openOnHf = async (repo: string) => {
@@ -1013,7 +1551,27 @@ function ProgressBar({ progress }: { progress: InstallProgress }) {
 /* runtime                                                             */
 /* ------------------------------------------------------------------ */
 
-function RuntimePanel({
+/* Reports whether an installed runtime entry actually carries the build a
+ * settings draft pins, so picking a version can preserve the acceleration
+ * mode instead of silently resetting it to auto. */
+function installedModeAvailable(inst: InstalledLlamaRuntime, mode: RuntimeMode): boolean {
+  switch (mode) {
+    case "cpu":
+      return inst.cpuInstalled;
+    case "cuda":
+      return inst.cudaInstalled;
+    case "vulkan":
+      return inst.vulkanInstalled;
+    case "hip":
+      return inst.hipInstalled;
+    default:
+      return false;
+  }
+}
+
+/* Exported for the runtime-panel live regression test: mounts the real panel
+ * against a stubbed bridge (scripts/runtime-panel-live-entry.tsx). */
+export function RuntimePanel({
   draft,
   patch,
   notify,
@@ -1028,28 +1586,48 @@ function RuntimePanel({
   const [status, setStatus] = useState<LlamaRuntimeStatus | null>(null);
   const [catalog, setCatalog] = useState<LlamaRuntimeCatalogStatus | null>(null);
   const [releases, setReleases] = useState<LlamaRuntimeRelease[]>([]);
+  /* non-null when the live release lookup failed and no cache could serve a
+   * list: the page still shows installed runtimes, so this is a hint, not a
+   * dead end. */
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  /* non-null when a list was served but not from the live GitHub API: the
+   * GitHub releases page (API rate-limited or blocked) or the local cache. */
+  const [releaseInfo, setReleaseInfo] = useState<LlamaRuntimeReleaseList | null>(null);
   const [releaseVersion, setReleaseVersion] = useState("");
   const [models, setModels] = useState<LocalModel[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<InstallProgress | null>(null);
 
+  /* Release loading stays independent of the core refresh so a slow live
+   * lookup (API timeout, web fallback) never delays the rest of the panel. */
+  const loadReleases = useCallback(async (force: boolean) => {
+    try {
+      const info = force ? await desktop.refreshLlamaRuntimeReleases() : await desktop.listLlamaRuntimeReleases();
+      setReleases(info.releases);
+      setReleaseInfo(info);
+      setReleaseError(null);
+      setReleaseVersion((v) => v || info.releases[0]?.version || "");
+    } catch (error: unknown) {
+      setReleaseInfo(null);
+      setReleaseError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
-    const [st, cat, rels, mdl] = await Promise.all([
+    const [st, cat, mdl] = await Promise.all([
       desktop.getLlamaRuntimeStatus().catch(() => null),
       desktop.getLlamaRuntimeCatalogStatus().catch(() => null),
-      desktop.listLlamaRuntimeReleases().catch(() => []),
       desktop.listInstalledLlamaModels().catch(() => []),
     ]);
     setStatus(st);
     setCatalog(cat);
-    setReleases(rels);
     setModels(mdl);
-    setReleaseVersion((v) => v || rels[0]?.version || "");
   }, []);
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void loadReleases(false);
+  }, [refresh, loadReleases]);
 
   useEffect(() => {
     const timer = window.setInterval(async () => {
@@ -1095,48 +1673,131 @@ function RuntimePanel({
 
   const rt: LlamaRuntimeSettings = draft.llamaRuntime;
 
-  const versionOptions = useMemo(() => {
-    const installedMap = new Map((catalog?.installed ?? []).map((i) => [i.version, i]));
-    return releases.map((r) => {
-      const inst = installedMap.get(r.version);
-      const modes = [
-        inst?.cpuInstalled && r.cpu.url ? "CPU" : null,
-        inst?.cudaInstalled && r.cuda.url ? "CUDA" : null,
-        inst?.vulkanInstalled && r.vulkan.url ? "VULKAN" : null,
-        inst?.hipInstalled && r.hip.url ? "HIP" : null,
+  const installed = catalog?.installed ?? [];
+
+  /* Version options lead with the installed runtimes and then merge in the
+   * live/cached release list: an offline or rate-limited GitHub API must never
+   * hide the runtimes that are already on disk, and the installed-runtime
+   * picker must never lead with a version that was never installed. Values are
+   * bare versions: the acceleration mode is pinned by the install (the backend
+   * writes request.Mode into settings) and resolved at launch, so encoding a
+   * mode suffix in the values would keep the configured selection from ever
+   * matching — the exact bug that showed the newest release as installed. */
+  const versionOptions = useMemo<DropdownOption[]>(() => {
+    const modesFor = (inst?: InstalledLlamaRuntime) =>
+      [
+        inst?.cpuInstalled ? "CPU" : null,
+        inst?.cudaInstalled ? "CUDA" : null,
+        inst?.vulkanInstalled ? "VULKAN" : null,
+        inst?.hipInstalled ? "HIP" : null,
       ].filter(Boolean);
+    const options: DropdownOption[] = installed.map((inst) => {
+      const modes = modesFor(inst);
       return {
-        value: `${r.version}:auto`,
-        label: modes.length > 0 ? `${r.version} · ${modes.join("/")}` : r.version,
-        icon: modes.length > 0 ? "Check" : undefined,
+        value: inst.version,
+        label: modes.length > 0 ? `${inst.version} · ${modes.join("/")}` : inst.version,
+        icon: "Check",
       };
     });
-  }, [catalog, releases]);
+    const seen = new Set(options.map((o) => o.value));
+    for (const release of releases) {
+      if (seen.has(release.version)) continue;
+      options.push({ value: release.version, label: release.version });
+    }
+    return options;
+  }, [installed, releases]);
 
-  const currentVersion = `${rt.runtimeVersion ?? releaseVersion}:${rt.mode}`;
+  /* The field shows exactly the configured version: matched by version (the
+   * settings mode can never match a mode suffix), kept visible through a
+   * synthetic entry while the catalog loads, and a placeholder — never the
+   * newest release — when nothing is configured. */
+  const configuredVersion = (rt.runtimeVersion ?? "").trim();
+  const runtimeOptions = useMemo(() => {
+    if (!configuredVersion || versionOptions.some((o) => o.value === configuredVersion)) return versionOptions;
+    return [{ value: configuredVersion, label: configuredVersion }, ...versionOptions];
+  }, [versionOptions, configuredVersion]);
+
+  /* Drives the banner under the runtime card: an error when no list could be
+   * served at all, an amber note when only a cached list exists, and a subtle
+   * info line when the live list came from the GitHub releases page because
+   * the API was rate-limited or blocked. */
+  const releaseNotice = useMemo(() => {
+    if (releaseError) {
+      return { kind: "error" as const, icon: "WifiOff", tone: "text-warning", text: t("runtime.releasesUnavailable"), detail: releaseError };
+    }
+    if (releaseInfo?.source === "github-web") {
+      return { kind: "info" as const, icon: "Info", tone: "text-info", text: t("runtime.releasesFromWeb"), detail: releaseInfo.notice };
+    }
+    if (releaseInfo?.source === "cache" && releaseInfo.fetchedAt) {
+      const time = new Date(releaseInfo.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return { kind: "warn" as const, icon: "WifiOff", tone: "text-warning", text: t("runtime.releasesFromCache", { time }), detail: releaseInfo.notice };
+    }
+    return null;
+  }, [releaseError, releaseInfo, t]);
 
   return (
     <div className="mx-auto max-w-[720px] space-y-3">
       <SectionCard title={t("runtime.managedTitle")}>
         <div className="space-y-3">
+          {releaseNotice && (
+            <div className="flex items-start gap-2 rounded-md border border-ink-600 bg-ink-900/70 px-3 py-2 text-[11.5px] leading-relaxed text-fg-subtle">
+              <Icon name={releaseNotice.icon} className={cn("mt-px h-3.5 w-3.5 shrink-0", releaseNotice.tone)} />
+              <span>
+                {releaseNotice.text}
+                {releaseNotice.detail && <span className="mt-0.5 block font-mono text-[10.5px] text-fg-faint">{releaseNotice.detail}</span>}
+              </span>
+            </div>
+          )}
           <Field label={t("runtime.contentDirectory")}>
             <TextInput mono value={draft.contentDirectory} onChange={(v) => patch({ contentDirectory: v })} />
           </Field>
+          {installed.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold tracking-wide text-fg-subtle uppercase">{t("runtime.installedRuntimes")}</span>
+              {installed.map((item) => {
+                const modes = [
+                  item.cpuInstalled ? "CPU" : null,
+                  item.cudaInstalled ? "CUDA" : null,
+                  item.vulkanInstalled ? "VULKAN" : null,
+                  item.hipInstalled ? "HIP" : null,
+                ].filter(Boolean);
+                const selected = item.version === configuredVersion;
+                return (
+                  <span
+                    key={item.version}
+                    className={cn(
+                      "rounded-md border px-2 py-px font-mono text-[10.5px]",
+                      selected ? "border-ink-500 bg-ink-750 text-fg" : "border-ink-700 bg-ink-900 text-fg-subtle",
+                    )}
+                  >
+                    {item.version} · {modes.join("/") || "?"}
+                    {selected && <span className="ml-1 text-fg-faint">· {t("runtime.selected")}</span>}
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("runtime.installedRuntime")} hint={status?.running ? status.endpoint : undefined}>
               <Dropdown
-                value={versionOptions.some((o) => o.value === currentVersion) ? currentVersion : (versionOptions[0]?.value ?? "")}
+                value={configuredVersion}
+                placeholder={t("runtime.selectRuntime")}
                 onChange={(v) => {
-                  const [version, mode] = v.split(":");
+                  /* Keep the pinned acceleration mode when the picked version
+                   * actually has that build installed; any other choice
+                   * resolves automatically at launch. */
+                  const next = installed.find((i) => i.version === v);
+                  const keepMode: RuntimeMode =
+                    rt.mode !== "auto" && next && installedModeAvailable(next, rt.mode) ? rt.mode : "auto";
                   patch({
                     llamaRuntime: {
                       ...rt,
-                      runtimeVersion: version,
-                      mode: (["auto", "cpu", "cuda", "vulkan", "hip"].includes(mode) ? mode : "auto") as RuntimeMode,
+                      runtimeVersion: v,
+                      mode: keepMode,
                     },
                   });
                 }}
-                options={versionOptions}
+                options={runtimeOptions}
               />
             </Field>
             <Field label={t("runtime.contextSize")}>
@@ -1195,7 +1856,16 @@ function RuntimePanel({
               className="flex-1"
               options={releases.map((r) => ({ value: r.version, label: r.version, icon: "Download" }))}
             />
-            <Button icon="RefreshCw" variant="solid" onClick={() => void refresh()}>
+            <Button
+              icon={busy === "releases" ? "Loader2" : "RefreshCw"}
+              spin={busy === "releases"}
+              variant="solid"
+              disabled={Boolean(busy)}
+              onClick={() => {
+                setBusy("releases");
+                void loadReleases(true).finally(() => setBusy(null));
+              }}
+            >
               {t("runtime.browseReleases")}
             </Button>
           </div>
@@ -1405,7 +2075,7 @@ function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Se
     await desktop.clearMetrics().catch(() => undefined);
   };
 
-  const updateRate = (index: number, key: "model" | "inputUsdPerMillion" | "outputUsdPerMillion", value: string | number) => {
+  const updateRate = (index: number, key: "providerId" | "model" | "inputUsdPerMillion" | "outputUsdPerMillion", value: string | number) => {
     patch({
       metrics: {
         ...draft.metrics,
@@ -1462,8 +2132,8 @@ function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Se
                   priceRates: [
                     ...draft.metrics.priceRates,
                     {
-                      providerId: draft.providers[0]?.id ?? "",
-                      model: draft.providers[0]?.model ?? "",
+                      providerId: draft.defaultProviderId || draft.providers[0]?.id || "",
+                      model: "",
                       inputUsdPerMillion: 0,
                       outputUsdPerMillion: 0,
                     },
@@ -1481,7 +2151,13 @@ function MetricsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Se
         ) : (
           <div className="space-y-2">
             {draft.metrics.priceRates.map((rate, index) => (
-              <div key={index} className="grid grid-cols-[minmax(0,1fr)_92px_92px_28px] items-center gap-2">
+              <div key={index} className="grid grid-cols-[150px_minmax(0,1fr)_92px_92px_28px] items-center gap-2">
+                <Dropdown
+                  value={rate.providerId}
+                  onChange={(v) => updateRate(index, "providerId", v)}
+                  options={draft.providers.map((p) => ({ value: p.id, label: p.name || p.id }))}
+                  placeholder={t("metrics.rateProvider")}
+                />
                 <TextInput
                   mono
                   size="sm"

@@ -301,9 +301,9 @@ func objectPin(id, label string) domain.NodePort {
 	spec := domain.TypeSpec{Kind: domain.TypeMap, Key: &key, Value: &value}
 	return domain.NodePort{ID: id, Label: label, Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataObject, Type: &spec, Color: "#60a5fa", MaxConnections: 1}
 }
+
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }

@@ -20,7 +20,7 @@ import { Dropdown } from "../components/Dropdown";
 import { EmptyState } from "../components/ViewShell";
 import { cn } from "../utils/cn";
 
-const PROVIDER_KINDS = ["openai-compatible", "ollama", "llamacpp"] as const;
+const PROVIDER_KINDS = ["openai-compatible", "ollama", "anthropic", "llamacpp"] as const;
 type ProviderKind = (typeof PROVIDER_KINDS)[number];
 
 /** Settings panel managing remote executor registrations, connections, and runtime configuration. */

@@ -4,8 +4,6 @@ package constant
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes"
@@ -45,91 +43,49 @@ func resolve(definition domain.NodeDefinition, node domain.FlowNode) domain.Node
 	return resolved
 }
 
-// Evaluate validates a canonical V3 literal. Only legacy V2 values retain
-// text parsing, and only inside this explicit Constant node.
+// Evaluate validates a canonical literal against the declared type.
 func Evaluate(_ context.Context, invocation nodes.Invocation, _ nodes.Runtime) (map[string]any, error) {
 	value, exists := invocation.Inputs["value"]
 	if !exists {
 		value = invocation.Config["value"]
 	}
 	target, _ := invocation.Config["type"].(string)
-	if target == "" && invocation.SchemaVersion >= domain.GraphSchemaV3 {
+	if target == "" {
 		target = "text"
 	}
-	typed, err := typedValue(target, value, invocation.SchemaVersion >= domain.GraphSchemaV3)
+	typed, err := typedValue(target, value)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"value": typed}, nil
 }
 
-func typedValue(target string, value any, strict bool) (any, error) {
+func typedValue(target string, value any) (any, error) {
 	switch target {
-	case "":
-		return value, nil
 	case "text":
-		if strict {
-			if _, ok := value.(string); !ok {
-				return nil, fmt.Errorf("constant text value must be a string")
-			}
-			return value, nil
+		if _, ok := value.(string); !ok {
+			return nil, fmt.Errorf("constant text value must be a string")
 		}
-		return fmt.Sprint(value), nil
+		return value, nil
 	case "number":
-		if strict {
-			if err := typespec.ValidateValue(value, typespec.Float()); err != nil {
-				return nil, fmt.Errorf("constant number value: %w", err)
-			}
-			return value, nil
+		if err := typespec.ValidateValue(value, typespec.Float()); err != nil {
+			return nil, fmt.Errorf("constant number value: %w", err)
 		}
-		return castNumber(value)
+		return value, nil
 	case "boolean":
-		if strict {
-			if _, ok := value.(bool); !ok {
-				return nil, fmt.Errorf("constant Boolean value must be a bool")
-			}
-			return value, nil
+		if _, ok := value.(bool); !ok {
+			return nil, fmt.Errorf("constant Boolean value must be a bool")
 		}
-		return castBoolean(value)
+		return value, nil
 	default:
 		return nil, fmt.Errorf("unknown constant type %q", target)
 	}
 }
 
-func castNumber(value any) (float64, error) {
-	switch number := value.(type) {
-	case float64:
-		return number, nil
-	case float32:
-		return float64(number), nil
-	case int:
-		return float64(number), nil
-	case int64:
-		return float64(number), nil
-	}
-	parsed, err := strconv.ParseFloat(strings.TrimSpace(fmt.Sprint(value)), 64)
-	if err != nil {
-		return 0, fmt.Errorf("cannot cast %T to number", value)
-	}
-	return parsed, nil
-}
-
-func castBoolean(value any) (bool, error) {
-	if boolean, ok := value.(bool); ok {
-		return boolean, nil
-	}
-	parsed, err := strconv.ParseBool(strings.TrimSpace(fmt.Sprint(value)))
-	if err != nil {
-		return false, fmt.Errorf("cannot cast %T to Boolean", value)
-	}
-	return parsed, nil
-}
-
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }
 
 func outputType(target string) (domain.DataType, bool) {

@@ -24,11 +24,11 @@ func TestRegexMatchUsesInspectorPatternUntilAWireOverridesIt(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			nodes := []domain.FlowNode{
-				v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-				v2Node("text-value", "data:constant", map[string]any{"value": "a b"}),
-				v2Node("text", "data:format_text", map[string]any{"format": "{{.value}}"}),
-				v2Node("match", "data:regex_match", map[string]any{"pattern": "a"}),
-				v2Node("store", "flow:set_variable", map[string]any{"name": "Probe"}),
+				cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+				cfgNode("text-value", "data:constant", map[string]any{"value": "a b"}),
+				cfgNode("text", "data:format_text", map[string]any{"format": "{{.value}}"}),
+				cfgNode("match", "data:regex_match", map[string]any{"pattern": "a"}),
+				cfgNode("store", "flow:set_variable", map[string]any{"name": "Probe"}),
 			}
 			edges := []domain.FlowEdge{
 				execEdge("start-store", "start", "out", "store", "in"),
@@ -38,8 +38,8 @@ func TestRegexMatchUsesInspectorPatternUntilAWireOverridesIt(t *testing.T) {
 			}
 			if test.wantOverride {
 				nodes = append(nodes,
-					v2Node("pattern-value", "data:constant", map[string]any{"value": test.wirePattern}),
-					v2Node("pattern", "data:format_text", map[string]any{"format": "{{.value}}"}),
+					cfgNode("pattern-value", "data:constant", map[string]any{"value": test.wirePattern}),
+					cfgNode("pattern", "data:format_text", map[string]any{"format": "{{.value}}"}),
 				)
 				edges = append(edges,
 					dataEdge("pattern-value-format", "pattern-value", "value", "pattern", "value"),
@@ -68,10 +68,10 @@ func TestRegexMatchRejectsNonTextWireDuringV3Validation(t *testing.T) {
 	flow := domain.FlowDefinition{
 		SchemaVersion: domain.GraphSchemaV3,
 		Nodes: []domain.FlowNode{
-			v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-			v2Node("number", "date:now", map[string]any{}),
-			v2Node("match", "data:regex_match", map[string]any{"pattern": "1"}),
-			v2Node("store", "flow:set_variable", map[string]any{"name": "Probe"}),
+			cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+			cfgNode("number", "date:now", map[string]any{}),
+			cfgNode("match", "data:regex_match", map[string]any{"pattern": "1"}),
+			cfgNode("store", "flow:set_variable", map[string]any{"name": "Probe"}),
 		},
 		Edges: []domain.FlowEdge{
 			execEdge("start-store", "start", "out", "store", "in"),

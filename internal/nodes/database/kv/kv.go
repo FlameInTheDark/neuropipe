@@ -217,39 +217,24 @@ func ConfigFlag(invocation nodes.Invocation, key string) bool {
 	return value
 }
 
-// ConfigStrings reads one inspector list field in either shape the editors
-// have persisted over time: an array of values (the visual list editor) or a
-// newline-separated string (the legacy textarea). Blank items are dropped.
+// ConfigStrings reads one inspector list field as the array of values the
+// visual list editor persists. Blank items are dropped.
 func ConfigStrings(invocation nodes.Invocation, key string) []string {
-	raw, exists := invocation.Config[key]
-	if !exists || raw == nil {
+	typed, ok := invocation.Config[key].([]any)
+	if !ok {
 		return nil
 	}
-	switch typed := raw.(type) {
-	case []any:
-		result := make([]string, 0, len(typed))
-		for _, item := range typed {
-			converted, err := Arg(item)
-			if err != nil {
-				continue
-			}
-			if strings.TrimSpace(converted) != "" {
-				result = append(result, converted)
-			}
+	result := make([]string, 0, len(typed))
+	for _, item := range typed {
+		converted, err := Arg(item)
+		if err != nil {
+			continue
 		}
-		return result
-	case string:
-		result := make([]string, 0)
-		for _, line := range strings.Split(typed, "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				result = append(result, line)
-			}
+		if strings.TrimSpace(converted) != "" {
+			result = append(result, converted)
 		}
-		return result
-	default:
-		return nil
 	}
+	return result
 }
 
 // Arg converts one typed pin value into its Redis string argument form.

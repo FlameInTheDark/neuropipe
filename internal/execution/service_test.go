@@ -55,7 +55,7 @@ func TestRunDraftExecutesAndPersistsConnectedNodes(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	definition := domain.FlowDefinition{
-		SchemaVersion: domain.GraphSchemaV2,
+		SchemaVersion: domain.GraphSchemaV3,
 		Nodes: []domain.FlowNode{
 			{ID: "button", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Run"}}},
 			{ID: "set", Type: "action:notification", Data: map[string]any{"config": map[string]any{"title": "Done", "message": "done"}}},

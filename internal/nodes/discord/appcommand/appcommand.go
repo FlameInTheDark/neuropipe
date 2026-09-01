@@ -273,9 +273,9 @@ func numberOptionPin(name string, required bool) domain.NodePort {
 	spec := typespec.Float()
 	return domain.NodePort{ID: name, Label: name, Kind: domain.PinData, Direction: domain.PinOutput, DataType: domain.DataNumber, Type: &spec, Color: "#a78bfa", Required: required, MaxConnections: 1}
 }
+
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }

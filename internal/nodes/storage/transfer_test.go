@@ -162,19 +162,6 @@ func TestResolveUploadFiltersPinsPerMode(t *testing.T) {
 	}
 }
 
-func TestResolveUploadReadsFlatNodeData(t *testing.T) {
-	// Graphs saved outside the editor may store config keys directly on Data.
-	resolved, err := resolveUpload(domain.FlowNode{Type: "action:storage_upload_file", Data: map[string]any{"source": "file"}})
-	if err != nil {
-		t.Fatalf("resolveUpload() error = %v", err)
-	}
-	for _, port := range resolved.Inputs {
-		if port.ID == "data" || port.ID == "base64" {
-			t.Fatalf("pin %q should be filtered in disk mode", port.ID)
-		}
-	}
-}
-
 /* ---------------- executor: explicit modes ---------------- */
 
 func TestExecuteUploadDiskModeStreamsFile(t *testing.T) {

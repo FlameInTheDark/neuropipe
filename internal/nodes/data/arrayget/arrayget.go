@@ -18,7 +18,7 @@ func Register(registrar nodes.Registrar) error {
 	index := datanodes.Pin("index", "Index", domain.PinInput, domain.DataNumber)
 	index.Default = 0.0
 	inputs := []domain.NodePort{datanodes.Pin("array", "Array", domain.PinInput, domain.DataList), index}
-	return registrar.Register(Node{Metadata: datanodes.Node("data:array_get", "Data", "Pick from Array", "Read the element at a zero-based index from a list.", "list", inputs, []domain.NodePort{datanodes.Pin("value", "Value", domain.PinOutput, domain.DataAny)}, []domain.ConfigField{datanodes.Field("index", "Index", "number", "0", false)}, map[string]any{"index": 0.0}), Executor: nodes.Outputs(Evaluate)})
+	return registrar.Register(Node{Metadata: datanodes.Node("data:array_get", "Arrays", "Pick from Array", "Read the element at a zero-based index from a list.", "list", inputs, []domain.NodePort{datanodes.Pin("value", "Value", domain.PinOutput, domain.DataAny)}, []domain.ConfigField{datanodes.Field("index", "Index", "number", "0", false)}, map[string]any{"index": 0.0}), Executor: nodes.Outputs(Evaluate)})
 }
 
 // Evaluate reads one zero-based item from a JSON-compatible list.

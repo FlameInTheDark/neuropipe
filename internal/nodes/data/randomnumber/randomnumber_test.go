@@ -2,11 +2,46 @@ package randomnumber
 
 import (
 	"context"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes"
 )
+
+func TestRegisterReportsImpureSourceContract(t *testing.T) {
+	registry := nodes.New()
+	if err := Register(registry); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	module, ok := registry.Get("data:random_number")
+	if !ok {
+		t.Fatal("data:random_number was not registered")
+	}
+	definition := module.Definition()
+	if definition.Mode != domain.NodeImpure || !definition.PortContractOwned {
+		t.Fatalf("definition header = %#v", definition)
+	}
+	inputs := map[string]domain.PinKind{}
+	for _, input := range definition.Inputs {
+		inputs[input.ID] = input.Kind
+	}
+	if inputs["in"] != domain.PinExec || inputs["from"] != domain.PinData || inputs["to"] != domain.PinData {
+		t.Fatalf("inputs = %#v", inputs)
+	}
+	outputs := map[string]domain.PinKind{}
+	for _, output := range definition.Outputs {
+		outputs[output.ID] = output.Kind
+	}
+	if outputs["out"] != domain.PinExec || outputs["value"] != domain.PinData {
+		t.Fatalf("outputs = %#v", outputs)
+	}
+	want := map[string]any{"type": "float", "useRange": false, "from": 0.0, "to": 1.0}
+	if !reflect.DeepEqual(definition.DefaultConfig, want) {
+		t.Fatalf("default config = %#v, want %#v", definition.DefaultConfig, want)
+	}
+}
 
 func TestRandomNumberFloat(t *testing.T) {
 	module := New()
@@ -26,6 +61,92 @@ func TestRandomNumberFloat(t *testing.T) {
 	}
 	if value < 0 || value >= 1 {
 		t.Fatalf("expected value in [0, 1), got %v", value)
+	}
+}
+
+func TestRandomNumberDefaultsToFloatWithoutType(t *testing.T) {
+	module := New()
+	invocation := nodes.Invocation{
+		Node:            domain.FlowNode{Type: "data:random_number"},
+		Definition:      module.Definition(),
+		SchemaVersion:   3,
+		Config:          map[string]any{},
+		Inputs:          map[string]any{},
+		ConnectedInputs: map[string]bool{},
+	}
+	result, err := module.Execute(context.Background(), invocation, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	value, ok := result.Outputs["value"].(float64)
+	if !ok {
+		t.Fatalf("expected float64 value, got %T", result.Outputs["value"])
+	}
+	if value < 0 || value >= 1 {
+		t.Fatalf("expected value in [0, 1), got %v", value)
+	}
+}
+
+func TestRandomNumberExecuteEmitsExecPortAndResultRecord(t *testing.T) {
+	module := New()
+	invocation := nodes.Invocation{
+		Node:            domain.FlowNode{Type: "data:random_number", Data: map[string]any{"config": map[string]any{"type": "integer"}}},
+		Definition:      module.Definition(),
+		SchemaVersion:   3,
+		Config:          map[string]any{"type": "integer"},
+		Inputs:          map[string]any{},
+		ConnectedInputs: map[string]bool{},
+	}
+	result, err := module.Execute(context.Background(), invocation, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !reflect.DeepEqual(result.Ports, []string{"out"}) {
+		t.Fatalf("ports = %#v, want the single out exec port", result.Ports)
+	}
+	value, ok := result.Outputs["value"].(int64)
+	if !ok {
+		t.Fatalf("expected int64 value, got %T", result.Outputs["value"])
+	}
+	record, ok := result.Outputs["result"].(map[string]any)
+	if !ok || record["value"] != value {
+		t.Fatalf("result record = %#v, want it to mirror the value output", result.Outputs["result"])
+	}
+}
+
+func TestRandomNumberParsesStringBoundsFromConfig(t *testing.T) {
+	module := New()
+	// Inspector number fields may persist as text; the bounds parser accepts them.
+	invocation := nodes.Invocation{
+		Node:            domain.FlowNode{Type: "data:random_number", Data: map[string]any{"config": map[string]any{"type": "integer", "useRange": true, "from": "5", "to": "5"}}},
+		Definition:      module.Definition(),
+		SchemaVersion:   3,
+		Config:          map[string]any{"type": "integer", "useRange": true, "from": "5", "to": "5"},
+		Inputs:          map[string]any{},
+		ConnectedInputs: map[string]bool{},
+	}
+	result, err := module.Execute(context.Background(), invocation, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.Outputs["value"] != int64(5) {
+		t.Fatalf("value = %#v, want 5 from the string bounds", result.Outputs["value"])
+	}
+}
+
+func TestRandomNumberCancelledContext(t *testing.T) {
+	module := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	invocation := nodes.Invocation{
+		Node:       domain.FlowNode{Type: "data:random_number"},
+		Definition: module.Definition(),
+		Config:     map[string]any{"type": "float"},
+		Inputs:     map[string]any{},
+	}
+	_, err := module.Execute(ctx, invocation, nil)
+	if err == nil || !strings.Contains(err.Error(), "random number cancelled") {
+		t.Fatalf("Execute(cancelled) error = %v, want the cancellation failure", err)
 	}
 }
 

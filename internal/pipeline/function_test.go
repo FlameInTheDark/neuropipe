@@ -58,7 +58,7 @@ func TestBlueprintExecutesPublishedImpureFunction(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry.ReplaceDynamic(definitions)
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{v2Node("start", "trigger:button", map[string]any{"label": "Run"}), v2Node("call", "function:"+function.ID, nil)}, Edges: []domain.FlowEdge{execEdge("call", "start", "out", "call", "in")}}
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{cfgNode("start", "trigger:button", map[string]any{"label": "Run"}), cfgNode("call", "function:"+function.ID, nil)}, Edges: []domain.FlowEdge{execEdge("call", "start", "out", "call", "in")}}
 	result, err := NewEngine(registry, nil, nil, WithFunctionResolver(store)).Execute(context.Background(), flow, "start", Packet{})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -91,7 +91,7 @@ func TestBlueprintCachesPublishedPureFunction(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry.ReplaceDynamic(definitions)
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{v2Node("start", "trigger:button", map[string]any{"label": "Run"}), v2Node("truth", "data:constant", map[string]any{"value": true}), v2Node("call", "function:"+function.ID, nil), v2Node("branch", "flow:branch", nil)}, Edges: []domain.FlowEdge{execEdge("start-branch", "start", "out", "branch", "in"), dataEdge("truth-call", "truth", "value", "call", "input"), dataEdge("call-branch", "call", "output", "branch", "condition")}}
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{cfgNode("start", "trigger:button", map[string]any{"label": "Run"}), cfgNode("truth", "data:constant", map[string]any{"type": "boolean", "value": true}), cfgNode("call", "function:"+function.ID, nil), cfgNode("branch", "flow:branch", nil)}, Edges: []domain.FlowEdge{execEdge("start-branch", "start", "out", "branch", "in"), dataEdge("truth-call", "truth", "value", "call", "input"), dataEdge("call-branch", "call", "output", "branch", "condition")}}
 	if _, err := NewEngine(registry, nil, nil, WithFunctionResolver(store)).Execute(context.Background(), flow, "start", Packet{}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -120,10 +120,10 @@ func TestAgentRunsMultipleConnectedLLMToolFunctions(t *testing.T) {
 	}
 	registry.ReplaceDynamic(definitions)
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Use a connected tool before answering.", "maxTurns": 3.0}),
-		v2Node("weather", "function:"+weather.ID, nil),
-		v2Node("calendar", "function:"+calendar.ID, nil),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "Use a connected tool before answering.", "maxTurns": 3.0}),
+		cfgNode("weather", "function:"+weather.ID, nil),
+		cfgNode("calendar", "function:"+calendar.ID, nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-agent", "start", "out", "agent", "in"),
 		{ID: "weather-tool", Source: "weather", SourceHandle: "tool", Target: "agent", TargetHandle: "tools", Kind: domain.PinTool},
@@ -156,8 +156,8 @@ func (r *captureChatRunner) Chat(_ context.Context, request ChatRequest) (ChatRe
 func TestAgentWithoutToolsUsesInstructionsField(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Standby."}),
+		cfgNode("chat", "trigger:chat", map[string]any{"label": "Chat"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "Standby."}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("chat-agent", "chat", "out", "agent", "in"),
 		{ID: "chat-instructions", Source: "chat", SourceHandle: "text", Target: "agent", TargetHandle: "instructions", Kind: domain.PinData},
@@ -208,9 +208,9 @@ func TestAgentUsesWiredInstructionsPin(t *testing.T) {
 	}
 	registry.ReplaceDynamic(definitions)
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Inspector fallback must be overridden.", "maxTurns": 2.0}),
-		v2Node("weather", "function:"+weather.ID, nil),
+		cfgNode("chat", "trigger:chat", map[string]any{"label": "Chat"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "Inspector fallback must be overridden.", "maxTurns": 2.0}),
+		cfgNode("weather", "function:"+weather.ID, nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("chat-agent", "chat", "out", "agent", "in"),
 		{ID: "chat-instructions", Source: "chat", SourceHandle: "text", Target: "agent", TargetHandle: "instructions", Kind: domain.PinData},
@@ -242,7 +242,7 @@ func createPublishedToolFunction(ctx context.Context, store *persistence.Store, 
 	}
 	function.Inputs = []domain.FunctionPin{{ID: "city", Name: "City", Description: "The city and country to look up.", DataType: domain.DataText, Required: true}}
 	function.Outputs = []domain.FunctionPin{{ID: "answer", Name: "Answer", Description: "The requested tool result.", DataType: domain.DataText, Required: true}}
-	function.DraftDefinition.Nodes = append(function.DraftDefinition.Nodes, v2Node("answer", "data:constant", map[string]any{"type": "text", "value": value}))
+	function.DraftDefinition.Nodes = append(function.DraftDefinition.Nodes, cfgNode("answer", "data:constant", map[string]any{"type": "text", "value": value}))
 	function.DraftDefinition.Edges = append(function.DraftDefinition.Edges, dataEdge("answer-return", "answer", "value", "return", "answer"))
 	return store.PublishFunction(ctx, function)
 }

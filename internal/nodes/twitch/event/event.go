@@ -163,9 +163,9 @@ func eventPin(id, label string, spec domain.TypeSpec) domain.NodePort {
 func authorType() domain.TypeSpec {
 	return domain.TypeSpec{Kind: domain.TypeRecord, Name: "TwitchAuthor", Fields: []domain.TypeFieldSpec{{ID: "login", Name: "login", Type: typespec.String()}, {ID: "name", Name: "name", Type: typespec.String()}, {ID: "id", Name: "id", Type: typespec.String()}}}
 }
+
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }

@@ -3,8 +3,6 @@ package gate
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes"
@@ -31,7 +29,11 @@ func Execute(_ context.Context, invocation nodes.Invocation, runtime nodes.Runti
 	}
 	open, configured := store.GateOpen(invocation.Node.ID)
 	if !configured {
-		open = configuredBool(invocation.Config["startOpen"], invocation.SchemaVersion, true)
+		// The inspector default is Start open; an unconfigured gate opens.
+		open = true
+		if value, ok := invocation.Config["startOpen"].(bool); ok {
+			open = value
+		}
 	}
 	switch invocation.ExecInput {
 	case "open":
@@ -50,18 +52,4 @@ func Execute(_ context.Context, invocation nodes.Invocation, runtime nodes.Runti
 		}
 		return nodes.ExecutionResult{Outputs: map[string]any{"result": map[string]any{"open": false}}}, nil
 	}
-}
-
-func configuredBool(value any, schemaVersion int, fallback bool) bool {
-	if value == nil {
-		return fallback
-	}
-	if boolean, ok := value.(bool); ok {
-		return boolean
-	}
-	if schemaVersion >= domain.GraphSchemaV3 {
-		return fallback
-	}
-	boolean, err := strconv.ParseBool(strings.TrimSpace(fmt.Sprint(value)))
-	return err == nil && boolean
 }

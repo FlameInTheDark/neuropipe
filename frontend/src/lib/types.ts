@@ -27,7 +27,7 @@ export interface Viewport {
   zoom: number;
 }
 
-export type PipelineStatus = "draft" | "active" | "archived" | "legacy";
+export type PipelineStatus = "draft" | "active" | "archived";
 export type TriggerKind = "button" | "cron" | "file" | "hotkey" | "webhook" | "chat" | "twitch" | "kvsubscribe" | "discord" | "telegram";
 export type RunStatus =
   "pending" | "running" | "completed" | "failed" | "skipped" | "cancelled";
@@ -112,7 +112,6 @@ export interface Pipeline {
   publishedRevision: number;
         /** True when the editable draft differs from the revision triggers execute. */
   hasUnpublishedChanges: boolean;
-  migrationIssue?: string;
   /** Set when the pipeline is deployed to and runs on a remote executor. */
   executorId?: string;
   createdAt: string;
@@ -129,7 +128,6 @@ export interface PipelineSummary {
   status: PipelineStatus;
   publishedRevision: number;
   triggerCount: number;
-  migrationIssue?: string;
   executorId?: string;
   executorName?: string;
   updatedAt: string;
@@ -444,14 +442,35 @@ export interface KVServerInfo {
   databases: KVDatabaseInfo[];
 }
 
+export type ProviderKind = "ollama" | "llamacpp" | "openai-compatible" | "anthropic";
+/** Optional generation overrides. Undefined fields stay unset (provider default). */
+export interface GenerationParameters {
+  temperature?: number;
+  topK?: number;
+  topP?: number;
+  maxTokens?: number;
+  contextSize?: number;
+}
+/** One configured model of a provider: the provider-facing key plus a display title. */
+export interface ModelConfig {
+  id: string;
+  name?: string;
+  /** Per-model overrides of the provider-level generation values. */
+  parameters?: GenerationParameters;
+}
 export interface ProviderConfig {
   id: string;
   name: string;
-  kind: "ollama" | "llamacpp" | "openai-compatible";
+  kind: ProviderKind;
   baseUrl: string;
+  /** Default model: AI nodes without an explicit model resolve to it. */
   model: string;
+  /** Configured model list (discovered and manually added entries). */
+  models?: ModelConfig[];
   apiKeyRef?: string;
   enabled: boolean;
+  /** Provider-level generation defaults for every request. */
+  parameters?: GenerationParameters;
 }
 export type RuntimeMode = "auto" | "cpu" | "cuda" | "vulkan" | "hip";
 export interface LlamaRuntimeSettings {
@@ -498,6 +517,15 @@ export interface LlamaRuntimeRelease {
   vulkan: RuntimeArtifact;
   hip: RuntimeArtifact;
 }
+/** Which source served a llama.cpp release listing. */
+export type LlamaRuntimeReleaseSource = "github-api" | "github-web" | "cache" | "";
+export interface LlamaRuntimeReleaseList {
+  releases: LlamaRuntimeRelease[];
+  source: LlamaRuntimeReleaseSource;
+  fetchedAt?: string;
+  /** Non-fatal explanation shown when the listing did not come from the GitHub API. */
+  notice?: string;
+}
 export interface InstalledLlamaRuntime {
   version: string;
   cpuInstalled: boolean;
@@ -513,6 +541,11 @@ export interface LlamaRuntimeCatalogStatus {
 export interface LlamaRuntimeInstallRequest {
   version: string;
   mode: Exclude<RuntimeMode, "auto">;
+}
+/** A model returned by provider model discovery (ListProviderModels). */
+export interface ModelInfo {
+  id: string;
+  name: string;
 }
 export interface ModelSearchResult {
   id: string;
@@ -591,6 +624,8 @@ export interface Settings {
   webhookPort: number;
   pluginDirectory: string;
   providers: ProviderConfig[];
+  /** User removed the managed llama.cpp provider; suppress auto-materialization. */
+  managedLlamaRemoved?: boolean;
   maxConcurrentRuns: number;
   maxConcurrentLLMRuns: number;
   llamaRuntime: LlamaRuntimeSettings;

@@ -30,6 +30,9 @@ export interface EditorApi {
   identities: TwitchIdentity[];
   discordIdentities: DiscordIdentity[];
   telegramIdentities: TelegramIdentity[];
+  /** configured LLM providers for AI node provider/model pickers */
+  providers: import("@/lib/types").ProviderConfig[];
+  defaultProviderId: string;
   validateJavaScript: (code: string) => Promise<void>;
   generateCode: (request: CodeGenerationRequest) => Promise<CodeGenerationResponse>;
   inspectDatabase: (id: string) => Promise<DatabaseSchema>;

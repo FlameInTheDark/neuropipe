@@ -147,9 +147,6 @@ export default function PipelinesView({ workspace, nav }: { workspace: Workspace
                       {p.status === "published" && (
                         <span className="font-mono text-[10px] text-fg-faint">{p.version}</span>
                       )}
-                      {p.migrationIssue && (
-                        <Icon name="AlertTriangle" className="h-3 w-3 shrink-0 text-warning-fg" />
-                      )}
                     </span>
                     <span className="mt-[1px] flex min-w-0 items-center gap-1.5">
                       {p.executorName && (

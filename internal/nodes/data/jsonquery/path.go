@@ -19,8 +19,8 @@ import (
 
 // Query resolves a path against a source value. An empty path returns the
 // source itself. Paths rooted with `$` (and any path that contains brackets
-// or `..`) are evaluated as JSONPath; plain dotted paths keep the legacy
-// key.key.index behavior so existing graphs stay valid. A path that cannot
+// or `..`) are evaluated as JSONPath; plain dotted paths keep the simple
+// key.key.index behaviour. A path that cannot
 // be parsed yields nil rather than an error: an unknown location is a null
 // pick, the same contract ValueAt always had.
 func Query(value any, path string) any {

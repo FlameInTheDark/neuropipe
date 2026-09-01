@@ -42,9 +42,9 @@ func TestAgentWithToolsContinuesChatHistory(t *testing.T) {
 	registry.ReplaceDynamic(definitions)
 
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Answer briefly.", "maxTurns": 2.0, "chatMode": "history"}),
-		v2Node("weather", "function:"+weather.ID, nil),
+		cfgNode("chat", "trigger:chat", map[string]any{"label": "Chat"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "Answer briefly.", "maxTurns": 2.0, "chatMode": "history"}),
+		cfgNode("weather", "function:"+weather.ID, nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("chat-agent", "chat", "out", "agent", "in"),
 		dataEdge("chat-chatid", "chat", "chatId", "agent", "chatId"),
@@ -86,8 +86,8 @@ func TestAgentWithToolsContinuesChatHistory(t *testing.T) {
 func TestAgentWithoutToolsConversesOverChatHistory(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "You are a local assistant.", "chatMode": "history"}),
+		cfgNode("chat", "trigger:chat", map[string]any{"label": "Chat"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "You are a local assistant.", "chatMode": "history"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("chat-agent", "chat", "out", "agent", "in"),
 		dataEdge("chat-chatid", "chat", "chatId", "agent", "chatId"),
@@ -111,8 +111,8 @@ func TestAgentWithoutToolsConversesOverChatHistory(t *testing.T) {
 func TestAgentChatHistoryDoesNotAppendTaskPrompt(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Follow up on the conversation.", "chatMode": "history", "chatId": "conv-1"}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "Follow up on the conversation.", "chatMode": "history", "chatId": "conv-1"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-agent", "start", "out", "agent", "in"),
 	}}
@@ -128,31 +128,11 @@ func TestAgentChatHistoryDoesNotAppendTaskPrompt(t *testing.T) {
 }
 
 // Graphs saved with the earlier Use-chat-history toggle keep working.
-func TestAgentLegacyPullChatHistoryToggle(t *testing.T) {
-	ctx := context.Background()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Legacy mode.", "pullChatHistory": true}),
-	}, Edges: []domain.FlowEdge{
-		execEdge("chat-agent", "chat", "out", "agent", "in"),
-		dataEdge("chat-chatid", "chat", "chatId", "agent", "chatId"),
-	}}
-	runner := &instructionsCaptureRunner{}
-	chat := &recordingChatWriter{history: chatHistoryFixture()}
-	if _, err := NewEngine(catalog.New(), runner, nil, WithChatWriter(chat)).Execute(ctx, flow, "chat", Packet{"text": "ignored", "chatId": "conv-1", "chatRunId": "run-1"}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	messages := runner.requests[0].Messages
-	if len(messages) != 4 || messages[3].Content != "Summarise that in one word." {
-		t.Fatalf("messages = %#v, want the legacy toggle to behave as chat-history mode", messages)
-	}
-}
-
 func TestAgentChatHistoryRequiresChatID(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Anything.", "chatMode": "history"}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "Anything.", "chatMode": "history"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-agent", "start", "out", "agent", "in"),
 	}}
@@ -165,8 +145,8 @@ func TestAgentChatHistoryRequiresChatID(t *testing.T) {
 func TestAgentChatHistoryRejectsEmptyConversation(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("agent", "llm:agent", map[string]any{"instructions": "Anything.", "chatMode": "history", "chatId": "conv-empty"}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("agent", "llm:agent", map[string]any{"instructions": "Anything.", "chatMode": "history", "chatId": "conv-empty"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-agent", "start", "out", "agent", "in"),
 	}}
@@ -184,7 +164,7 @@ func TestAgentChatIDPinFollowsChatMode(t *testing.T) {
 	if !ok {
 		t.Fatal("llm:agent is not registered")
 	}
-	off, err := definitionForNode(definition, v2Node("agent", "llm:agent", map[string]any{"instructions": "x", "chatMode": "message"}))
+	off, err := definitionForNode(definition, cfgNode("agent", "llm:agent", map[string]any{"instructions": "x", "chatMode": "message"}))
 	if err != nil {
 		t.Fatalf("definitionForNode() error = %v", err)
 	}
@@ -193,7 +173,7 @@ func TestAgentChatIDPinFollowsChatMode(t *testing.T) {
 			t.Fatal("chatId pin must be hidden outside chat-history mode")
 		}
 	}
-	on, err := definitionForNode(definition, v2Node("agent", "llm:agent", map[string]any{"instructions": "x", "chatMode": "history"}))
+	on, err := definitionForNode(definition, cfgNode("agent", "llm:agent", map[string]any{"instructions": "x", "chatMode": "history"}))
 	if err != nil {
 		t.Fatalf("definitionForNode() error = %v", err)
 	}
@@ -243,9 +223,9 @@ func agentToolFlow(t *testing.T, agentConfig map[string]any) (domain.FlowDefinit
 		t.Fatal(err)
 	}
 	return domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("agent", "llm:agent", agentConfig),
-		v2Node("weather", "function:"+weather.ID, nil),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("agent", "llm:agent", agentConfig),
+		cfgNode("weather", "function:"+weather.ID, nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-agent", "start", "out", "agent", "in"),
 		{ID: "weather-tool", Source: "weather", SourceHandle: "tool", Target: "agent", TargetHandle: "tools", Kind: domain.PinTool},

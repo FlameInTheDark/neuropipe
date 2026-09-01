@@ -2,6 +2,8 @@ package base64encode
 
 import (
 	"context"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
@@ -69,5 +71,105 @@ func sameValue(left, right any) bool {
 		return ok && string(actual) == string(expected)
 	default:
 		return left == right
+	}
+}
+
+func registeredModule(t *testing.T) nodes.Node {
+	t.Helper()
+	registry := nodes.New()
+	if err := Register(registry); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	module, ok := registry.Get("data:base64_encode")
+	if !ok {
+		t.Fatal("data:base64_encode was not registered")
+	}
+	return module
+}
+
+func TestRegisterMetadata(t *testing.T) {
+	definition := registeredModule(t).Definition()
+	if definition.Type != "data:base64_encode" || definition.Mode != domain.NodePure || definition.Category != "Data" {
+		t.Fatalf("definition header = %#v", definition)
+	}
+	if got := definition.Inputs[0]; got.ID != "value" || got.DataType != domain.DataBytes || got.Direction != domain.PinInput || !got.Required {
+		t.Fatalf("value input = %#v", got)
+	}
+	if got := definition.Outputs[0]; got.ID != "result" || got.DataType != domain.DataText || got.Direction != domain.PinOutput {
+		t.Fatalf("result output = %#v", got)
+	}
+	for index, name := range []string{"inputType", "outputType"} {
+		if field := definition.Fields[index]; field.Name != name || field.Kind != "wire-representation" || !field.Required {
+			t.Fatalf("field %d = %#v, want the %s wire-representation field", index, field, name)
+		}
+	}
+	if want := map[string]any{"inputType": "bytes", "outputType": "text"}; !reflect.DeepEqual(definition.DefaultConfig, want) {
+		t.Fatalf("default config = %#v, want %#v", definition.DefaultConfig, want)
+	}
+}
+
+func TestExecuteEncodesExactValues(t *testing.T) {
+	module := registeredModule(t)
+	tests := []struct {
+		name   string
+		config map[string]any
+		value  any
+		want   any
+	}{
+		{"default bytes to text", nil, []byte("hello"), "aGVsbG8="},
+		{"text input to text output", map[string]any{"inputType": "text", "outputType": "text"}, "hello", "aGVsbG8="},
+		{"unicode text to text output", map[string]any{"inputType": "text", "outputType": "text"}, "Привет", "0J/RgNC40LLQtdGC"},
+		{"empty bytes", nil, []byte{}, ""},
+		{"bytes input to bytes output", map[string]any{"inputType": "bytes", "outputType": "bytes"}, []byte{1, 2}, []byte("AQI=")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := module.Execute(context.Background(), nodes.Invocation{
+				Node:            domain.FlowNode{Type: "data:base64_encode", Data: map[string]any{"config": test.config}},
+				Definition:      module.Definition(),
+				SchemaVersion:   domain.GraphSchemaV3,
+				Config:          test.config,
+				Inputs:          map[string]any{"value": test.value},
+				ConnectedInputs: map[string]bool{},
+			}, nil)
+			if err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if got := result.Outputs["result"]; !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("result = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestExecuteRejectsWrongRepresentations(t *testing.T) {
+	module := registeredModule(t)
+	tests := []struct {
+		name    string
+		config  map[string]any
+		value   any
+		message string
+	}{
+		{"text value with bytes input", nil, "hello", "value must be bytes"},
+		{"missing value with bytes input", nil, nil, "value must be bytes"},
+		{"invalid UTF-8 text", map[string]any{"inputType": "text"}, "\xff\xfe", "text value must be valid UTF-8"},
+		{"non-string inputType", map[string]any{"inputType": 5.0}, []byte("hello"), "inputType must be text"},
+		{"unsupported inputType", map[string]any{"inputType": "json"}, []byte("hello"), `inputType "json" is unsupported`},
+		{"unsupported outputType", map[string]any{"outputType": "list"}, []byte("hello"), `outputType "list" is unsupported`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := module.Execute(context.Background(), nodes.Invocation{
+				Node:            domain.FlowNode{Type: "data:base64_encode", Data: map[string]any{"config": test.config}},
+				Definition:      module.Definition(),
+				SchemaVersion:   domain.GraphSchemaV3,
+				Config:          test.config,
+				Inputs:          map[string]any{"value": test.value},
+				ConnectedInputs: map[string]bool{},
+			}, nil)
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("Execute() error = %v, want it to contain %q", err, test.message)
+			}
+		})
 	}
 }

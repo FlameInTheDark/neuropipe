@@ -289,8 +289,27 @@
         "data:greater_than",
         "data:json_parse",
         "data:get_variable",
-        "data:get_global_variable",
-        "data:reroute"
+        "data:get_global_variable"
+      ]
+    },
+    {
+      "id": "reference/arrays",
+      "title": "Array nodes",
+      "summary": "Build, append, pick, sort, split, reverse, slice, and deduplicate lists.",
+      "category": [
+        "Node reference",
+        "Arrays"
+      ],
+      "path": "reference/arrays.md",
+      "nodeTypes": [
+        "data:build_array",
+        "data:array_append",
+        "data:array_get",
+        "data:array_sort",
+        "data:array_split",
+        "data:array_reverse",
+        "data:array_slice",
+        "data:array_unique"
       ]
     },
     {
@@ -335,7 +354,6 @@
         "flow:gate",
         "flow:flip_flop",
         "flow:multi_gate",
-        "flow:reroute",
         "flow:break",
         "flow:set_variable",
         "flow:set_global_variable",
@@ -353,8 +371,7 @@
       "path": "reference/actions.md",
       "nodeTypes": [
         "action:http",
-        "action:report",
-        "action:subpipeline"
+        "action:report"
       ]
     },
     {
@@ -478,6 +495,31 @@
         "action:rename_file",
         "action:file_to_base64",
         "action:base64_to_file"
+      ]
+    },
+    {
+      "id": "reference/documents",
+      "title": "Document nodes",
+      "summary": "Read, write, and populate local Word and Excel documents with configurable value pins.",
+      "category": [
+        "Node reference",
+        "Documents"
+      ],
+      "path": "reference/documents.md",
+      "nodeTypes": [
+        "action:excel_read_rows",
+        "action:excel_append_rows",
+        "action:excel_update_row",
+        "action:excel_delete_row",
+        "action:excel_read_cell",
+        "action:excel_write_cell",
+        "action:excel_list_worksheets",
+        "action:excel_add_worksheet",
+        "action:word_read_text",
+        "action:word_create",
+        "action:word_template_fill",
+        "action:word_append_text",
+        "action:word_replace_text"
       ]
     },
     {
@@ -618,10 +660,6 @@
       "documentId": "reference/data",
       "anchor": "get-global-variable"
     },
-    "data:reroute": {
-      "documentId": "reference/data",
-      "anchor": "data-reroute"
-    },
     "flow:branch": {
       "documentId": "reference/flow",
       "anchor": "branch"
@@ -662,10 +700,6 @@
       "documentId": "reference/flow",
       "anchor": "multigate"
     },
-    "flow:reroute": {
-      "documentId": "reference/flow",
-      "anchor": "flow-reroute"
-    },
     "flow:break": {
       "documentId": "reference/flow",
       "anchor": "break"
@@ -689,10 +723,6 @@
     "action:report": {
       "documentId": "reference/actions",
       "anchor": "create-report"
-    },
-    "action:subpipeline": {
-      "documentId": "reference/actions",
-      "anchor": "run-pipeline"
     },
     "action:list_directory": {
       "documentId": "reference/local",

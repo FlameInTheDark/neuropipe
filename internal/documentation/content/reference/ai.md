@@ -1,6 +1,6 @@
 # AI nodes
 
-AI action nodes use the selected provider/model and execute through an exec input. Their resolved prompts and outputs are recorded redacted in the execution log. Set an LLM queue limit appropriate for the active local runtime.
+AI action nodes use their selected provider/model (defaulting to the app's default provider and its default model) and execute through an exec input. Their resolved prompts and outputs are recorded redacted in the execution log. Set an LLM queue limit appropriate for the active local runtime.
 
 Every AI node can publish live progress to the chat run that triggered it: turn on **Update chat status** to reveal a **Chat Run ID** input pin (wire `Chat Trigger.Chat Run ID`). The node then reports "Thinking" while the model works, and agents additionally report "Running <tool>" for every connected tool call, until the run finishes with its normal final status.
 

@@ -81,12 +81,8 @@ const EMPTY: { nodes: GraphNode[]; edges: Edge[] } = { nodes: [], edges: [] };
  * Reroute knots are presentation-only. The Blueprint V3 model has no reroute
  * nodes: on save every knot chain collapses into a single edge carrying the
  * knot positions as waypoints; on load such edges are expanded back into
- * knots. Legacy flow:/data:reroute nodes (V2 revisions) still open as knots.
+ * knots.
  */
-
-function isLegacyRerouteNode(type: string): boolean {
-  return type === "flow:reroute" || type === "data:reroute";
-}
 
 /** Saved waypoint wires expand into pin-sized UI knots. */
 function expandWaypoints(nodes: GraphNode[], edges: Edge[]): { nodes: GraphNode[]; edges: Edge[] } {
@@ -121,29 +117,6 @@ function expandWaypoints(nodes: GraphNode[], edges: Edge[]): { nodes: GraphNode[
     });
   }
   return { nodes: [...nodes, ...knots], edges: plain };
-}
-
-/** Legacy V2 reroute *nodes* also open as knots (validator rejects them in V3). */
-function toUiReroutes(nodes: GraphNode[], edges: Edge[]): { nodes: GraphNode[]; edges: Edge[] } {
-  if (!nodes.some((n) => isLegacyRerouteNode(n.type))) return { nodes, edges };
-  let nextEdges = edges;
-  const nextNodes = nodes.map((n) => {
-    if (!isLegacyRerouteNode(n.type)) return n;
-    const isExec = n.type === "flow:reroute";
-    let dataType = isExec ? "exec" : "any";
-    if (!isExec) {
-      const fed = edges.find((e) => e.to.node === n.id) ?? edges.find((e) => e.from.node === n.id);
-      if (fed?.dataType && fed.dataType !== "exec") dataType = fed.dataType;
-      else if (fed && fed.kind === "exec") dataType = "exec";
-    }
-    nextEdges = nextEdges.map((e) => ({
-      ...e,
-      to: e.to.node === n.id ? { node: n.id, port: REROUTE_IN } : e.to,
-      from: e.from.node === n.id ? { node: n.id, port: REROUTE_OUT } : e.from,
-    }));
-    return createRerouteNode(n.id, n.x, n.y, dataType as never);
-  });
-  return { nodes: nextNodes, edges: nextEdges };
 }
 
 interface CollapsedEdge extends Edge {
@@ -549,7 +522,6 @@ export function useGraphEditor(options: {
         }
         const hydrated = hydrateGraph(definition, definitionIndex);
         Object.assign(hydrated, expandWaypoints(hydrated.nodes, hydrated.edges));
-        Object.assign(hydrated, toUiReroutes(hydrated.nodes, hydrated.edges));
         setGroups(hydrated.groups ?? []);
         setComments(hydrated.comments ?? []);
 
@@ -583,7 +555,6 @@ export function useGraphEditor(options: {
       try {
         const hydrated = hydrateGraph(item.draftDefinition, definitionIndex);
         Object.assign(hydrated, expandWaypoints(hydrated.nodes, hydrated.edges));
-        Object.assign(hydrated, toUiReroutes(hydrated.nodes, hydrated.edges));
         setGroups(hydrated.groups ?? []);
         setComments(hydrated.comments ?? []);
 

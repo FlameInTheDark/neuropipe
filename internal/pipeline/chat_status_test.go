@@ -15,7 +15,7 @@ func TestAgentReportsToolProgressToChatRun(t *testing.T) {
 	flow, store := agentToolFlow(t, map[string]any{"instructions": "Use the tool.", "maxTurns": 3.0, "updateChatStatus": true})
 	// Replace the fixture's button trigger with the chat trigger that owns
 	// the run being reported on.
-	flow.Nodes[0] = v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"})
+	flow.Nodes[0] = cfgNode("chat", "trigger:chat", map[string]any{"label": "Chat"})
 	flow.Edges[0] = execEdge("chat-agent", "chat", "out", "agent", "in")
 	flow.Edges = append(flow.Edges, dataEdge("chat-runid", "chat", "chatRunId", "agent", "chatRunId"))
 	runner := &loopingToolRunner{toolRounds: 1}
@@ -42,8 +42,8 @@ func TestAgentReportsToolProgressToChatRun(t *testing.T) {
 func TestLLMPromptReportsThinkingStatus(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("chat", "trigger:chat", map[string]any{"label": "Chat"}),
-		v2Node("prompt", "llm:prompt", map[string]any{"prompt": "Hello.", "updateChatStatus": true}),
+		cfgNode("chat", "trigger:chat", map[string]any{"label": "Chat"}),
+		cfgNode("prompt", "llm:prompt", map[string]any{"prompt": "Hello.", "updateChatStatus": true}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("chat-prompt", "chat", "out", "prompt", "in"),
 		dataEdge("chat-runid", "chat", "chatRunId", "prompt", "chatRunId"),
@@ -61,8 +61,8 @@ func TestLLMPromptReportsThinkingStatus(t *testing.T) {
 func TestLLMNodesStaySilentWithoutStatusToggle(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("prompt", "llm:prompt", map[string]any{"prompt": "Hello."}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("prompt", "llm:prompt", map[string]any{"prompt": "Hello."}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-prompt", "start", "out", "prompt", "in"),
 	}}
@@ -79,8 +79,8 @@ func TestLLMNodesStaySilentWithoutStatusToggle(t *testing.T) {
 func TestLLMStatusToggleRequiresChatRunID(t *testing.T) {
 	ctx := context.Background()
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("prompt", "llm:prompt", map[string]any{"prompt": "Hello.", "updateChatStatus": true}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("prompt", "llm:prompt", map[string]any{"prompt": "Hello.", "updateChatStatus": true}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-prompt", "start", "out", "prompt", "in"),
 	}}
@@ -98,7 +98,7 @@ func TestLLMChatRunIDPinFollowsToggle(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s definition is missing", nodeType)
 		}
-		off, err := definitionForNode(definition, v2Node("node", nodeType, map[string]any{"updateChatStatus": false}))
+		off, err := definitionForNode(definition, cfgNode("node", nodeType, map[string]any{"updateChatStatus": false}))
 		if err != nil {
 			t.Fatalf("%s definitionForNode() error = %v", nodeType, err)
 		}
@@ -107,7 +107,7 @@ func TestLLMChatRunIDPinFollowsToggle(t *testing.T) {
 				t.Fatalf("%s chatRunId pin must be hidden while status updates are off", nodeType)
 			}
 		}
-		on, err := definitionForNode(definition, v2Node("node", nodeType, map[string]any{"updateChatStatus": true}))
+		on, err := definitionForNode(definition, cfgNode("node", nodeType, map[string]any{"updateChatStatus": true}))
 		if err != nil {
 			t.Fatalf("%s definitionForNode() error = %v", nodeType, err)
 		}

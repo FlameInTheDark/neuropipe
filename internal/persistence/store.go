@@ -37,52 +37,11 @@ func New(root string) (*Store, error) {
 	}
 	database.SetMaxOpenConns(1)
 	store := &Store{db: database, root: root}
-	if err := store.backupLegacyGraphs(context.Background()); err != nil {
-		_ = database.Close()
-		return nil, err
-	}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = database.Close()
 		return nil, err
 	}
-	if err := store.migrateBlueprintCatalog(context.Background()); err != nil {
-		_ = database.Close()
-		return nil, err
-	}
-	if err := store.migrateBlueprintV3(context.Background()); err != nil {
-		_ = database.Close()
-		return nil, err
-	}
-	if err := store.migrateRerouteWaypoints(context.Background()); err != nil {
-		_ = database.Close()
-		return nil, err
-	}
 	return store, nil
-}
-
-// backupLegacyGraphs creates a consistent SQLite copy immediately before the
-// one-way Blueprint-v2 migration, but only when v1 graphs actually exist.
-func (s *Store) backupLegacyGraphs(ctx context.Context) error {
-	var tables int
-	if err := statements(s.db).Select("COUNT(*)").From("sqlite_master").Where(squirrel.Eq{"type": "table", "name": "pipelines"}).QueryRowContext(ctx).Scan(&tables); err != nil {
-		return fmt.Errorf("check database schema: %w", err)
-	}
-	if tables == 0 {
-		return nil
-	}
-	var legacy int
-	if err := statements(s.db).Select("COUNT(*)").From("pipelines").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":2%").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":3%").QueryRowContext(ctx).Scan(&legacy); err != nil {
-		return fmt.Errorf("check legacy graphs: %w", err)
-	}
-	if legacy == 0 {
-		return nil
-	}
-	backup := filepath.Join(s.root, "neuropipe-pre-blueprint-v2-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".db")
-	escaped := strings.ReplaceAll(backup, "'", "''")
-	if _, err := s.db.ExecContext(ctx, "VACUUM INTO '"+escaped+"'"); err != nil {
-		return fmt.Errorf("back up legacy database: %w", err)
-	}
-	return nil
 }
 
 // Close releases database resources.
@@ -329,17 +288,8 @@ CREATE TABLE IF NOT EXISTS function_revisions (
 );
 CREATE INDEX IF NOT EXISTS functions_updated_at ON functions(updated_at DESC);
 CREATE INDEX IF NOT EXISTS function_revisions_function_id ON function_revisions(function_id, revision DESC);
-CREATE TABLE IF NOT EXISTS legacy_graphs (
-  pipeline_id TEXT PRIMARY KEY REFERENCES pipelines(id) ON DELETE CASCADE,
-  detected_at TEXT NOT NULL,
-  reason TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS blueprint_migration_issues (
-  id TEXT PRIMARY KEY,
-  pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
-  issue TEXT NOT NULL,
-  detected_at TEXT NOT NULL
-);
+DROP TABLE IF EXISTS legacy_graphs;
+DROP TABLE IF EXISTS blueprint_migration_issues;
 CREATE TABLE IF NOT EXISTS metric_execution_events (
   execution_id TEXT PRIMARY KEY,
   pipeline_id TEXT NOT NULL,
@@ -493,31 +443,6 @@ CREATE TABLE IF NOT EXISTS remote_executors (
 	}
 	if err := s.ensureStorageColumns(ctx); err != nil {
 		return err
-	}
-	if err := s.repairV3LegacyMarkers(ctx); err != nil {
-		return err
-	}
-	// Graphs without a supported schema version are preserved for manual rebuild
-	// and their triggers are disabled before the V3 runtime can process them.
-	legacyPipelines := sqliteStatements.Select("id").Column("?", stamp(time.Now().UTC())).Column("?", "Blueprint v3 rebuild required").From("pipelines").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":2%").Where("draft_definition NOT LIKE ?", "%\"schemaVersion\":3%")
-	_, _ = statements(s.db).Insert("legacy_graphs").Columns("pipeline_id", "detected_at", "reason").Select(legacyPipelines).Suffix("ON CONFLICT (pipeline_id) DO NOTHING").ExecContext(ctx)
-	legacyMarkers := sqliteStatements.Select("pipeline_id").From("legacy_graphs")
-	_, _ = statements(s.db).Update("trigger_bindings").Set("enabled", false).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Expr("pipeline_id IN (?)", legacyMarkers)).ExecContext(ctx)
-	_, _ = statements(s.db).Update("pipelines").Set("status", domain.PipelineLegacy).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Expr("id IN (?)", legacyMarkers)).ExecContext(ctx)
-	return nil
-}
-
-// repairV3LegacyMarkers removes records written by the brief V3 detector bug
-// that classified valid V3 graphs as legacy. The graph is deliberately made a
-// draft: restoring publication would require reconstructing the prior revision
-// and trust state, while drafts are immediately editable and safe.
-func (s *Store) repairV3LegacyMarkers(ctx context.Context) error {
-	v3Pipelines := sqliteStatements.Select("id").From("pipelines").Where("draft_definition LIKE ?", "%\"schemaVersion\":3%")
-	if _, err := statements(s.db).Delete("legacy_graphs").Where(squirrel.Expr("pipeline_id IN (?)", v3Pipelines)).ExecContext(ctx); err != nil {
-		return fmt.Errorf("remove invalid V3 legacy markers: %w", err)
-	}
-	if _, err := statements(s.db).Update("pipelines").Set("status", domain.PipelineDraft).Set("updated_at", stamp(time.Now().UTC())).Where(squirrel.Eq{"status": domain.PipelineLegacy}).Where("draft_definition LIKE ?", "%\"schemaVersion\":3%").ExecContext(ctx); err != nil {
-		return fmt.Errorf("restore invalid V3 legacy pipelines: %w", err)
 	}
 	return nil
 }
@@ -781,8 +706,7 @@ func (s *Store) DeletePipeline(ctx context.Context, id string) error {
 
 // ListPipelines returns concise cards ordered by newest edits.
 func (s *Store) ListPipelines(ctx context.Context) ([]domain.PipelineSummary, error) {
-	migrationIssue := sqliteStatements.Select("issue").From("blueprint_migration_issues mi").Where("mi.pipeline_id = p.id").OrderBy("mi.detected_at DESC").Limit(1)
-	rows, err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.published_revision", "p.updated_at", "COUNT(t.id)", "COALESCE(p.executor_id, '')", "COALESCE(e.name, '')").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").LeftJoin("trigger_bindings t ON t.pipeline_id = p.id").LeftJoin("remote_executors e ON e.id = p.executor_id").GroupBy("p.id", "p.executor_id").OrderBy("p.updated_at DESC").QueryContext(ctx)
+	rows, err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.published_revision", "p.updated_at", "COUNT(t.id)", "COALESCE(p.executor_id, '')", "COALESCE(e.name, '')").From("pipelines p").LeftJoin("trigger_bindings t ON t.pipeline_id = p.id").LeftJoin("remote_executors e ON e.id = p.executor_id").GroupBy("p.id", "p.executor_id").OrderBy("p.updated_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list pipelines: %w", err)
 	}
@@ -792,7 +716,7 @@ func (s *Store) ListPipelines(ctx context.Context) ([]domain.PipelineSummary, er
 		var item domain.PipelineSummary
 		var status string
 		var updated string
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Icon, &item.IconColor, &item.IconBackground, &status, &item.PublishedRevision, &updated, &item.TriggerCount, &item.ExecutorID, &item.ExecutorName, &item.MigrationIssue); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Icon, &item.IconColor, &item.IconBackground, &status, &item.PublishedRevision, &updated, &item.TriggerCount, &item.ExecutorID, &item.ExecutorName); err != nil {
 			return nil, fmt.Errorf("scan pipeline summary: %w", err)
 		}
 		item.Status = domain.PipelineStatus(status)
@@ -822,8 +746,7 @@ func (s *Store) ListPublishedPipelines(ctx context.Context) ([]domain.PipelineSu
 func (s *Store) GetPipeline(ctx context.Context, id string) (domain.Pipeline, error) {
 	var pipeline domain.Pipeline
 	var status, definitionJSON, created, updated string
-	migrationIssue := sqliteStatements.Select("issue").From("blueprint_migration_issues mi").Where("mi.pipeline_id = p.id").OrderBy("mi.detected_at DESC").Limit(1)
-	err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.draft_definition", "p.published_revision", "p.created_at", "p.updated_at", "COALESCE(p.executor_id, '')").Column(squirrel.Expr("COALESCE((?), '')", migrationIssue)).From("pipelines p").Where(squirrel.Eq{"p.id": id}).QueryRowContext(ctx).Scan(&pipeline.ID, &pipeline.Name, &pipeline.Description, &pipeline.Icon, &pipeline.IconColor, &pipeline.IconBackground, &status, &definitionJSON, &pipeline.PublishedRevision, &created, &updated, &pipeline.ExecutorID, &pipeline.MigrationIssue)
+	err := statements(s.db).Select("p.id", "p.name", "p.description", "p.icon", "p.icon_color", "p.icon_background", "p.status", "p.draft_definition", "p.published_revision", "p.created_at", "p.updated_at", "COALESCE(p.executor_id, '')").From("pipelines p").Where(squirrel.Eq{"p.id": id}).QueryRowContext(ctx).Scan(&pipeline.ID, &pipeline.Name, &pipeline.Description, &pipeline.Icon, &pipeline.IconColor, &pipeline.IconBackground, &status, &definitionJSON, &pipeline.PublishedRevision, &created, &updated, &pipeline.ExecutorID)
 	if err != nil {
 		return domain.Pipeline{}, fmt.Errorf("get pipeline: %w", err)
 	}
@@ -847,13 +770,6 @@ func (s *Store) GetPipeline(ctx context.Context, id string) (domain.Pipeline, er
 
 // SaveDraft updates the editable definition without changing live triggers.
 func (s *Store) SaveDraft(ctx context.Context, pipeline domain.Pipeline) (domain.Pipeline, error) {
-	var status string
-	if err := statements(s.db).Select("status").From("pipelines").Where(squirrel.Eq{"id": pipeline.ID}).QueryRowContext(ctx).Scan(&status); err != nil {
-		return domain.Pipeline{}, fmt.Errorf("read draft status: %w", err)
-	}
-	if domain.PipelineStatus(status) == domain.PipelineLegacy {
-		return domain.Pipeline{}, fmt.Errorf("legacy pipeline %q is read-only; create a new Blueprint v3 pipeline", pipeline.Name)
-	}
 	definitionJSON, err := encode(pipeline.DraftDefinition)
 	if err != nil {
 		return domain.Pipeline{}, err
@@ -935,9 +851,6 @@ func (s *Store) Publish(ctx context.Context, pipeline domain.Pipeline, bindings 
 	}
 	if _, err := statements(tx).Delete("permissions").Where(squirrel.Eq{"pipeline_id": pipeline.ID}).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("revoke prior permission grants: %w", err)
-	}
-	if _, err := statements(tx).Delete("blueprint_migration_issues").Where(squirrel.Eq{"pipeline_id": pipeline.ID}).ExecContext(ctx); err != nil {
-		return domain.Pipeline{}, fmt.Errorf("clear resolved migration issues: %w", err)
 	}
 	if _, err := statements(tx).Update("pipelines").Set("status", domain.PipelineActive).Set("published_revision", next).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": pipeline.ID}).ExecContext(ctx); err != nil {
 		return domain.Pipeline{}, fmt.Errorf("activate pipeline: %w", err)

@@ -2,6 +2,18 @@ import { dataPinColor } from "@/lib/node-pins";
 import { normalizeDrawImageDoc } from "@/lib/draw-image";
 import { normalizeEmbedDoc } from "@/lib/embed";
 import {
+  parsePinBindings,
+  pinBindingInputPorts,
+  pinBindingOutputPorts,
+} from "@/lib/document-pins";
+import {
+  buildEntryPorts,
+  buildItemPorts,
+  parseBuildItems,
+  parseCollectionType,
+  parseMapEntries,
+} from "@/lib/build-nodes";
+import {
   resolveJavaScriptInputs,
   resolveJavaScriptOutputs,
 } from "@/lib/javascript-node";
@@ -120,8 +132,26 @@ function castTargetDataType(target: unknown): DataType {
   }
 }
 
+/** JSON roots cover the structural and scalar types; bytes never appears.
+ *  Unlike Cast, a blank value deliberately ignores the definition default and
+ *  resolves to any: graphs saved before the Root type field existed keep their
+ *  untyped contract on both canvas and validator. */
+function jsonRootType(value: unknown): DataType {
+  switch (value) {
+    case "object":
+    case "list":
+    case "text":
+    case "number":
+    case "boolean":
+      return value;
+    default:
+      return "any";
+  }
+}
+
 /** Objects cast into the graph-wide map<string, any> shape so the output
- *  connects to first-party object inputs (KV hash fields, SQL rows, storage). */
+ *  connects to first-party object inputs (KV hash fields, SQL rows, storage).
+ *  Parse JSON's object root uses the same shape. */
 function castTypeSpec(dataType: DataType): TypeSpec {
   if (dataType === "object") {
     return { kind: "map", key: { kind: "string" }, value: { kind: "any" } };
@@ -169,19 +199,10 @@ function isSwitchValueType(
   return value === "text" || value === "number" || value === "boolean";
 }
 
-export function switchConfigFromValue(
-  value: unknown,
-  legacyOptions?: unknown,
-): SwitchConfigValue {
+export function switchConfigFromValue(value: unknown): SwitchConfigValue {
   const parsed = parseStructuredValue(value);
   if (!isRecord(parsed)) {
-    const legacyCases = routeOptionsFromValue(legacyOptions).map((item) => ({
-      id: item.id,
-      label: item.label,
-      valueType: "text" as const,
-      value: item.id,
-    }));
-    return { comparator: "equals", cases: legacyCases };
+    return { comparator: "equals", cases: [] };
   }
   const comparator = isSwitchComparator(parsed.comparator)
     ? parsed.comparator
@@ -242,13 +263,7 @@ export function routeOptionsFromValue(value: unknown): RouteOptionValue[] {
   });
 }
 
-export function fieldOutputsFromValue(
-  value: unknown,
-  config?: Record<string, unknown>,
-): FieldOutputValue[] {
-  if (value === undefined && typeof config?.path === "string") {
-    return [{ id: "value", label: "Value", path: config.path, dataType: "any" }];
-  }
+export function fieldOutputsFromValue(value: unknown): FieldOutputValue[] {
   const parsed = parseStructuredValue(value);
   if (!Array.isArray(parsed)) return [];
   const seen = new Set<string>();
@@ -329,6 +344,20 @@ function definitionPorts(ports: NodePort[] | undefined | null): NodePort[] {
   return Array.isArray(ports) ? ports : [];
 }
 
+/** Config key holding a document node's pin-binding rows. */
+function documentPinsKey(nodeType: string): string {
+  switch (nodeType) {
+    case "action:word_template_fill":
+      return "valuePins";
+    case "action:excel_append_rows":
+      return "columnPins";
+    case "action:excel_update_row":
+      return "fieldPins";
+    default:
+      return "cellPins";
+  }
+}
+
 export function resolveConfigDrivenInputs(
   definition: NodeDefinition | undefined,
   config: Record<string, unknown>,
@@ -401,6 +430,18 @@ export function resolveConfigDrivenInputs(
   if (definition.type === "action:javascript") {
     return resolveJavaScriptInputs({ ...definition, inputs }, config);
   }
+  if (
+    definition.type === "action:word_template_fill" ||
+    definition.type === "action:excel_write_cell" ||
+    definition.type === "action:excel_append_rows" ||
+    definition.type === "action:excel_update_row"
+  ) {
+    // dynamic input pins mirror the configured value/cell/column/field rows
+    // (Go resolver twins — dynpins.Configured + InputPins)
+    const key = documentPinsKey(definition.type);
+    const rows = parsePinBindings(config[key] ?? definition.defaultConfig?.[key]);
+    return [...inputs, ...pinBindingInputPorts(rows)];
+  }
   if (definition.type === "data:base64_encode" || definition.type === "data:base64_decode") {
     const representation = textBytesRepresentation(config.inputType ?? definition.defaultConfig?.inputType);
     return inputs.map((pin) =>
@@ -432,18 +473,27 @@ export function resolveConfigDrivenInputs(
     }
     if (definition.type === "llm:agent" || definition.type === "llm:coding_agent") {
       const mode = config.chatMode ?? definition.defaultConfig?.chatMode;
-      // Graphs saved with the earlier boolean toggle migrate through its value;
-      // an explicit one-message default must not mask it.
-      const legacy = config.pullChatHistory;
-      const historyMode =
-        mode === "history" || legacy === true || legacy === "true";
-      if (!historyMode) {
+      if (mode !== "history") {
         pins = pins.filter((pin) => pin.id !== "chatId");
       }
     }
     return pins;
   }
-  if (definition.type !== "data:build_object" || config.fields === undefined) {
+  if (definition.type === "data:build_array") {
+    // one input pin per configured item, all typed by the node's element
+    // type, mirroring the Go resolver twin
+    const items = parseBuildItems(config.items ?? definition.defaultConfig?.items);
+    const dataType = parseCollectionType(config.elementType ?? definition.defaultConfig?.elementType);
+    return buildItemPorts(items, dataType);
+  }
+  if (definition.type === "data:build_map") {
+    // one input pin per configured entry, all typed by the node's value
+    // type, mirroring the Go resolver twin
+    const entries = parseMapEntries(config.entries ?? definition.defaultConfig?.entries);
+    const dataType = parseCollectionType(config.valueType ?? definition.defaultConfig?.valueType);
+    return buildEntryPorts(entries, dataType);
+  }
+  if (definition.type !== "data:build_object") {
     return [...inputs];
   }
   const fields = objectFieldsFromValue(
@@ -470,6 +520,11 @@ export function resolveConfigDrivenOutputs(
   if (definition.type === "action:javascript") {
     return resolveJavaScriptOutputs({ ...definition, outputs }, config);
   }
+  if (definition.type === "action:excel_read_cell") {
+    // one output pin per configured cell, mirroring the Go resolver twin
+    const rows = parsePinBindings(config.cellPins ?? definition.defaultConfig?.cellPins);
+    return [...outputs, ...pinBindingOutputPorts(rows)];
+  }
   if (definition.type === "discord:app_command") {
     // one output pin per command option, mirroring the Go resolver twin
     return [...outputs, ...commandOptionPorts(config.command ?? definition.defaultConfig?.command)];
@@ -485,10 +540,8 @@ export function resolveConfigDrivenOutputs(
     );
   }
   if (definition.type === "flow:switch") {
-    const usingLegacyOptions = config.switch === undefined && config.options !== undefined;
     const configured = switchConfigFromValue(
-      usingLegacyOptions ? undefined : config.switch ?? definition.defaultConfig?.switch,
-      config.options,
+      config.switch ?? definition.defaultConfig?.switch,
     );
     return [
       ...configured.cases.map((item) => ({
@@ -533,6 +586,18 @@ export function resolveConfigDrivenOutputs(
   if (definition.type === "data:cast") {
     const target = config.target ?? definition.defaultConfig?.target;
     const dataType = castTargetDataType(target);
+    return outputs.map((pin) =>
+      pin.id === "value"
+        ? { ...pin, dataType, type: castTypeSpec(dataType), color: dataPinColor(dataType) }
+        : pin,
+    );
+  }
+  if (definition.type === "data:json_parse") {
+    // Root type refines the value pin. Blank config — graphs saved before the
+    // field existed — stays any so legacy wires keep validating; the Go
+    // resolver twin applies the same rule, so the canvas never shows a typed
+    // pin the validator would reject.
+    const dataType = jsonRootType(config.type);
     return outputs.map((pin) =>
       pin.id === "value"
         ? { ...pin, dataType, type: castTypeSpec(dataType), color: dataPinColor(dataType) }
@@ -592,15 +657,8 @@ export function resolveConfigDrivenOutputs(
   ) {
     return [...outputs];
   }
-  const hasLegacyPath =
-    definition.type === "data:get_field" &&
-    config.outputs === undefined &&
-    typeof config.path === "string";
   const configuredOutputs = fieldOutputsFromValue(
-    hasLegacyPath
-      ? undefined
-      : config.outputs ?? definition.defaultConfig?.outputs,
-    config,
+    config.outputs ?? definition.defaultConfig?.outputs,
   );
   return configuredOutputs.map((output) => ({
     id: output.id,

@@ -4,7 +4,7 @@ import { Events } from "@wailsio/runtime";
 import { ask } from "@/stores/confirmation";
 import i18n from "@/i18n";
 import { desktop } from "@/lib/bridge";
-import type { Database, Pipeline, Storage, TwitchIdentity, DiscordIdentity, TelegramIdentity } from "@/lib/types";
+import type { Database, Pipeline, ProviderConfig, Storage, TwitchIdentity, DiscordIdentity, TelegramIdentity } from "@/lib/types";
 import { pipelineFromBackend } from "@/lib/adapters";
 import { TopBar } from "./components/TopBar";
 import { IconRail, NAV_ALL } from "./components/IconRail";
@@ -537,6 +537,11 @@ export default function App() {
     () => workspace.settings?.telegram?.identities ?? [],
     [workspace.settings],
   );
+  const providers: ProviderConfig[] = useMemo(
+    () => workspace.settings?.providers ?? [],
+    [workspace.settings],
+  );
+  const defaultProviderId = workspace.settings?.defaultProviderId ?? "";
 
   const viewTitle = t(NAV_ALL.find((n) => n.id === nav.rail)?.labelKey ?? "app.title");
   const activeRuns = Object.values(workspace.running).filter(Boolean).length;
@@ -608,8 +613,8 @@ export default function App() {
                   <div className="flex h-full w-full items-center justify-center rounded-xl border border-ink-700 bg-ink-900/70">
                     <EmptyState
                       icon="AlertTriangle"
-                      title={t("editor.legacyTitle")}
-                      hint={t("editor.legacyDescription")}
+                      title={t("editor.loadErrorTitle")}
+                      hint={t("editor.loadErrorDescription")}
                     />
                   </div>
                 </div>
@@ -637,6 +642,8 @@ export default function App() {
                     pipelines: workspace.pipelines,
                     secrets,
                     databases,
+                    providers,
+                    defaultProviderId,
                     storages,
                     identities,
                     discordIdentities,

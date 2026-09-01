@@ -65,7 +65,7 @@ func definition() domain.NodeDefinition {
 }
 
 // sourceField builds one image-source input gated to its source mode (and
-// to Auto, which keeps every input reachable for legacy graphs).
+// to Auto, which keeps every input reachable for unconfigured nodes).
 func sourceField(name, label, kind, placeholder, source string) domain.ConfigField {
 	return domain.ConfigField{
 		Name: name, Label: label, Kind: kind, Placeholder: placeholder,
@@ -183,11 +183,7 @@ func documentPorts(document EmbedDocument) []domain.NodePort {
 
 func configValue(node domain.FlowNode, key string) any {
 	config := map[string]any{}
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		config = value
-	} else if len(node.Data) > 0 {
-		config = node.Data
-	}
+	config, _ = node.Data["config"].(map[string]any)
 	return config[key]
 }
 

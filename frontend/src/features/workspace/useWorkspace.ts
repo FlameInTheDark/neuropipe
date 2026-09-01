@@ -256,8 +256,18 @@ export function useWorkspace(notify: (text: string, icon?: string) => void) {
   const saveSettings = useCallback(
     async (next: Settings) => {
       await desktop.saveSettings(next);
-      setSettings(next);
-      await applySettingsLanguage(next);
+      /* Adopt the backend's view of the saved settings instead of echoing the
+       * submitted draft: the server normalizes provider defaults and syncs the
+       * managed llama.cpp model list from the Models tab. A failed re-read
+       * falls back to the submitted copy so the UI never rolls back visibly. */
+      let saved: Settings | null = null;
+      try {
+        saved = await desktop.getSettings();
+      } catch {
+        /* transient hiccup — the save itself succeeded */
+      }
+      if (mounted.current) setSettings(saved ?? next);
+      await applySettingsLanguage(saved ?? next);
     },
     [applySettingsLanguage],
   );

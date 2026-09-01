@@ -56,9 +56,8 @@ func Evaluate(_ context.Context, invocation nodes.Invocation, _ nodes.Runtime) (
 	return result, nil
 }
 
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }

@@ -2,6 +2,7 @@ package keys
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
@@ -133,15 +134,14 @@ func TestDeleteUsesWiredKeyList(t *testing.T) {
 	}
 }
 
-func TestDeleteFallsBackToTextareaConfig(t *testing.T) {
-	executor := &executorStub{result: domain.KVCommandResult{Value: int64(2)}}
+// Legacy newline-separated textarea strings were removed with the strict V3
+// rework: only the visual list editor's array shape is accepted, so a string
+// config now yields no keys at all.
+func TestDeleteRejectsLegacyTextareaConfig(t *testing.T) {
 	module := nodes.Implementation{Metadata: deleteDefinition(), Executor: executeDelete}
 	config := map[string]any{"databaseId": "db-1", "keys": "a\n\n b \n"}
-	if _, err := module.Execute(context.Background(), invocation(config, map[string]any{}), runtimeStub{executor: executor}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if len(executor.request.Args) != 2 || executor.request.Args[0] != "a" || executor.request.Args[1] != "b" {
-		t.Fatalf("request = %#v", executor.request)
+	if _, err := module.Execute(context.Background(), invocation(config, map[string]any{}), runtimeStub{executor: &executorStub{}}); err == nil || !strings.Contains(err.Error(), "at least one key is required") {
+		t.Fatalf("Execute() error = %v, want the empty-keys rejection", err)
 	}
 }
 

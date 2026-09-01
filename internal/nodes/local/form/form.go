@@ -169,11 +169,10 @@ func resolveText(invocation nodes.Invocation, name, fallback string) string {
 	return fallback
 }
 
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }
 
 func dataColor(dataType domain.DataType) string {

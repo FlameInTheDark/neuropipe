@@ -370,15 +370,13 @@ function normalizeCases(cases: readonly SwitchCaseValue[], comparator: SwitchCom
 
 export function SwitchCasesEditor({
   value,
-  legacyOptions,
   onChange,
 }: {
   value: unknown;
-  legacyOptions?: unknown;
   onChange: (value: SwitchConfigValue) => void;
 }) {
   const { t } = useTranslation();
-  const configuration = switchConfigFromValue(value, legacyOptions);
+  const configuration = switchConfigFromValue(value);
   const comparatorOptions = useMemo(
     () =>
       [

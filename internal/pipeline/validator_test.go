@@ -10,7 +10,7 @@ import (
 func TestValidateRejectsLegacyGraphsAndInvalidPinKinds(t *testing.T) {
 	tests := []domain.FlowDefinition{
 		{Nodes: []domain.FlowNode{{ID: "start", Type: "trigger:button", Data: map[string]any{"config": map[string]any{"label": "Run"}}}}},
-		{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{v2Node("start", "trigger:button", map[string]any{"label": "Run"}), v2Node("constant", "data:constant", map[string]any{"value": true})}, Edges: []domain.FlowEdge{execEdge("bad", "start", "out", "constant", "value")}},
+		{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{cfgNode("start", "trigger:button", map[string]any{"label": "Run"}), cfgNode("constant", "data:constant", map[string]any{"type": "boolean", "value": true})}, Edges: []domain.FlowEdge{execEdge("bad", "start", "out", "constant", "value")}},
 	}
 	for _, flow := range tests {
 		if err := Validate(flow, catalog.New()); err == nil {
@@ -20,7 +20,7 @@ func TestValidateRejectsLegacyGraphsAndInvalidPinKinds(t *testing.T) {
 }
 
 func TestValidateAcceptsTypedDataAndExecEdges(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{v2Node("start", "trigger:button", map[string]any{"label": "Run"}), v2Node("constant", "data:constant", map[string]any{"value": true}), v2Node("branch", "flow:branch", nil)}, Edges: []domain.FlowEdge{execEdge("exec", "start", "out", "branch", "in"), dataEdge("data", "constant", "value", "branch", "condition")}}
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{cfgNode("start", "trigger:button", map[string]any{"label": "Run"}), cfgNode("constant", "data:constant", map[string]any{"type": "boolean", "value": true}), cfgNode("branch", "flow:branch", nil)}, Edges: []domain.FlowEdge{execEdge("exec", "start", "out", "branch", "in"), dataEdge("data", "constant", "value", "branch", "condition")}}
 	if err := Validate(flow, catalog.New()); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -29,10 +29,10 @@ func TestValidateAcceptsTypedDataAndExecEdges(t *testing.T) {
 func TestValidateV3AcceptsWaypointEdgesAsDirectWires(t *testing.T) {
 	waypoints := []domain.Position{{X: 120, Y: 240}, {X: 300, Y: 80}}
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("constant", "data:constant", map[string]any{"value": true, "type": "boolean"}),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("constant", "data:constant", map[string]any{"value": true, "type": "boolean"}),
+		cfgNode("branch", "flow:branch", nil),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		{ID: "exec", Source: "start", SourceHandle: "out", Target: "branch", TargetHandle: "in", Kind: domain.PinExec, Waypoints: waypoints},
 		{ID: "data", Source: "constant", SourceHandle: "value", Target: "branch", TargetHandle: "condition", Kind: domain.PinData, Waypoints: waypoints},
@@ -45,9 +45,9 @@ func TestValidateV3AcceptsWaypointEdgesAsDirectWires(t *testing.T) {
 
 func TestValidateV3WaypointsDoNotChangeEdgeContractErrors(t *testing.T) {
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("constant", "data:constant", map[string]any{"value": true}),
-		v2Node("branch", "flow:branch", nil),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("constant", "data:constant", map[string]any{"type": "text", "value": "yes"}),
+		cfgNode("branch", "flow:branch", nil),
 	}, Edges: []domain.FlowEdge{
 		{ID: "exec", Source: "start", SourceHandle: "out", Target: "branch", TargetHandle: "in", Kind: domain.PinExec},
 		{ID: "data", Source: "constant", SourceHandle: "value", Target: "branch", TargetHandle: "condition", Kind: domain.PinData, Waypoints: []domain.Position{{X: 1, Y: 2}}},
@@ -59,8 +59,8 @@ func TestValidateV3WaypointsDoNotChangeEdgeContractErrors(t *testing.T) {
 
 func TestValidateV3RejectsLegacyRerouteNodes(t *testing.T) {
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("relay", "flow:reroute", nil),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("relay", "flow:reroute", nil),
 	}}
 	if err := Validate(flow, catalog.New()); err == nil {
 		t.Fatal("Validate() accepted a legacy reroute in a V3 graph")
@@ -82,15 +82,15 @@ func TestPinsCompatibleRequiresExplicitV3Conversion(t *testing.T) {
 func TestValidateV3RejectsAnyNarrowingAndAllowsExplicitConstantType(t *testing.T) {
 	registry := catalog.New()
 	base := []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("constant", "data:constant", map[string]any{"value": "true"}),
-		v2Node("branch", "flow:branch", nil),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("constant", "data:constant", map[string]any{"value": "true"}),
+		cfgNode("branch", "flow:branch", nil),
 	}
 	edges := []domain.FlowEdge{execEdge("exec", "start", "out", "branch", "in"), dataEdge("data", "constant", "value", "branch", "condition")}
 	if err := Validate(domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: base, Edges: edges}, registry); err == nil {
 		t.Fatal("V3 accepted an any output connected to Boolean")
 	}
-	base[1] = v2Node("constant", "data:constant", map[string]any{"value": "true", "type": "boolean"})
+	base[1] = cfgNode("constant", "data:constant", map[string]any{"value": "true", "type": "boolean"})
 	if err := Validate(domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: base, Edges: edges}, registry); err != nil {
 		t.Fatalf("V3 rejected an explicitly typed Boolean constant: %v", err)
 	}
@@ -98,10 +98,10 @@ func TestValidateV3RejectsAnyNarrowingAndAllowsExplicitConstantType(t *testing.T
 
 func TestValidateV3AllowsExplicitTypeAssertNarrowing(t *testing.T) {
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("constant", "data:constant", map[string]any{"value": true}),
-		v2Node("assert", "data:type_assert", map[string]any{"typeSpec": map[string]any{"kind": "bool"}}),
-		v2Node("branch", "flow:branch", nil),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("constant", "data:constant", map[string]any{"type": "boolean", "value": true}),
+		cfgNode("assert", "data:type_assert", map[string]any{"typeSpec": map[string]any{"kind": "bool"}}),
+		cfgNode("branch", "flow:branch", nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("exec", "start", "out", "branch", "in"),
 		dataEdge("source-assert", "constant", "value", "assert", "value"),
@@ -130,9 +130,9 @@ func TestPinsCompatibleBytesContract(t *testing.T) {
 func TestValidateV3BytesPinsWireBytesToBytes(t *testing.T) {
 	registry := catalog.New()
 	base := []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("decode", "data:base64_to_bytes", map[string]any{"value": "aGVsbG8="}),
-		v2Node("upload", "action:storage_upload_file", map[string]any{"storageId": "stg-1", "source": "bytes", "remotePath": "out.bin"}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("decode", "data:base64_to_bytes", map[string]any{"value": "aGVsbG8="}),
+		cfgNode("upload", "action:storage_upload_file", map[string]any{"storageId": "stg-1", "source": "bytes", "remotePath": "out.bin"}),
 	}
 	edges := []domain.FlowEdge{
 		execEdge("exec", "start", "out", "upload", "in"),
@@ -143,9 +143,9 @@ func TestValidateV3BytesPinsWireBytesToBytes(t *testing.T) {
 	}
 
 	typed := []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("constant", "data:constant", map[string]any{"value": "aGVsbG8=", "type": "text"}),
-		v2Node("upload", "action:storage_upload_file", map[string]any{"storageId": "stg-1", "source": "bytes", "remotePath": "out.bin"}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("constant", "data:constant", map[string]any{"value": "aGVsbG8=", "type": "text"}),
+		cfgNode("upload", "action:storage_upload_file", map[string]any{"storageId": "stg-1", "source": "bytes", "remotePath": "out.bin"}),
 	}
 	if err := Validate(domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: typed, Edges: edges}, registry); err == nil {
 		t.Fatal("V3 accepted a text output wired into a bytes pin")

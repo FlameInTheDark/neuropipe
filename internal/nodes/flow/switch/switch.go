@@ -80,15 +80,11 @@ type caseDefinition struct {
 type configuration struct {
 	Comparator comparator
 	Cases      []caseDefinition
-	Legacy     bool
 }
 
 func configurationFor(config, defaults map[string]any) (configuration, error) {
 	if raw, exists := config["switch"]; exists {
 		return parseConfiguration(raw)
-	}
-	if legacy, exists := config["options"]; exists {
-		return legacyConfiguration(legacy)
 	}
 	return parseConfiguration(defaults["switch"])
 }
@@ -134,8 +130,12 @@ func parseConfiguration(raw any) (configuration, error) {
 }
 
 func parseCase(value map[string]any, selected comparator, index int) (caseDefinition, error) {
-	id := strings.TrimSpace(fmt.Sprint(value["id"]))
-	if id == "" {
+	rawID, exists := value["id"]
+	if !exists || rawID == nil {
+		return caseDefinition{}, fmt.Errorf("switch case %d needs an ID", index+1)
+	}
+	id := strings.TrimSpace(fmt.Sprint(rawID))
+	if id == "" || id == "<nil>" {
 		return caseDefinition{}, fmt.Errorf("switch case %d needs an ID", index+1)
 	}
 	label := strings.TrimSpace(fmt.Sprint(value["label"]))
@@ -151,38 +151,6 @@ func parseCase(value map[string]any, selected comparator, index int) (caseDefini
 		return caseDefinition{}, fmt.Errorf("switch case %q has invalid %s value: %w", id, valueType, err)
 	}
 	return caseDefinition{ID: id, Label: label, ValueType: valueType, Value: literal}, nil
-}
-
-func legacyConfiguration(value any) (configuration, error) {
-	items, ok := value.([]any)
-	if !ok {
-		return configuration{}, fmt.Errorf("options must be a list")
-	}
-	if len(items) == 0 {
-		return configuration{}, fmt.Errorf("add at least one option")
-	}
-	result := configuration{Comparator: equals, Legacy: true, Cases: make([]caseDefinition, 0, len(items))}
-	seen := make(map[string]struct{}, len(items))
-	for index, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			return configuration{}, fmt.Errorf("option %d must be an object", index+1)
-		}
-		id := strings.TrimSpace(fmt.Sprint(item["id"]))
-		if id == "" {
-			return configuration{}, fmt.Errorf("option %d needs an ID", index+1)
-		}
-		if _, exists := seen[id]; exists {
-			return configuration{}, fmt.Errorf("options contain duplicate ID %q", id)
-		}
-		seen[id] = struct{}{}
-		label := strings.TrimSpace(fmt.Sprint(item["label"]))
-		if label == "" {
-			label = id
-		}
-		result.Cases = append(result.Cases, caseDefinition{ID: id, Label: label, ValueType: domain.DataText, Value: id})
-	}
-	return result, nil
 }
 
 func validComparator(value comparator) bool {
@@ -233,9 +201,6 @@ func literal(value any, valueType domain.DataType) (any, error) {
 }
 
 func match(input any, configuration configuration, item caseDefinition) (bool, error) {
-	if configuration.Legacy {
-		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(input)), item.ID), nil
-	}
 	switch configuration.Comparator {
 	case equals:
 		return equal(input, item.Value, item.ValueType), nil
@@ -322,9 +287,8 @@ func number(value any) (float64, bool) {
 	}
 }
 
+// config returns the node's persisted V3 configuration.
 func config(node domain.FlowNode) map[string]any {
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		return value
-	}
-	return node.Data
+	value, _ := node.Data["config"].(map[string]any)
+	return value
 }

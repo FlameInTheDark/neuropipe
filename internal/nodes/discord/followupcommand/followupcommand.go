@@ -103,11 +103,7 @@ func pinColor(dataType domain.DataType) string {
 
 func configValue(node domain.FlowNode, key string) any {
 	config := map[string]any{}
-	if value, ok := node.Data["config"].(map[string]any); ok {
-		config = value
-	} else if len(node.Data) > 0 {
-		config = node.Data
-	}
+	config, _ = node.Data["config"].(map[string]any)
 	return config[key]
 }
 

@@ -66,23 +66,26 @@ const (
 
 // Desktop is the only object bound to the Wails renderer.
 type Desktop struct {
-	ctx                    context.Context
-	app                    *application.App
-	dataRoot               string
-	store                  *persistence.Store
-	registry               *catalog.Registry
-	vault                  *security.Vault
-	providers              *llm.Manager
-	metrics                *metrics.Service
-	plugins                *plugins.Manager
-	documentation          *documentation.Service
-	runs                   *execution.Service
-	chat                   *chatservice.Service
-	hotkeys                *hotkey.Service
-	scheduler              *scheduler.Service
-	llama                  *localruntime.LlamaManager
-	llamaFiles             *localruntime.LlamaCatalog
-	models                 *localruntime.ModelCatalog
+	ctx           context.Context
+	app           *application.App
+	dataRoot      string
+	store         *persistence.Store
+	registry      *catalog.Registry
+	vault         *security.Vault
+	providers     *llm.Manager
+	metrics       *metrics.Service
+	plugins       *plugins.Manager
+	documentation *documentation.Service
+	runs          *execution.Service
+	chat          *chatservice.Service
+	hotkeys       *hotkey.Service
+	scheduler     *scheduler.Service
+	llama         *localruntime.LlamaManager
+	llamaFiles    *localruntime.LlamaCatalog
+	models        *localruntime.ModelCatalog
+	// llamaRouteMu serializes managed llama.cpp model switches so one
+	// served model is stable while requests are in flight.
+	llamaRouteMu           sync.Mutex
 	progressMu             sync.RWMutex
 	runtimeInstallProgress domain.InstallProgress
 	modelInstallProgress   domain.InstallProgress
@@ -129,7 +132,7 @@ func New(version string) (*Desktop, error) {
 		_ = store.Close()
 		return nil, err
 	}
-	if err := normalizeConfiguredProvider(&settings); err != nil {
+	if err := normalizeConfiguredProviders(&settings); err != nil {
 		_ = store.Close()
 		return nil, err
 	}
@@ -170,7 +173,10 @@ func New(version string) (*Desktop, error) {
 	}
 	desktop.llama = localruntime.NewLlamaManager()
 	desktop.metrics = metrics.NewService(store, desktop.emit, metrics.NewProcessSampler(), desktop.llama.PID)
-	desktop.providers = llm.NewManager(settings, vault, llm.WithUsageRecorder(desktop.metrics))
+	// The managed llama.cpp provider routes through the app-owned runtime:
+	// it starts (or switches models) on demand instead of failing when the
+	// persisted loopback endpoint is stale or empty.
+	desktop.providers = llm.NewManager(settings, vault, llm.WithUsageRecorder(desktop.metrics), llm.WithLlamaRouter(desktop.routeManagedLlama))
 	desktop.dialogs = dialogs.New(nil, func(event string, payload ...any) {
 		if len(payload) > 0 {
 			desktop.emit(event, payload[0])
@@ -946,7 +952,7 @@ func (d *Desktop) GetExecution(id string) (domain.Execution, error) {
 	return d.store.GetExecution(d.context(), id)
 }
 
-// StartPublishedPipeline queues a published Blueprint-v2 graph for a direct
+// StartPublishedPipeline queues a published Blueprint graph for a direct
 // authenticated API invocation. It is an explicit run, not an unattended trigger.
 func (d *Desktop) StartPublishedPipeline(pipelineID, triggerNodeID string, input map[string]any) (domain.Execution, error) {
 	if err := d.refreshFunctionRegistry(d.context()); err != nil {
@@ -1376,8 +1382,14 @@ func (d *Desktop) saveTelegramIdentity(ctx context.Context, identity domain.Tele
 
 func (d *Desktop) GetSettings() domain.Settings {
 	d.settingsMu.RLock()
-	defer d.settingsMu.RUnlock()
-	return d.settings
+	settings := d.settings
+	d.settingsMu.RUnlock()
+	// The managed llama.cpp provider's model list mirrors the Models tab, so
+	// every read returns what is actually on disk. The sync only touches the
+	// returned copy: shared state such as the live manager configuration is
+	// never mutated from a read path.
+	syncManagedLlamaModels(&settings, d.installedLlamaFiles())
+	return settings
 }
 
 func (d *Desktop) SaveSettings(settings domain.Settings) error {
@@ -1402,9 +1414,12 @@ func (d *Desktop) SaveSettings(settings domain.Settings) error {
 	if settings.LlamaRuntime.ContextSize < 1024 {
 		settings.LlamaRuntime.ContextSize = 8192
 	}
-	if err := normalizeConfiguredProvider(&settings); err != nil {
+	if err := normalizeConfiguredProviders(&settings); err != nil {
 		return err
 	}
+	// Persist the managed llama.cpp provider with the model list the Models
+	// tab currently holds, so a save can never write a stale list back.
+	syncManagedLlamaModels(&settings, d.installedLlamaFiles())
 	if err := validateAPISettings(&settings); err != nil {
 		return err
 	}
@@ -1480,6 +1495,13 @@ func (d *Desktop) StartLlamaRuntime() (domain.LlamaRuntimeStatus, error) {
 	if err != nil {
 		return domain.LlamaRuntimeStatus{}, err
 	}
+	// The selected model's context override beats the global runtime context,
+	// matching what request-time routing launches.
+	if runtimeSettings.ModelPath != "" {
+		if contextSize := d.managedModelContextSize(filepath.Base(runtimeSettings.ModelPath)); contextSize > 0 {
+			runtimeSettings.ContextSize = contextSize
+		}
+	}
 	status, err := d.llama.Start(ctx, runtimeSettings)
 	if err != nil {
 		_ = d.metrics.RecordActivity(d.context(), domain.MetricActivityEvent{Kind: "runtime.start", Outcome: "failed", OccurredAt: time.Now().UTC()})
@@ -1508,11 +1530,22 @@ func (d *Desktop) StopLlamaRuntime() domain.LlamaRuntimeStatus {
 	return d.llama.Status()
 }
 
-// ListLlamaRuntimeReleases lists compatible official llama.cpp Windows releases.
-func (d *Desktop) ListLlamaRuntimeReleases() ([]domain.LlamaRuntimeRelease, error) {
-	ctx, cancel := context.WithTimeout(d.context(), 20*time.Second)
+// ListLlamaRuntimeReleases lists compatible official llama.cpp Windows
+// releases. The returned list also names its source: the GitHub API, the
+// GitHub releases page (used when the API is rate-limited or blocked), or the
+// last cached listing, so the Runtime page can explain what the user sees.
+func (d *Desktop) ListLlamaRuntimeReleases() (domain.LlamaRuntimeReleaseList, error) {
+	ctx, cancel := context.WithTimeout(d.context(), 90*time.Second)
 	defer cancel()
-	return d.llamaFiles.List(ctx)
+	return d.llamaFiles.ListWithInfo(ctx)
+}
+
+// RefreshLlamaRuntimeReleases forces a live release re-lookup, bypassing the
+// fresh-cache shortcut, for the Runtime page's refresh button.
+func (d *Desktop) RefreshLlamaRuntimeReleases() (domain.LlamaRuntimeReleaseList, error) {
+	ctx, cancel := context.WithTimeout(d.context(), 90*time.Second)
+	defer cancel()
+	return d.llamaFiles.Refresh(ctx)
 }
 
 // GetLlamaRuntimeCatalogStatus lists user-owned managed runtime installations.
@@ -1736,6 +1769,20 @@ func (d *Desktop) HandleWebhook(path string, body []byte, signature string) (dom
 }
 
 func (d *Desktop) ListProviderModels(providerID string) ([]llm.ModelInfo, error) {
+	// The managed llama.cpp runtime serves exactly the GGUF files installed
+	// in the Models tab, so its discovery is a local listing rather than a
+	// network call: it works while the runtime is stopped and can never hang
+	// on a stale loopback endpoint.
+	for _, provider := range d.GetSettings().Providers {
+		if provider.ID == strings.TrimSpace(providerID) && provider.Kind == domain.ProviderLlamaCPP {
+			files := d.installedLlamaFiles()
+			models := make([]llm.ModelInfo, 0, len(files))
+			for _, file := range files {
+				models = append(models, llm.ModelInfo{ID: file.Name, Name: file.Name})
+			}
+			return models, nil
+		}
+	}
 	return d.providers.ListModels(d.context(), providerID)
 }
 
@@ -1857,65 +1904,279 @@ func (d *Desktop) advanceInstallProgress(event, kind, stage, label string) {
 }
 
 // activateManagedLlamaProvider makes Neuropipe's owned llama.cpp server the
-// one configured LLM provider for future pipeline node executions.
+// default LLM provider for future pipeline node executions. Other configured
+// providers are preserved so switching back never loses their settings. It is
+// the explicit user choice path: starting the runtime or installing/selecting
+// a model in Settings means "route AI nodes here".
 func activateManagedLlamaProvider(settings *domain.Settings, model, endpoint string) {
-	settings.Providers = []domain.ProviderConfig{{
+	bindManagedLlamaProvider(settings, model, endpoint)
+	settings.DefaultProviderID = managedLlamaProviderID
+}
+
+// bindManagedLlamaProvider updates (or creates) the managed llama.cpp provider
+// entry with the model and endpoint the local runtime is currently serving
+// while leaving every other provider and the default selection untouched.
+// Request-time routing uses it: serving one chat must never re-route nodes
+// that deliberately follow a different default provider.
+func bindManagedLlamaProvider(settings *domain.Settings, model, endpoint string) {
+	managed := domain.ProviderConfig{
 		ID:      managedLlamaProviderID,
 		Name:    "Managed llama.cpp",
 		Kind:    domain.ProviderLlamaCPP,
 		BaseURL: endpoint,
 		Model:   model,
 		Enabled: true,
-	}}
-	settings.DefaultProviderID = managedLlamaProviderID
+	}
+	replaced := false
+	providers := make([]domain.ProviderConfig, 0, len(settings.Providers)+1)
+	for _, item := range settings.Providers {
+		if item.ID == managedLlamaProviderID {
+			// Keep a previously configured model list and generation
+			// parameters; the alias always wins.
+			managed.Models = item.Models
+			managed.Parameters = item.Parameters
+			providers = append(providers, managed)
+			replaced = true
+			continue
+		}
+		providers = append(providers, item)
+	}
+	if !replaced {
+		providers = append(providers, managed)
+	}
+	settings.Providers = providers
+	settings.ManagedLlamaRemoved = false
 }
 
-// normalizeConfiguredProvider keeps the persisted provider contract simple:
-// Neuropipe has one active LLM provider at a time. The slice remains in the
-// domain type for a stable SDK boundary, but contains exactly one item.
-func normalizeConfiguredProvider(settings *domain.Settings) error {
-	provider := domain.ProviderConfig{
-		ID:      "ollama-local",
-		Name:    "Local Ollama",
-		Kind:    domain.ProviderOllama,
-		BaseURL: "http://127.0.0.1:11434",
-		Enabled: true,
+// syncManagedLlamaModels rebuilds the managed llama.cpp provider's model list
+// from the GGUF files installed under Settings, Models. The managed runtime
+// can only serve those files, so the list is derived, never hand-maintained:
+// every settings read and save refreshes it. A default model that is no longer
+// installed stays in the list so an existing selection never silently
+// disappears from pickers. Per-model generation overrides survive the rebuild.
+//
+// The entry itself is materialized whenever local models exist, so the
+// Providers tab always offers the managed llama.cpp provider it can serve;
+// only an explicit removal (ManagedLlamaRemoved) keeps it hidden until the
+// user adds it back.
+func syncManagedLlamaModels(settings *domain.Settings, files []domain.LocalModel) {
+	overrides := make(map[string]*domain.GenerationParameters)
+	index := slices.IndexFunc(settings.Providers, func(provider domain.ProviderConfig) bool {
+		return provider.ID == managedLlamaProviderID
+	})
+	if index >= 0 {
+		for _, model := range settings.Providers[index].Models {
+			if model.Parameters != nil {
+				overrides[model.ID] = model.Parameters
+			}
+		}
+	} else {
+		if settings.ManagedLlamaRemoved || len(files) == 0 {
+			return
+		}
+		// Clone first: appending into a shared backing array would leak the
+		// materialized entry into another holder of the same slice.
+		settings.Providers = append(slices.Clone(settings.Providers), domain.ProviderConfig{
+			ID:      managedLlamaProviderID,
+			Name:    "Managed llama.cpp",
+			Kind:    domain.ProviderLlamaCPP,
+			Enabled: true,
+		})
+		index = len(settings.Providers) - 1
 	}
-	for _, item := range settings.Providers {
-		if item.ID == settings.DefaultProviderID {
-			provider = item
-			break
+	provider := settings.Providers[index]
+	models := make([]domain.ModelConfig, 0, len(files)+1)
+	seen := make(map[string]struct{}, len(files)+1)
+	for _, file := range files {
+		name := strings.TrimSpace(file.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		models = append(models, domain.ModelConfig{ID: name, Name: name, Parameters: overrides[name]})
+		seen[name] = struct{}{}
+	}
+	if model := strings.TrimSpace(provider.Model); model != "" {
+		if _, exists := seen[model]; !exists {
+			models = append(models, domain.ModelConfig{ID: model, Parameters: overrides[model]})
 		}
 	}
-	if len(settings.Providers) > 0 && provider.ID == "ollama-local" && settings.DefaultProviderID != "ollama-local" {
-		provider = settings.Providers[0]
-	}
+	provider.Models = models
+	providers := slices.Clone(settings.Providers)
+	providers[index] = provider
+	settings.Providers = providers
+}
 
-	switch provider.Kind {
-	case "", domain.ProviderOllama:
-		provider.ID = "ollama-local"
-		provider.Name = "Local Ollama"
-		provider.Kind = domain.ProviderOllama
-		provider.APIKeyRef = ""
-		if strings.TrimSpace(provider.BaseURL) == "" {
-			provider.BaseURL = "http://127.0.0.1:11434"
-		}
-	case domain.ProviderLlamaCPP:
-		provider.ID = managedLlamaProviderID
-		provider.Name = "Managed llama.cpp"
-		provider.APIKeyRef = ""
-	case domain.ProviderOpenAICompatible:
-		provider.ID = "openai-compatible"
-		provider.Name = "OpenAI-compatible"
-		if strings.TrimSpace(provider.BaseURL) == "" {
-			return fmt.Errorf("an OpenAI-compatible provider requires a base URL")
-		}
-	default:
-		return fmt.Errorf("unsupported LLM provider kind %q", provider.Kind)
+// normalizeConfiguredProviders validates the full provider list. Neuropipe
+// supports several configured providers at once: AI nodes pick one explicitly
+// and unselected nodes resolve to DefaultProviderID.
+func normalizeConfiguredProviders(settings *domain.Settings) error {
+	if len(settings.Providers) == 0 {
+		settings.Providers = []domain.ProviderConfig{defaultOllamaProvider()}
+		settings.DefaultProviderID = settings.Providers[0].ID
+		return nil
 	}
-	provider.Enabled = true
-	settings.Providers = []domain.ProviderConfig{provider}
-	settings.DefaultProviderID = provider.ID
+	seenIDs := make(map[string]struct{}, len(settings.Providers))
+	managedSeen := false
+	for index := range settings.Providers {
+		provider := settings.Providers[index]
+		provider.ID = strings.TrimSpace(provider.ID)
+		provider.Name = strings.TrimSpace(provider.Name)
+		provider.BaseURL = strings.TrimSpace(provider.BaseURL)
+		provider.Model = strings.TrimSpace(provider.Model)
+		switch provider.Kind {
+		case "", domain.ProviderOllama:
+			provider.Kind = domain.ProviderOllama
+			if provider.ID == "" {
+				provider.ID = "ollama-local"
+			}
+			if provider.Name == "" {
+				provider.Name = "Local Ollama"
+			}
+			if provider.BaseURL == "" {
+				provider.BaseURL = "http://127.0.0.1:11434"
+			}
+		case domain.ProviderLlamaCPP:
+			// The llama.cpp kind is bound to Neuropipe's managed runtime, so
+			// there is exactly one such provider entry.
+			provider.ID = managedLlamaProviderID
+			provider.Name = "Managed llama.cpp"
+			provider.APIKeyRef = ""
+			if managedSeen {
+				return fmt.Errorf("only one managed llama.cpp provider can be configured")
+			}
+			managedSeen = true
+		case domain.ProviderOpenAICompatible:
+			if provider.ID == "" {
+				provider.ID = "openai-compatible"
+			}
+			if provider.Name == "" {
+				provider.Name = "OpenAI-compatible"
+			}
+			if provider.BaseURL == "" {
+				return fmt.Errorf("provider %s requires a base URL", provider.Name)
+			}
+		case domain.ProviderAnthropic:
+			if provider.ID == "" {
+				provider.ID = "anthropic"
+			}
+			if provider.Name == "" {
+				provider.Name = "Anthropic"
+			}
+			if provider.BaseURL == "" {
+				provider.BaseURL = "https://api.anthropic.com"
+			}
+		default:
+			return fmt.Errorf("unsupported LLM provider kind %q", provider.Kind)
+		}
+		provider.ID = uniqueProviderID(provider.ID, seenIDs)
+		seenIDs[provider.ID] = struct{}{}
+		if err := validateGenerationParameters(provider.Parameters, fmt.Sprintf("provider %s", provider.Name)); err != nil {
+			return err
+		}
+		for _, model := range provider.Models {
+			if err := validateGenerationParameters(model.Parameters, fmt.Sprintf("provider %s model %s", provider.Name, model.ID)); err != nil {
+				return err
+			}
+		}
+		provider.Models = normalizeProviderModels(provider)
+		settings.Providers[index] = provider
+	}
+	if managedSeen {
+		// A present managed entry always wins over a stale removal
+		// marker: settings saved by older builds or hand-edited files
+		// must not keep the provider hidden.
+		settings.ManagedLlamaRemoved = false
+	}
+	if strings.TrimSpace(settings.DefaultProviderID) == "" || !providerByID(settings.Providers, settings.DefaultProviderID) {
+		settings.DefaultProviderID = firstEnabledProviderID(settings.Providers)
+	}
+	return nil
+}
+
+func defaultOllamaProvider() domain.ProviderConfig {
+	return domain.ProviderConfig{ID: "ollama-local", Name: "Local Ollama", Kind: domain.ProviderOllama, BaseURL: "http://127.0.0.1:11434", Enabled: true}
+}
+
+func providerByID(providers []domain.ProviderConfig, id string) bool {
+	for _, provider := range providers {
+		if provider.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func firstEnabledProviderID(providers []domain.ProviderConfig) string {
+	for _, provider := range providers {
+		if provider.Enabled {
+			return provider.ID
+		}
+	}
+	return providers[0].ID
+}
+
+// uniqueProviderID appends a numeric suffix when a provider reuses an ID.
+func uniqueProviderID(id string, seen map[string]struct{}) string {
+	if _, exists := seen[id]; !exists {
+		return id
+	}
+	for counter := 2; ; counter++ {
+		candidate := fmt.Sprintf("%s-%d", id, counter)
+		if _, exists := seen[candidate]; !exists {
+			return candidate
+		}
+	}
+}
+
+// normalizeProviderModels drops blank and duplicate model keys, preserving
+// the configured order.
+func normalizeProviderModels(provider domain.ProviderConfig) []domain.ModelConfig {
+	if len(provider.Models) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(provider.Models))
+	models := make([]domain.ModelConfig, 0, len(provider.Models))
+	for _, model := range provider.Models {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		models = append(models, domain.ModelConfig{ID: id, Name: strings.TrimSpace(model.Name), Parameters: model.Parameters})
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
+}
+
+// validateGenerationParameters rejects configured values that endpoints would
+// reject or silently misinterpret. Nil parameters are valid (unset).
+func validateGenerationParameters(params *domain.GenerationParameters, label string) error {
+	if params == nil {
+		return nil
+	}
+	if params.Temperature != nil && (*params.Temperature < 0 || *params.Temperature > 2) {
+		return fmt.Errorf("%s: temperature must be between 0 and 2", label)
+	}
+	if params.TopK != nil && *params.TopK < 0 {
+		return fmt.Errorf("%s: top K cannot be negative", label)
+	}
+	if params.TopP != nil && (*params.TopP < 0 || *params.TopP > 1) {
+		return fmt.Errorf("%s: top P must be between 0 and 1", label)
+	}
+	if params.MaxTokens != nil && *params.MaxTokens < 1 {
+		return fmt.Errorf("%s: max tokens must be at least 1", label)
+	}
+	if params.ContextSize != nil && *params.ContextSize < 1024 {
+		return fmt.Errorf("%s: context size must be at least 1024", label)
+	}
 	return nil
 }
 
@@ -1930,6 +2191,109 @@ func (d *Desktop) effectiveLlamaSettings() (domain.LlamaRuntimeSettings, error) 
 	}
 	settings.Mode, settings.BinaryPath = mode, binary
 	return settings, nil
+}
+
+// installedLlamaFiles lists the GGUF files of the Models tab without metadata
+// reads or network work. A transient failure yields nil so callers keep the
+// previously synced model list instead of dropping it.
+func (d *Desktop) installedLlamaFiles() []domain.LocalModel {
+	if d.models == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(d.context(), 10*time.Second)
+	defer cancel()
+	files, err := d.models.InstalledFiles(ctx)
+	if err != nil {
+		return nil
+	}
+	return files
+}
+
+// resolveManagedLlamaModel finds the installed GGUF file for a requested
+// model name. Names are file names, so matching is case-insensitive.
+func resolveManagedLlamaModel(files []domain.LocalModel, target string) (domain.LocalModel, bool) {
+	for _, file := range files {
+		if strings.EqualFold(file.Name, target) {
+			return file, true
+		}
+	}
+	return domain.LocalModel{}, false
+}
+
+// managedModelContextSize resolves the context window configured for one
+// managed llama.cpp model: the model entry's override wins over the
+// provider-level value. Zero means "not configured".
+func (d *Desktop) managedModelContextSize(model string) int {
+	settings := d.GetSettings()
+	for _, provider := range settings.Providers {
+		if provider.ID != managedLlamaProviderID {
+			continue
+		}
+		params := provider.EffectiveParameters(model)
+		if params.ContextSize != nil {
+			return *params.ContextSize
+		}
+		return 0
+	}
+	return 0
+}
+
+// routeManagedLlama returns the loopback endpoint of Neuropipe's managed
+// llama.cpp server together with the canonical model name it is serving. The
+// server is started, or switched to the requested model, when it is not
+// already serving it, so AI nodes, the chat view, and the HTTP API share one
+// lazy start path. Routing never changes the default provider: that stays an
+// explicit choice made in Settings.
+func (d *Desktop) routeManagedLlama(ctx context.Context, model string) (string, string, error) {
+	// One switch at a time: concurrent requests may pick different models, and
+	// serializing keeps the runtime serving exactly the last requested one
+	// instead of thrashing between starts.
+	d.llamaRouteMu.Lock()
+	defer d.llamaRouteMu.Unlock()
+
+	target := strings.TrimSpace(model)
+	if target == "" {
+		if persisted := strings.TrimSpace(d.GetSettings().LlamaRuntime.ModelPath); persisted != "" {
+			target = filepath.Base(persisted)
+		}
+	}
+	if target == "" || target == "." || target == string(filepath.Separator) {
+		return "", "", fmt.Errorf("install or select a GGUF model for managed llama.cpp in Settings, Models")
+	}
+
+	status := d.llama.Status()
+	if status.Running && status.Endpoint != "" && strings.EqualFold(status.Model, target) {
+		return status.Endpoint, status.Model, nil
+	}
+
+	file, ok := resolveManagedLlamaModel(d.installedLlamaFiles(), target)
+	if !ok {
+		return "", "", fmt.Errorf("model %q is not installed; download it in Settings, Models", target)
+	}
+	d.llama.Stop()
+	runtimeSettings, err := d.effectiveLlamaSettings()
+	if err != nil {
+		return "", "", err
+	}
+	runtimeSettings.ModelPath = file.Path
+	// A per-model context override beats both the provider-level value and
+	// the global runtime context: llama-server fixes its window at launch.
+	if contextSize := d.managedModelContextSize(file.Name); contextSize > 0 {
+		runtimeSettings.ContextSize = contextSize
+	}
+	started, err := d.llama.Start(ctx, runtimeSettings)
+	if err != nil {
+		return "", "", err
+	}
+
+	settings := d.GetSettings()
+	settings.LlamaRuntime.ModelPath = file.Path
+	bindManagedLlamaProvider(&settings, file.Name, started.Endpoint)
+	if err := d.SaveSettings(settings); err != nil {
+		d.llama.Stop()
+		return "", "", fmt.Errorf("save managed llama.cpp selection: %w", err)
+	}
+	return started.Endpoint, file.Name, nil
 }
 
 // configureContentDirectory keeps downloaded runtimes and GGUF files together
@@ -2215,7 +2579,7 @@ func validateFunction(function domain.CustomFunction, registry *catalog.Registry
 }
 
 func isCurrentBlueprintSchema(version int) bool {
-	return version == domain.GraphSchemaV2 || version == domain.GraphSchemaV3
+	return version == domain.GraphSchemaV3
 }
 
 // validateFunctionTriggers is the draft-save counterpart to the event checks

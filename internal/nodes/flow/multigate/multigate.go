@@ -3,8 +3,6 @@ package multigate
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/nodes"
@@ -35,22 +33,11 @@ func Execute(_ context.Context, invocation nodes.Invocation, runtime nodes.Runti
 	ports := []string{"a", "b", "c"}
 	index := store.MultiGateIndex(invocation.Node.ID)
 	if index >= len(ports) {
-		if !configuredBool(invocation.Config["loop"], invocation.SchemaVersion) {
+		if loop, _ := invocation.Config["loop"].(bool); !loop {
 			return nodes.ExecutionResult{Outputs: map[string]any{"result": map[string]any{"complete": true}}}, nil
 		}
 		index = 0
 	}
 	store.SetMultiGateIndex(invocation.Node.ID, index+1)
 	return nodes.ExecutionResult{Outputs: map[string]any{"result": map[string]any{"index": index}}, Ports: []string{ports[index]}}, nil
-}
-
-func configuredBool(value any, schemaVersion int) bool {
-	if boolean, ok := value.(bool); ok {
-		return boolean
-	}
-	if schemaVersion >= domain.GraphSchemaV3 {
-		return false
-	}
-	boolean, err := strconv.ParseBool(strings.TrimSpace(fmt.Sprint(value)))
-	return err == nil && boolean
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { GraphNode, LogEntry, Port } from "@/types";
-import type { Execution } from "@/lib/types";
+import type { Execution, ProviderConfig } from "@/lib/types";
 import type { EditorApi } from "@/features/graph/PipelineEditor";
 import { Icon } from "./icons";
 import { Badge, Dot, Empty, Toggle } from "./ui";
@@ -18,6 +18,9 @@ import { RouteOptionsEditor, SchemaEditor, SwitchCasesEditor } from "./Structure
 import { HtmlExtractionsEditor } from "./HtmlExtractionsEditor";
 import { HeadersEditor } from "./HeadersEditor";
 import { KVArgumentsEditor, KVHashFieldsEditor, KVScoredEntriesEditor, KVStringListEditor } from "./KVFieldEditors";
+import { PinBindingsEditor } from "./PinBindingsEditor";
+import { BuildRowsEditor } from "./BuildRowsEditor";
+import { parseCollectionType } from "../lib/build-nodes";
 import { TypeSpecField, specTopToken, tokenToPinDataType } from "./TypeSpecField";
 import { typeSpecFromDataType } from "../lib/type-spec";
 import { parseNamedFields, serializeNamedFields, uniqueFieldID } from "../lib/named-fields";
@@ -557,6 +560,8 @@ function InspectBody({
                 discordIdentityOptions={discordIdentityOptions}
                 telegramIdentityOptions={telegramIdentityOptions}
                 pipelineOptions={pipelineOptions}
+                providers={api.providers}
+                defaultProviderId={api.defaultProviderId}
                 onChange={onChange}
                 onExpand={(key, label) =>
                   f.type === "code-js" || f.type === "code-sql"
@@ -683,6 +688,8 @@ function InspectorField({
   discordIdentityOptions,
   telegramIdentityOptions,
   pipelineOptions,
+  providers,
+  defaultProviderId,
   onChange,
   onExpand,
   onCode,
@@ -698,6 +705,8 @@ function InspectorField({
   discordIdentityOptions: { value: string; label: string }[];
   telegramIdentityOptions: { value: string; label: string }[];
   pipelineOptions: DropdownOption[];
+  providers: ProviderConfig[];
+  defaultProviderId: string;
   onChange: (key: string, value: unknown) => void;
   onExpand: (key: string, label: string) => void;
   onCode: () => void;
@@ -756,6 +765,36 @@ function InspectorField({
     return <KVArgumentsEditor label={field.label} value={raw} onChange={(next) => onChange(fieldKey, next)} />;
   }
 
+  /* Documents nodes' dynamic value pins: placeholders, columns, cells */
+  if (field.kind === "pin-bindings" || field.kind === "pin-bindings-output") {
+    return (
+      <PinBindingsEditor
+        label={field.label}
+        value={raw}
+        mode={field.kind === "pin-bindings-output" ? "output" : "input"}
+        placeholder={field.placeholder}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+
+  /* Build Array / Build Map row editors: summary card + modal editor. The
+     collection type select sits above this field; both read the same node
+     value so validation and preview follow it live. */
+  if (field.kind === "array-items" || field.kind === "map-entries") {
+    const isMap = field.kind === "map-entries";
+    return (
+      <BuildRowsEditor
+        kind={isMap ? "map" : "array"}
+        label={field.label}
+        nodeTitle={node.title}
+        dataType={parseCollectionType(node.values[isMap ? "valueType" : "elementType"])}
+        value={raw}
+        onChange={(next) => onChange(fieldKey, next)}
+      />
+    );
+  }
+
   /* wire-type picker (Type Assert, JS output contracts) */
   if (field.kind === "type-spec") {
     let spec: TypeSpec | undefined;
@@ -781,6 +820,77 @@ function InspectorField({
     );
   }
 
+  /* LLM provider picker: an empty selection follows the app's default
+     provider, so changing the default re-routes every unopinionated node. */
+  if (field.kind === "llm-provider") {
+    const fallback = providers.find((p) => p.id === defaultProviderId);
+    const providerOptions: DropdownOption[] = [
+      {
+        value: "",
+        label: fallback ? t("editor.providerDefaultOption", { name: fallback.name || fallback.id }) : t("editor.providerPlaceholder"),
+      },
+      ...providers.map((p) => ({
+        value: p.id,
+        label: p.enabled ? p.name || p.id : `${p.name || p.id} · ${t("editor.providerDisabled")}`,
+        icon: "Cable",
+      })),
+    ];
+    return (
+      <label className="block">
+        <span className="mb-1 block">
+          <Label text={field.label} required={field.required} />
+        </span>
+        <Dropdown
+          value={String(raw ?? "")}
+          options={providerOptions}
+          onChange={(nv) => {
+            onChange(fieldKey, nv);
+            // A model picked for another provider is meaningless: clear it.
+            if (String(node.values.model ?? "") !== "") onChange("model", "");
+          }}
+        />
+      </label>
+    );
+  }
+
+  /* LLM model picker listing the selected provider's configured models. */
+  if (field.kind === "llm-model") {
+    const providerId = String(node.values.providerId ?? "");
+    const provider =
+      providers.find((p) => p.id === providerId) ?? providers.find((p) => p.id === defaultProviderId);
+    const models = provider?.models ?? [];
+    const current = String(raw ?? "");
+    const modelOptions: DropdownOption[] = [
+      {
+        value: "",
+        label: provider?.model
+          ? t("editor.modelDefaultOption", { model: provider.model })
+          : t("editor.modelPlaceholder"),
+      },
+      ...models.map((m) => ({ value: m.id, label: m.name || m.id })),
+    ];
+    // Keep a saved model selectable even when it is no longer configured, so
+    // legacy graphs never lose their value silently.
+    if (current && !models.some((m) => m.id === current)) {
+      modelOptions.push({ value: current, label: `${current} · ${t("editor.modelSaved")}` });
+    }
+    return (
+      <label className="block">
+        <span className="mb-1 block">
+          <Label text={field.label} required={field.required} />
+        </span>
+        {/* Searchable: a discovered provider list can hold dozens of models. */}
+        <Dropdown
+          value={current}
+          options={modelOptions}
+          searchable
+          searchPlaceholder={t("common.searchModels")}
+          onChange={(nv) => onChange(fieldKey, nv)}
+        />
+      </label>
+    );
+  }
+
   if (field.kind === "json-schema") {
     return <SchemaEditor value={raw} onChange={(next) => onChange(fieldKey, next)} />;
   }
@@ -791,7 +901,6 @@ function InspectorField({
     return (
       <SwitchCasesEditor
         value={raw}
-        legacyOptions={node.values.options}
         onChange={(next) => onChange(fieldKey, next)}
       />
     );

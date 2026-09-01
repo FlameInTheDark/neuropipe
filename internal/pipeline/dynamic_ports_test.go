@@ -9,44 +9,70 @@ import (
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 )
 
-func TestDefinitionForNodeBuildsSwitchOutputsFromCases(t *testing.T) {
-	definition, ok := catalog.New().Get("flow:switch")
+// resolveNode resolves a node's dynamic contract through the registered
+// module, the same path the editor, validator, and interpreter use.
+func resolveNode(t *testing.T, registry *catalog.Registry, nodeType string, config map[string]any) domain.NodeDefinition {
+	t.Helper()
+	definition, ok := registry.Get(nodeType)
 	if !ok {
-		t.Fatal("Switch definition is missing")
+		t.Fatalf("%s definition is missing", nodeType)
 	}
-	node := domain.FlowNode{
-		ID:   "switch",
-		Type: "flow:switch",
-		Data: map[string]any{"config": map[string]any{
-			"switch": map[string]any{"comparator": "equals", "cases": []any{
-				map[string]any{"id": "approved", "label": "Approved", "valueType": "text", "value": "approved"},
-				map[string]any{"id": "rejected", "label": "Rejected", "valueType": "text", "value": "rejected"},
-			},
-			},
-		}},
-	}
-	resolved, err := definitionForNode(definition, node)
+	resolved, err := definitionForRegisteredNode(registry, definition, domain.FlowNode{ID: "node", Type: nodeType, Data: map[string]any{"config": config}})
 	if err != nil {
-		t.Fatalf("definitionForNode() error = %v", err)
+		t.Fatalf("resolve %s() error = %v", nodeType, err)
 	}
+	return resolved
+}
+
+func resolveNodeErr(t *testing.T, registry *catalog.Registry, nodeType string, config map[string]any) error {
+	t.Helper()
+	definition, ok := registry.Get(nodeType)
+	if !ok {
+		t.Fatalf("%s definition is missing", nodeType)
+	}
+	_, err := definitionForRegisteredNode(registry, definition, domain.FlowNode{ID: "node", Type: nodeType, Data: map[string]any{"config": config}})
+	return err
+}
+
+func TestResolveBuildsSwitchOutputsFromCases(t *testing.T) {
+	registry := catalog.New()
+	resolved := resolveNode(t, registry, "flow:switch", map[string]any{
+		"switch": map[string]any{"comparator": "equals", "cases": []any{
+			map[string]any{"id": "approved", "label": "Approved", "valueType": "text", "value": "approved"},
+			map[string]any{"id": "rejected", "label": "Rejected", "valueType": "text", "value": "rejected"},
+		}},
+	})
 	if got, want := resolved.Outputs[0].ID, "approved"; got != want {
 		t.Fatalf("first configured output = %q, want %q", got, want)
 	}
 	if got, want := resolved.Outputs[1].ID, "rejected"; got != want {
 		t.Fatalf("second configured output = %q, want %q", got, want)
 	}
+	if last := resolved.Outputs[len(resolved.Outputs)-1]; last.ID != "default" {
+		t.Fatalf("default output = %q, want it last", last.ID)
+	}
 }
 
-func TestDefinitionForNodePreservesLegacySwitchOptions(t *testing.T) {
-	definition, _ := catalog.New().Get("flow:switch")
-	resolved, err := definitionForNode(definition, domain.FlowNode{ID: "switch", Type: "flow:switch", Data: map[string]any{"config": map[string]any{
-		"options": []any{map[string]any{"id": "approved", "label": "Approved"}},
-	}}})
-	if err != nil {
-		t.Fatalf("definitionForNode() error = %v", err)
+func TestResolveSwitchUsesDefaultCasesWithoutConfiguration(t *testing.T) {
+	registry := catalog.New()
+	resolved := resolveNode(t, registry, "flow:switch", nil)
+	if len(resolved.Outputs) < 3 {
+		t.Fatalf("default switch outputs = %d, want case-a, case-b, and default", len(resolved.Outputs))
 	}
-	if got, want := resolved.Outputs[0].ID, "approved"; got != want {
-		t.Fatalf("legacy output ID = %q, want %q", got, want)
+	if resolved.Outputs[0].ID != "case-a" || resolved.Outputs[1].ID != "case-b" {
+		t.Fatalf("default switch outputs = %q, %q", resolved.Outputs[0].ID, resolved.Outputs[1].ID)
+	}
+}
+
+func TestResolveRejectsInvalidSwitchCaseConfiguration(t *testing.T) {
+	registry := catalog.New()
+	err := resolveNodeErr(t, registry, "flow:switch", map[string]any{
+		"switch": map[string]any{"comparator": "contains", "cases": []any{
+			map[string]any{"id": "bad", "label": "Bad", "valueType": "number", "value": 1},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot use") {
+		t.Fatalf("resolve switch() error = %v, want invalid comparator type error", err)
 	}
 }
 
@@ -70,36 +96,79 @@ func TestDefinitionForNodeRejectsDuplicateRouteOptionIDs(t *testing.T) {
 	}
 }
 
-func TestDefinitionForNodeRejectsInvalidSwitchCaseConfiguration(t *testing.T) {
-	definition, _ := catalog.New().Get("flow:switch")
-	_, err := definitionForNode(definition, domain.FlowNode{ID: "switch", Type: "flow:switch", Data: map[string]any{"config": map[string]any{
-		"switch": map[string]any{"comparator": "contains", "cases": []any{
-			map[string]any{"id": "bad", "label": "Bad", "valueType": "number", "value": 1},
-		}},
-	}}})
-	if err == nil || !strings.Contains(err.Error(), "cannot use") {
-		t.Fatalf("definitionForNode() error = %v, want invalid comparator type error", err)
-	}
-}
-
-func TestDefinitionForNodeBuildsTypedGetFieldOutputs(t *testing.T) {
-	definition, ok := catalog.New().Get("data:get_field")
+func TestDefinitionForNodeBuildsChoiceOptionPorts(t *testing.T) {
+	definition, ok := catalog.New().Get("llm:choice")
 	if !ok {
-		t.Fatal("Get Field definition is missing")
+		t.Fatal("Choice definition is missing")
 	}
 	resolved, err := definitionForNode(definition, domain.FlowNode{
-		ID:   "get-field",
-		Type: "data:get_field",
+		ID:   "choice",
+		Type: "llm:choice",
 		Data: map[string]any{"config": map[string]any{
-			"outputs": []any{
-				map[string]any{"id": "command", "label": "Command", "path": "terminal.command", "dataType": "text"},
-				map[string]any{"id": "output", "label": "Output", "path": "terminal.output", "dataType": "text"},
+			"options": []any{
+				map[string]any{"id": "ship", "label": "Ship it"},
+				map[string]any{"id": "hold", "label": "Hold"},
 			},
 		}},
 	})
 	if err != nil {
 		t.Fatalf("definitionForNode() error = %v", err)
 	}
+	if got, want := resolved.Outputs[0].ID, "ship"; got != want {
+		t.Fatalf("first option port = %q, want %q", got, want)
+	}
+	if got, want := resolved.Outputs[1].Label, "Hold"; got != want {
+		t.Fatalf("second option label = %q, want %q", got, want)
+	}
+}
+
+func TestDefinitionForNodeFiltersChatContextPins(t *testing.T) {
+	registry := catalog.New()
+	definition, ok := registry.Get("llm:agent")
+	if !ok {
+		t.Fatal("Agent definition is missing")
+	}
+	// One-message mode without status updates hides chatId and chatRunId.
+	resolved, err := definitionForRegisteredNode(registry, definition, domain.FlowNode{ID: "agent", Type: "llm:agent", Data: map[string]any{"config": map[string]any{
+		"chatMode": "message", "updateChatStatus": false,
+	}}})
+	if err != nil {
+		t.Fatalf("resolve agent() error = %v", err)
+	}
+	for _, pin := range resolved.Inputs {
+		if pin.ID == "chatId" || pin.ID == "chatRunId" {
+			t.Fatalf("one-message agent exposes %q pin", pin.ID)
+		}
+	}
+	// History mode with status updates exposes both.
+	resolved, err = definitionForRegisteredNode(registry, definition, domain.FlowNode{ID: "agent", Type: "llm:agent", Data: map[string]any{"config": map[string]any{
+		"chatMode": "history", "updateChatStatus": true,
+	}}})
+	if err != nil {
+		t.Fatalf("resolve agent (history)() error = %v", err)
+	}
+	var hasChatID, hasRunID bool
+	for _, pin := range resolved.Inputs {
+		if pin.ID == "chatId" {
+			hasChatID = true
+		}
+		if pin.ID == "chatRunId" {
+			hasRunID = true
+		}
+	}
+	if !hasChatID || !hasRunID {
+		t.Fatalf("history agent pins missing chatId/chatRunId (chatId=%v chatRunId=%v)", hasChatID, hasRunID)
+	}
+}
+
+func TestResolveBuildsTypedGetFieldOutputs(t *testing.T) {
+	registry := catalog.New()
+	resolved := resolveNode(t, registry, "data:get_field", map[string]any{
+		"outputs": []any{
+			map[string]any{"id": "command", "label": "Command", "path": "terminal.command", "dataType": "text"},
+			map[string]any{"id": "output", "label": "Output", "path": "terminal.output", "dataType": "text"},
+		},
+	})
 	if got, want := len(resolved.Outputs), 2; got != want {
 		t.Fatalf("output count = %d, want %d", got, want)
 	}
@@ -108,28 +177,27 @@ func TestDefinitionForNodeBuildsTypedGetFieldOutputs(t *testing.T) {
 	}
 }
 
-func TestDefinitionForNodeBuildsTypeAssertContract(t *testing.T) {
-	definition, ok := catalog.New().Get("data:type_assert")
-	if !ok {
-		t.Fatal("Type Assert definition is missing")
+func TestResolveGetFieldFallsBackToDefaultOutputs(t *testing.T) {
+	registry := catalog.New()
+	resolved := resolveNode(t, registry, "data:get_field", nil)
+	if got, want := resolved.Outputs[0].ID, "value"; got != want {
+		t.Fatalf("default output ID = %q, want %q", got, want)
 	}
-	resolved, err := definitionForNode(definition, domain.FlowNode{ID: "assert", Type: "data:type_assert", Data: map[string]any{"config": map[string]any{
+}
+
+func TestResolveBuildsTypeAssertContract(t *testing.T) {
+	registry := catalog.New()
+	resolved := resolveNode(t, registry, "data:type_assert", map[string]any{
 		"typeSpec": map[string]any{"kind": "record", "fields": []any{map[string]any{"id": "name", "name": "name", "type": map[string]any{"kind": "string"}}}},
-	}}})
-	if err != nil {
-		t.Fatalf("definitionForNode() error = %v", err)
-	}
+	})
 	got := resolved.Outputs[0].Type
 	if got == nil || got.Kind != domain.TypeRecord || len(got.Fields) != 1 || got.Fields[0].Type.Kind != domain.TypeString {
 		t.Fatalf("resolved Type Assert contract = %#v", got)
 	}
 }
 
-func TestDefinitionForNodeTypesCastOutputs(t *testing.T) {
-	definition, ok := catalog.New().Get("data:cast")
-	if !ok {
-		t.Fatal("Cast definition is missing")
-	}
+func TestResolveTypesCastOutputs(t *testing.T) {
+	registry := catalog.New()
 	tests := []struct {
 		target   string
 		dataType domain.DataType
@@ -140,10 +208,7 @@ func TestDefinitionForNodeTypesCastOutputs(t *testing.T) {
 		{"bytes", domain.DataBytes, domain.TypeBytes},
 	}
 	for _, test := range tests {
-		resolved, err := definitionForNode(definition, domain.FlowNode{ID: "cast", Type: "data:cast", Data: map[string]any{"config": map[string]any{"target": test.target}}})
-		if err != nil {
-			t.Fatalf("definitionForNode(%s) error = %v", test.target, err)
-		}
+		resolved := resolveNode(t, registry, "data:cast", map[string]any{"target": test.target})
 		output := resolved.Outputs[0]
 		if output.DataType != test.dataType {
 			t.Fatalf("target %s output data type = %q, want %q", test.target, output.DataType, test.dataType)
@@ -152,37 +217,13 @@ func TestDefinitionForNodeTypesCastOutputs(t *testing.T) {
 			t.Fatalf("target %s output contract = %#v, want kind %s", test.target, output.Type, test.kind)
 		}
 	}
-	object := resolvedOutputFor(t, definition, "object")
+	object := resolveNode(t, registry, "data:cast", map[string]any{"target": "object"}).Outputs[0]
 	if object.Type == nil || object.Type.Key == nil || object.Type.Key.Kind != domain.TypeString || object.Type.Value == nil || object.Type.Value.Kind != domain.TypeAny {
 		t.Fatalf("object cast contract = %#v, want map<string, any>", object.Type)
 	}
 }
 
-func resolvedOutputFor(t *testing.T, definition domain.NodeDefinition, target string) domain.NodePort {
-	t.Helper()
-	resolved, err := definitionForNode(definition, domain.FlowNode{ID: "cast", Type: "data:cast", Data: map[string]any{"config": map[string]any{"target": target}}})
-	if err != nil {
-		t.Fatalf("definitionForNode(%s) error = %v", target, err)
-	}
-	return resolved.Outputs[0]
-}
-
-func TestDefinitionForNodePreservesLegacyGetFieldPath(t *testing.T) {
-	definition, _ := catalog.New().Get("data:get_field")
-	resolved, err := definitionForNode(definition, domain.FlowNode{
-		ID:   "get-field",
-		Type: "data:get_field",
-		Data: map[string]any{"config": map[string]any{"path": "terminal.output"}},
-	})
-	if err != nil {
-		t.Fatalf("definitionForNode() error = %v", err)
-	}
-	if got, want := resolved.Outputs[0].ID, "value"; got != want {
-		t.Fatalf("legacy output ID = %q, want %q", got, want)
-	}
-}
-
-func TestDefinitionForNodeBuildsConfiguredObjectPins(t *testing.T) {
+func TestResolveBuildsConfiguredObjectPins(t *testing.T) {
 	registry := catalog.New()
 	tests := []struct {
 		name       string
@@ -201,6 +242,12 @@ func TestDefinitionForNodeBuildsConfiguredObjectPins(t *testing.T) {
 			inputCount: 2,
 		},
 		{
+			name:       "build object defaults to one value field",
+			nodeType:   "data:build_object",
+			config:     nil,
+			inputCount: 1,
+		},
+		{
 			name:     "break object outputs",
 			nodeType: "data:break_object",
 			config: map[string]any{"outputs": []any{
@@ -212,14 +259,7 @@ func TestDefinitionForNodeBuildsConfiguredObjectPins(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			definition, ok := registry.Get(test.nodeType)
-			if !ok {
-				t.Fatalf("%s definition is missing", test.nodeType)
-			}
-			resolved, err := definitionForNode(definition, domain.FlowNode{ID: "node", Type: test.nodeType, Data: map[string]any{"config": test.config}})
-			if err != nil {
-				t.Fatalf("definitionForNode() error = %v", err)
-			}
+			resolved := resolveNode(t, registry, test.nodeType, test.config)
 			if got := len(resolved.Inputs); got != test.inputCount {
 				t.Fatalf("input count = %d, want %d", got, test.inputCount)
 			}
@@ -230,24 +270,21 @@ func TestDefinitionForNodeBuildsConfiguredObjectPins(t *testing.T) {
 	}
 }
 
-func TestDefinitionForNodePreservesLegacyBuildObjectPins(t *testing.T) {
-	definition, _ := catalog.New().Get("data:build_object")
-	resolved, err := definitionForNode(definition, domain.FlowNode{ID: "build", Type: "data:build_object", Data: map[string]any{"config": map[string]any{}}})
-	if err != nil {
-		t.Fatalf("definitionForNode() error = %v", err)
-	}
-	if got, want := []string{resolved.Inputs[0].ID, resolved.Inputs[1].ID}, []string{"key", "value"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("legacy inputs = %#v, want %#v", got, want)
+func TestResolveBuildObjectDefaultsToConfiguredFieldPins(t *testing.T) {
+	registry := catalog.New()
+	resolved := resolveNode(t, registry, "data:build_object", nil)
+	if got, want := resolved.Inputs[0].ID, "value"; got != want {
+		t.Fatalf("default build object input = %q, want %q", got, want)
 	}
 }
 
-func TestDefinitionForNodeRejectsOverlappingObjectKeys(t *testing.T) {
-	definition, _ := catalog.New().Get("data:build_object")
-	_, err := definitionForNode(definition, domain.FlowNode{ID: "build", Type: "data:build_object", Data: map[string]any{"config": map[string]any{"fields": []any{
+func TestResolveRejectsOverlappingObjectKeys(t *testing.T) {
+	registry := catalog.New()
+	err := resolveNodeErr(t, registry, "data:build_object", map[string]any{"fields": []any{
 		map[string]any{"id": "customer", "key": "customer", "dataType": "object"},
 		map[string]any{"id": "name", "key": "customer.name", "dataType": "text"},
-	}}}})
+	}})
 	if err == nil || !strings.Contains(err.Error(), "overlap") {
-		t.Fatalf("definitionForNode() error = %v, want overlapping key error", err)
+		t.Fatalf("resolve build object() error = %v, want overlapping key error", err)
 	}
 }

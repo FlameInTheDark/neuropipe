@@ -16,4 +16,4 @@ This node has no configuration; the workspace catalogue is read live on each
 execution.
 
 ## Example
-`Manual Trigger → List Pipelines → JavaScript (pick by name) → Run Pipeline`
+`Manual Trigger → List Pipelines → JavaScript (pick by name) → Create Report`

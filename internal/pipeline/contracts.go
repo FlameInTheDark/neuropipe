@@ -21,7 +21,10 @@ type Executor interface {
 
 // ChatRequest is the provider-neutral LLM input used by AI nodes.
 type ChatRequest struct {
-	Prompt      string
+	Prompt string
+	// ProviderID selects the provider for this call. An empty value resolves
+	// to the application's configured default provider at execution time.
+	ProviderID  string
 	Model       string
 	Schema      map[string]any
 	ToolName    string

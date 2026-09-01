@@ -712,6 +712,9 @@ func definitionFrom(value any) (domain.FlowDefinition, error) {
 	if definition.SchemaVersion == 0 {
 		definition.SchemaVersion = domain.GraphSchemaV3
 	}
+	if definition.SchemaVersion != domain.GraphSchemaV3 {
+		return domain.FlowDefinition{}, fmt.Errorf("definition must be a Blueprint v3 object")
+	}
 	return definition, nil
 }
 

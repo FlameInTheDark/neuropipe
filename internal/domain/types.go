@@ -14,15 +14,11 @@ const (
 	PipelineDraft    PipelineStatus = "draft"
 	PipelineActive   PipelineStatus = "active"
 	PipelineArchived PipelineStatus = "archived"
-	PipelineLegacy   PipelineStatus = "legacy"
 )
 
-// GraphSchemaV2 is retained only so persisted v2 graphs can be identified and
-// migrated. New Blueprint graphs use GraphSchemaV3.
-const GraphSchemaV2 = 2
-
-// GraphSchemaV3 adds explicit recursive wire contracts. V2's DataType values
-// were display hints, while V3 types are enforced before and during execution.
+// GraphSchemaV3 is the only supported Blueprint graph schema. It adds
+// explicit recursive wire contracts: pin types are enforced before and during
+// execution.
 const GraphSchemaV3 = 3
 
 // PinKind separates control flow from values. Only exec pins can execute a
@@ -55,8 +51,8 @@ const (
 	DataBoolean DataType = "boolean"
 	DataObject  DataType = "object"
 	DataList    DataType = "list"
-	// DataBytes is the legacy display label for the V3 bytes wire contract.
-	// A pin declared bytes carries raw binary data ([]byte) and never accepts
+	// DataBytes is the display label for the bytes wire contract. A pin
+	// declared bytes carries raw binary data ([]byte) and never accepts
 	// implicit text conversion; use an explicit encoder node to bridge.
 	DataBytes DataType = "bytes"
 )
@@ -148,7 +144,23 @@ const (
 	ProviderOllama           ProviderKind = "ollama"
 	ProviderLlamaCPP         ProviderKind = "llamacpp"
 	ProviderOpenAICompatible ProviderKind = "openai-compatible"
+	ProviderAnthropic        ProviderKind = "anthropic"
 )
+
+// ValidProviderKinds lists every provider kind the settings UI may configure.
+func ValidProviderKinds() []ProviderKind {
+	return []ProviderKind{ProviderOllama, ProviderLlamaCPP, ProviderOpenAICompatible, ProviderAnthropic}
+}
+
+// IsValidProviderKind reports whether kind is a configurable provider kind.
+func IsValidProviderKind(kind ProviderKind) bool {
+	switch kind {
+	case ProviderOllama, ProviderLlamaCPP, ProviderOpenAICompatible, ProviderAnthropic:
+		return true
+	default:
+		return false
+	}
+}
 
 type Capability string
 
@@ -177,8 +189,7 @@ type Pipeline struct {
 	// HasUnpublishedChanges distinguishes an editable draft from the immutable
 	// revision that triggers currently run. Trust is revision-scoped and must
 	// never make the draft read-only.
-	HasUnpublishedChanges bool   `json:"hasUnpublishedChanges"`
-	MigrationIssue        string `json:"migrationIssue,omitempty"`
+	HasUnpublishedChanges bool `json:"hasUnpublishedChanges"`
 	// ExecutorID targets the pipeline at a remote executor. Empty means the
 	// pipeline runs inside this desktop installation.
 	ExecutorID string    `json:"executorId,omitempty"`
@@ -196,7 +207,6 @@ type PipelineSummary struct {
 	Status            PipelineStatus `json:"status"`
 	PublishedRevision int            `json:"publishedRevision"`
 	TriggerCount      int            `json:"triggerCount"`
-	MigrationIssue    string         `json:"migrationIssue,omitempty"`
 	ExecutorID        string         `json:"executorId,omitempty"`
 	ExecutorName      string         `json:"executorName,omitempty"`
 	UpdatedAt         time.Time      `json:"updatedAt"`
@@ -446,10 +456,11 @@ type ChatToolDefinition struct {
 // AssistantChatRequest carries a full persisted transcript to one provider
 // turn. Tool support is optional and adapter capability-dependent.
 type AssistantChatRequest struct {
-	Messages []ChatMessage        `json:"messages"`
-	Tools    []ChatToolDefinition `json:"tools,omitempty"`
-	Model    string               `json:"model,omitempty"`
-	Metrics  LLMMetricContext     `json:"metrics,omitempty"`
+	Messages   []ChatMessage        `json:"messages"`
+	Tools      []ChatToolDefinition `json:"tools,omitempty"`
+	ProviderID string               `json:"providerId,omitempty"`
+	Model      string               `json:"model,omitempty"`
+	Metrics    LLMMetricContext     `json:"metrics,omitempty"`
 }
 
 // AssistantChatResponse contains normal text and/or native tool calls.
@@ -514,7 +525,7 @@ type NodeDefinition struct {
 	// of duplicating node-type switches in application services.
 	TriggerKind TriggerKind `json:"triggerKind,omitempty"`
 	// PortContractOwned marks definitions whose input and output ports are
-	// complete module contracts. The legacy catalog must not append generic
+	// complete module contracts. The catalog must not append generic
 	// payload/result pins to these definitions.
 	PortContractOwned bool           `json:"portContractOwned,omitempty"`
 	Inputs            []NodePort     `json:"inputs"`
@@ -946,14 +957,113 @@ type Option struct {
 	Label string `json:"label"`
 }
 
+// ModelConfig is one manually configured or discovered model of a provider.
+// ID is the provider-facing model key; Name is the display title shown in
+// pickers. A model with an empty Name falls back to showing its ID.
+type ModelConfig struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	// Parameters override the provider-level generation values for this
+	// model. Unset fields keep inheriting the provider values.
+	Parameters *GenerationParameters `json:"parameters,omitempty"`
+}
+
+// GenerationParameters are optional per-request generation overrides. Nil
+// fields mean "not configured": Neuropipe then omits them from the wire so
+// endpoints keep their own defaults. Model entries override provider-level
+// values field by field, so a provider can set a temperature baseline while
+// one long-context model raises only its context size.
+type GenerationParameters struct {
+	// Temperature scales sampling randomness, typically 0..2.
+	Temperature *float64 `json:"temperature,omitempty"`
+	// TopK limits sampling to the K most likely tokens.
+	TopK *int `json:"topK,omitempty"`
+	// TopP enables nucleus sampling (0..1).
+	TopP *float64 `json:"topP,omitempty"`
+	// MaxTokens caps the generated completion (OpenAI max_tokens, Anthropic
+	// max_tokens, Ollama num_predict) when no cap was discovered.
+	MaxTokens *int `json:"maxTokens,omitempty"`
+	// ContextSize widens the prompt window (Ollama num_ctx, the context the
+	// managed llama.cpp server is launched with) for models whose window was
+	// not discovered from the provider.
+	ContextSize *int `json:"contextSize,omitempty"`
+}
+
+// EffectiveParameters resolves the generation parameters for one request to
+// the given model: the model entry's overrides win over the provider-level
+// values field by field. Matching is case-insensitive on the model key, and a
+// nil model resolves to the provider-level values alone.
+func (p ProviderConfig) EffectiveParameters(model string) GenerationParameters {
+	result := GenerationParameters{}
+	if p.Parameters != nil {
+		result = *p.Parameters
+	}
+	model = strings.TrimSpace(model)
+	var override *GenerationParameters
+	for index := range p.Models {
+		if strings.EqualFold(strings.TrimSpace(p.Models[index].ID), model) {
+			override = p.Models[index].Parameters
+			break
+		}
+	}
+	if override == nil {
+		return result
+	}
+	if override.Temperature != nil {
+		result.Temperature = override.Temperature
+	}
+	if override.TopK != nil {
+		result.TopK = override.TopK
+	}
+	if override.TopP != nil {
+		result.TopP = override.TopP
+	}
+	if override.MaxTokens != nil {
+		result.MaxTokens = override.MaxTokens
+	}
+	if override.ContextSize != nil {
+		result.ContextSize = override.ContextSize
+	}
+	return result
+}
+
 type ProviderConfig struct {
-	ID        string       `json:"id"`
-	Name      string       `json:"name"`
-	Kind      ProviderKind `json:"kind"`
-	BaseURL   string       `json:"baseUrl"`
-	Model     string       `json:"model"`
-	APIKeyRef string       `json:"apiKeyRef,omitempty"`
-	Enabled   bool         `json:"enabled"`
+	ID      string       `json:"id"`
+	Name    string       `json:"name"`
+	Kind    ProviderKind `json:"kind"`
+	BaseURL string       `json:"baseUrl"`
+	// Model is the provider's default model: AI nodes without an explicit
+	// model selection resolve to it at execution time.
+	Model     string        `json:"model"`
+	Models    []ModelConfig `json:"models,omitempty"`
+	APIKeyRef string        `json:"apiKeyRef,omitempty"`
+	Enabled   bool          `json:"enabled"`
+	// Parameters are provider-level generation defaults applied to every
+	// request unless the selected model overrides a field.
+	Parameters *GenerationParameters `json:"parameters,omitempty"`
+}
+
+// ModelOptions returns the configured model list, ensuring the provider's
+// default model is present so a saved default never disappears from pickers.
+func (p ProviderConfig) ModelOptions() []ModelConfig {
+	options := make([]ModelConfig, 0, len(p.Models)+1)
+	seen := make(map[string]struct{}, len(p.Models)+1)
+	if model := strings.TrimSpace(p.Model); model != "" {
+		options = append(options, ModelConfig{ID: model})
+		seen[model] = struct{}{}
+	}
+	for _, item := range p.Models {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		options = append(options, ModelConfig{ID: id, Name: strings.TrimSpace(item.Name), Parameters: item.Parameters})
+		seen[id] = struct{}{}
+	}
+	return options
 }
 
 // ModelPriceRate is an optional local estimate for one hosted provider/model.
@@ -982,9 +1092,13 @@ type Settings struct {
 	RetentionDays     int    `json:"retentionDays"`
 	// WebhookPort is retained to migrate pre-API settings. API.Port is the
 	// active listener setting and is the only port used by new installations.
-	WebhookPort          int                  `json:"webhookPort"`
-	PluginDirectory      string               `json:"pluginDirectory"`
-	Providers            []ProviderConfig     `json:"providers"`
+	WebhookPort     int              `json:"webhookPort"`
+	PluginDirectory string           `json:"pluginDirectory"`
+	Providers       []ProviderConfig `json:"providers"`
+	// ManagedLlamaRemoved records the user's explicit removal of the managed
+	// llama.cpp provider so the settings sync does not materialize it again
+	// while local models exist. Adding the provider back clears it.
+	ManagedLlamaRemoved  bool                 `json:"managedLlamaRemoved,omitempty"`
 	MaxConcurrentRuns    int                  `json:"maxConcurrentRuns"`
 	MaxConcurrentLLMRuns int                  `json:"maxConcurrentLLMRuns"`
 	LlamaRuntime         LlamaRuntimeSettings `json:"llamaRuntime"`
@@ -1741,6 +1855,18 @@ type LlamaRuntimeRelease struct {
 	CUDA        RuntimeArtifact `json:"cuda"`
 	Vulkan      RuntimeArtifact `json:"vulkan"`
 	HIP         RuntimeArtifact `json:"hip"`
+}
+
+// LlamaRuntimeReleaseList is a release listing together with the source that
+// served it. Source is "github-api" (live REST API), "github-web" (live
+// releases page, used when the API is rate-limited or blocked), or "cache"
+// (the last successful listing); Notice explains any fallback in a
+// user-readable way and is empty for a plain API listing.
+type LlamaRuntimeReleaseList struct {
+	Releases  []LlamaRuntimeRelease `json:"releases"`
+	Source    string                `json:"source"`
+	FetchedAt time.Time             `json:"fetchedAt,omitempty"`
+	Notice    string                `json:"notice,omitempty"`
 }
 
 // LlamaRuntimeInstallRequest selects one official runtime build to install.

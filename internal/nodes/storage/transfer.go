@@ -24,7 +24,7 @@ const (
 	uploadSourceBase64 = "base64"
 )
 
-// uploadSourceOptions lists the Source dropdown. Auto keeps legacy graphs
+// uploadSourceOptions lists the Source dropdown. Auto keeps unconfigured graphs
 // fully functional because it is the value their config lacks.
 func uploadSourceOptions() []domain.Option {
 	return []domain.Option{

@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +36,101 @@ func TestManagedLlamaRequiresStartedRuntime(t *testing.T) {
 	_, err := manager.Chat(context.Background(), pipeline.ChatRequest{Prompt: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "start managed llama.cpp") {
 		t.Fatalf("Chat() error = %v, want start instruction", err)
+	}
+}
+
+func TestManagedLlamaRoutesThroughRouter(t *testing.T) {
+	var servedModel string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s", request.URL.Path)
+		}
+		var payload struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(request.Body).Decode(&payload)
+		servedModel = payload.Model
+		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"{\"decision\":\"true\"}"}}]}`))
+	}))
+	defer server.Close()
+
+	var routedModel string
+	manager := NewManager(
+		domain.Settings{DefaultProviderID: "llama-managed", Providers: []domain.ProviderConfig{
+			// A stale persisted endpoint must never be used once a router is
+			// installed: the loopback port changes between sessions.
+			{ID: "llama-managed", Name: "Managed llama.cpp", Kind: domain.ProviderLlamaCPP, BaseURL: "http://127.0.0.1:1", Model: "default.gguf", Enabled: true},
+		}},
+		nil,
+		WithLlamaRouter(func(ctx context.Context, model string) (string, string, error) {
+			routedModel = model
+			return server.URL, "Canonical.gguf", nil
+		}),
+	)
+	response, err := manager.Chat(context.Background(), pipeline.ChatRequest{Prompt: "route", ToolName: "route", ToolChoices: []string{"true", "false"}})
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if response.JSON["decision"] != "true" {
+		t.Fatalf("decision = %v, want true", response.JSON["decision"])
+	}
+	if routedModel != "default.gguf" {
+		t.Fatalf("router model = %q, want the provider default model", routedModel)
+	}
+	if servedModel != "Canonical.gguf" {
+		t.Fatalf("request model = %q, want the canonical served alias", servedModel)
+	}
+}
+
+func TestManagedLlamaRouterErrorSurfaces(t *testing.T) {
+	manager := NewManager(
+		domain.Settings{DefaultProviderID: "llama-managed", Providers: []domain.ProviderConfig{{ID: "llama-managed", Kind: domain.ProviderLlamaCPP, Model: "model.gguf", Enabled: true}}},
+		nil,
+		WithLlamaRouter(func(context.Context, string) (string, string, error) {
+			return "", "", errors.New("model \"model.gguf\" is not installed; download it in Settings, Models")
+		}),
+	)
+	_, err := manager.Chat(context.Background(), pipeline.ChatRequest{Prompt: "hello"})
+	if err == nil || !strings.Contains(err.Error(), "is not installed") {
+		t.Fatalf("Chat() error = %v, want the routing error surfaced", err)
+	}
+	_, err = manager.Converse(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "hello"}}})
+	if err == nil || !strings.Contains(err.Error(), "is not installed") {
+		t.Fatalf("Converse() error = %v, want the routing error surfaced", err)
+	}
+}
+
+func TestManagedLlamaConverseRoutesThroughRouter(t *testing.T) {
+	var servedModel string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s", request.URL.Path)
+		}
+		var payload struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(request.Body).Decode(&payload)
+		servedModel = payload.Model
+		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"Hello there."}}]}`))
+	}))
+	defer server.Close()
+
+	manager := NewManager(
+		domain.Settings{DefaultProviderID: "llama-managed", Providers: []domain.ProviderConfig{{ID: "llama-managed", Kind: domain.ProviderLlamaCPP, Model: "default.gguf", Enabled: true}}},
+		nil,
+		WithLlamaRouter(func(ctx context.Context, model string) (string, string, error) {
+			return server.URL, "Default.gguf", nil
+		}),
+	)
+	response, err := manager.Converse(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatalf("Converse() error = %v", err)
+	}
+	if response.Content != "Hello there." {
+		t.Fatalf("content = %q, want the assistant reply", response.Content)
+	}
+	if servedModel != "Default.gguf" {
+		t.Fatalf("request model = %q, want the canonical served alias", servedModel)
 	}
 }
 

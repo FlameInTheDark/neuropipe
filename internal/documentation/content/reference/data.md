@@ -1,6 +1,6 @@
 # Data nodes
 
-Data nodes are pure unless noted. They have no exec pins and calculate only when a consumer asks for an output. Their values are memoized inside the active run frame only.
+Data nodes are pure unless noted. They have no exec pins and calculate only when a consumer asks for an output. Their values are memoized inside the active run frame only. Array-specific nodes (build, append, pick, sort, split, reverse, slice, unique) have their own reference under Arrays.
 
 ## Constant
 
@@ -17,6 +17,10 @@ Data nodes are pure unless noted. They have no exec pins and calculate only when
 ## Build Object
 
 **Purpose:** make an object from configurable typed input pins. **Pins:** one input per configured field and an Object output. **Configure:** stable input ID, display name, object key/path, and data type. **Produces:** an object; dotted keys create nested objects. **Capabilities:** none. **Failure:** empty, duplicate, or overlapping keys are invalid. **Example:** `Name` → `customer.name`, `Email` → `customer.email` → Build Object.
+
+## Build Map
+
+**Purpose:** assemble a flat string-keyed map whose values share one value type. **Pins:** one input per configured entry, all typed by the value type, and a Map output. **Configure:** the value type (any allows mixed values), plus per-row stable input ID, display name, verbatim key, and optional constant. **Produces:** an object with the keys exactly as written — no dotted nesting (use Build Object for paths). **Capabilities:** none. **Failure:** duplicate keys or an entry with neither wire nor constant stops the requesting path. **Example:** value type text, wired Id + constant `EUR` → Build Map → HTTP body.
 
 ## Break Object
 
@@ -40,7 +44,7 @@ Data nodes are pure unless noted. They have no exec pins and calculate only when
 
 ## Parse JSON
 
-**Purpose:** parse JSON text. **Pins:** Text input, Value output. **Configure:** none. **Produces:** object or list. **Capabilities:** none. **Failure:** malformed JSON stops the requesting path. **Example:** Read File content → Parse JSON → Query JSON.
+**Purpose:** parse JSON text into a typed value. **Pins:** Text input, Value output. **Configure:** Root type (object default; list, text, number, boolean, or any). **Produces:** the declared root type. **Capabilities:** none. **Failure:** malformed JSON or a root that does not match the declared type stops the requesting path with both kinds named. **Example:** Read File content → Parse JSON (object) → Word Template Fill Values.
 
 ## Get Variable
 
@@ -49,10 +53,6 @@ Data nodes are pure unless noted. They have no exec pins and calculate only when
 ## Get Global Variable
 
 **Purpose:** read a workspace variable shared by every pipeline and run. **Pins:** Value output. **Configure:** pick a declared variable name. **Produces:** the declared data type. **Capabilities:** none. **Failure:** an unknown or deleted variable stops the run; a read before any write returns the declared default. **Example:** Get Global Variable `visits` → Math Add → Set Global Variable.
-
-## Data Reroute
-
-**Purpose:** keep data wires legible. **Pins:** Value input/output. **Configure:** none. **Produces:** the same value. **Capabilities:** none. **Failure:** none beyond source evaluation. **Example:** LLM result → Data Reroute → Create Report.
 
 ## Bytes To Base64
 

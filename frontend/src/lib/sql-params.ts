@@ -17,7 +17,8 @@ export interface SqlParamRow {
   required: boolean;
 }
 
-const LEGACY_KIND_SPEC: Record<NonNullable<SqlParamRow["kind"]>, TypeSpec> = {
+/** Wire contracts derived from the UI-level kind shorthand. */
+const KIND_SPECS: Record<NonNullable<SqlParamRow["kind"]>, TypeSpec> = {
   text: { kind: "string" },
   int: { kind: "int" },
   float: { kind: "float" },
@@ -39,18 +40,19 @@ export function parseSqlParams(raw: unknown): SqlParamRow[] {
     .filter((p): p is Record<string, unknown> => typeof p === "object" && p !== null)
     .map((p) => {
       const spec = (p as { type?: TypeSpec }).type;
-      const kind = legacyKind(spec?.kind);
+      const kind = uiKind(spec?.kind);
       return {
         name: typeof p.name === "string" ? p.name : "",
         label: typeof p.label === "string" ? p.label : "",
         kind,
-        spec: spec ?? LEGACY_KIND_SPEC[kind],
+        spec: spec ?? KIND_SPECS[kind],
         required: p.required === true,
       };
     });
 }
 
-function legacyKind(kind?: string): NonNullable<SqlParamRow["kind"]> {
+/** Maps a wire contract kind onto the UI-level shorthand select. */
+function uiKind(kind?: string): NonNullable<SqlParamRow["kind"]> {
   switch (kind) {
     case "int": return "int";
     case "float": return "float";
@@ -63,7 +65,7 @@ function legacyKind(kind?: string): NonNullable<SqlParamRow["kind"]> {
 export function buildSqlPayload(rows: SqlParamRow[]): unknown[] {
   return rows.map((r, i) => {
     const id = /^[A-Za-z_][A-Za-z0-9_]*$/.test(r.name) ? r.name : `param_${i + 1}`;
-    const spec = r.spec ?? LEGACY_KIND_SPEC[r.kind];
+    const spec = r.spec ?? KIND_SPECS[r.kind];
     return { id, name: id, label: r.label.trim() || id, type: spec, required: r.required };
   });
 }

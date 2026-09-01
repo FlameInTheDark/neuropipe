@@ -182,6 +182,12 @@ func enrichNodeMarkdown(markdown string, definition domain.NodeDefinition) strin
 	if definition.Type == "data:build_object" {
 		inputs = []domain.NodePort{{ID: "<configured-field>", Label: "Configured field", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataAny}}
 	}
+	if definition.Type == "data:build_array" {
+		inputs = []domain.NodePort{{ID: "<configured-item>", Label: "Configured item", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataAny}}
+	}
+	if definition.Type == "data:build_map" {
+		inputs = []domain.NodePort{{ID: "<configured-entry>", Label: "Configured entry", Kind: domain.PinData, Direction: domain.PinInput, DataType: domain.DataAny}}
+	}
 	writePins("Inputs", inputs)
 	outputs := definition.Outputs
 	// Get Field and Break Object create their data outputs from inspector
@@ -212,6 +218,12 @@ func enrichNodeMarkdown(markdown string, definition domain.NodeDefinition) strin
 		builder.WriteString("Each row in **Outputs** creates one typed data pin. Its stable ID keeps connected wires intact when you rename its label; configure the path and expected data type for every output.\n")
 	} else if definition.Type == "data:build_object" {
 		builder.WriteString("Each row in **Fields** creates one typed input pin. Its stable ID keeps connected wires intact when you rename its label or remap its object key; dotted keys construct nested objects.\n")
+	} else if definition.Type == "data:build_array" {
+		builder.WriteString("Each row in **Items** creates one input pin typed by **Element type**; its stable ID keeps connected wires intact when you rename or reorder it, and a constant fills the element without a wire. Every pin, constant, and the Array output share that one type — choose **any** to allow mixed elements.\n")
+	} else if definition.Type == "data:build_map" {
+		builder.WriteString("Each row in **Entries** creates one input pin typed by **Value type**; its stable ID keeps connected wires intact when you rename or reorder it, keys are used verbatim, and a constant fills the entry without a wire. Every pin, constant, and the Map output share that one type — choose **any** to allow mixed values.\n")
+	} else if definition.Type == "data:json_parse" {
+		builder.WriteString("The **Value** output is typed by **Root type**: object (the default) carries the graph-wide map<string, any> shape so it connects to first-party object inputs without a Cast, and every other root type carries its own contract. A parsed root that does not match the declared type fails with both kinds named; **any** accepts every root.\n")
 	} else if len(definition.Outputs) == 0 {
 		builder.WriteString("This node produces no downstream value.\n")
 	} else {

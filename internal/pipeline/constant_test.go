@@ -13,10 +13,10 @@ import (
 
 func constantOutput(t *testing.T, config map[string]any) (map[string]any, error) {
 	t.Helper()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("const", "data:constant", config),
-		v2Node("store", "flow:set_variable", map[string]any{"name": "Probe"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("const", "data:constant", config),
+		cfgNode("store", "flow:set_variable", map[string]any{"name": "Probe"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-store", "start", "out", "store", "in"),
 		dataEdge("const-store", "const", "value", "store", "value"),
@@ -45,10 +45,9 @@ func TestDataConstantTypedValues(t *testing.T) {
 	}{
 		{name: "default type passes text", config: map[string]any{"value": "hello"}, want: map[string]any{"value": "hello"}},
 		{name: "explicit text", config: map[string]any{"value": "5", "type": "text"}, want: map[string]any{"value": "5"}},
-		{name: "number", config: map[string]any{"value": "7", "type": "number"}, want: map[string]any{"value": 7.0}},
-		{name: "boolean true", config: map[string]any{"value": "true", "type": "boolean"}, want: map[string]any{"value": true}},
-		{name: "boolean false", config: map[string]any{"value": "false", "type": "boolean"}, want: map[string]any{"value": false}},
-		{name: "legacy typed value unaffected", config: map[string]any{"value": 3.0}, want: map[string]any{"value": 3.0}},
+		{name: "number", config: map[string]any{"value": 7.0, "type": "number"}, want: map[string]any{"value": 7.0}},
+		{name: "boolean true", config: map[string]any{"value": true, "type": "boolean"}, want: map[string]any{"value": true}},
+		{name: "boolean false", config: map[string]any{"value": false, "type": "boolean"}, want: map[string]any{"value": false}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -63,24 +62,24 @@ func TestDataConstantTypedValues(t *testing.T) {
 	}
 }
 
-func TestDataConstantInvalidNumberFails(t *testing.T) {
-	_, err := constantOutput(t, map[string]any{"value": "abc", "type": "number"})
-	if err == nil || !strings.Contains(err.Error(), "cannot cast") {
-		t.Fatalf("Execute() error = %v, want cast failure", err)
+func TestDataConstantRejectsNonCanonicalValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		config map[string]any
+		want   string
+	}{
+		{name: "text value must be a string", config: map[string]any{"value": 7.0, "type": "text"}, want: "constant text value"},
+		{name: "number value must be numeric", config: map[string]any{"value": "abc", "type": "number"}, want: "constant number value"},
+		{name: "boolean value must be a bool", config: map[string]any{"value": "true", "type": "boolean"}, want: "constant Boolean value"},
+		{name: "unknown type", config: map[string]any{"value": "x", "type": "colour"}, want: "unknown constant type"},
 	}
-}
-
-func TestDataConstantV3RejectsLegacyTextCoercion(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("constant", "data:constant", map[string]any{"value": "7", "type": "number"}),
-		v2Node("store", "flow:set_variable", map[string]any{"name": "Probe"}),
-	}, Edges: []domain.FlowEdge{
-		execEdge("start-store", "start", "out", "store", "in"),
-		dataEdge("constant-store", "constant", "value", "store", "value"),
-	}}
-	if _, err := NewEngine(catalog.New(), nil, nil).Execute(context.Background(), flow, "start", Packet{}); err == nil || !strings.Contains(err.Error(), "constant number value") {
-		t.Fatalf("Execute() error = %v, want canonical-number error", err)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := constantOutput(t, test.config)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Execute() error = %v, want %q failure", err, test.want)
+			}
+		})
 	}
 }
 
@@ -93,8 +92,6 @@ func TestDataConstantOutputPinTypeFollowsConfig(t *testing.T) {
 		{name: "explicit text", config: map[string]any{"type": "text"}, want: domain.DataText},
 		{name: "number", config: map[string]any{"type": "number"}, want: domain.DataNumber},
 		{name: "boolean", config: map[string]any{"type": "boolean"}, want: domain.DataBoolean},
-		{name: "legacy type-less stays any", config: map[string]any{"value": "x"}, want: domain.DataAny},
-		{name: "typed legacy value stays any", config: map[string]any{"value": true}, want: domain.DataAny},
 	}
 	registry := catalog.New()
 	for _, test := range tests {
@@ -103,9 +100,13 @@ func TestDataConstantOutputPinTypeFollowsConfig(t *testing.T) {
 			if !ok {
 				t.Fatalf("registry is missing data:constant")
 			}
-			resolved, err := definitionForNode(definition, v2Node("const", "data:constant", test.config))
+			module, ok := registry.Node("data:constant")
+			if !ok {
+				t.Fatalf("registry is missing the constant module")
+			}
+			resolved, err := module.Resolve(cfgNode("const", "data:constant", test.config))
 			if err != nil {
-				t.Fatalf("definitionForNode() error = %v", err)
+				t.Fatalf("Resolve() error = %v", err)
 			}
 			value, ok := findOutput(resolved, "value")
 			if !ok {
@@ -114,6 +115,7 @@ func TestDataConstantOutputPinTypeFollowsConfig(t *testing.T) {
 			if value.DataType != test.want {
 				t.Fatalf("value output DataType = %q, want %q", value.DataType, test.want)
 			}
+			_ = definition
 		})
 	}
 }

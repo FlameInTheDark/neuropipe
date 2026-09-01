@@ -22,9 +22,9 @@ func TestHTTPNodeSendsConfiguredHeadersAndCustomUserAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("request", "action:http", map[string]any{
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("request", "action:http", map[string]any{
 			"url":                server.URL,
 			"headers":            []any{map[string]any{"id": "accept", "name": "Accept", "value": "application/json"}, map[string]any{"id": "trace", "name": "X-Trace-ID", "value": "trace-42"}},
 			"useCustomUserAgent": true,
@@ -48,8 +48,8 @@ func TestHTTPNodeSendsConfiguredHeadersAndCustomUserAgent(t *testing.T) {
 
 func TestBlueprintExecutesV3JavaScriptWithTypedOutput(t *testing.T) {
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("script", "action:javascript", map[string]any{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("script", "action:javascript", map[string]any{
 			"code":   "return { message: 'JavaScript ready' };",
 			"inputs": []any{},
 			"outputs": []any{map[string]any{
@@ -57,7 +57,7 @@ func TestBlueprintExecutesV3JavaScriptWithTypedOutput(t *testing.T) {
 			}},
 			"capabilities": []any{},
 		}),
-		v2Node("notice", "action:notification", map[string]any{"title": "JavaScript"}),
+		cfgNode("notice", "action:notification", map[string]any{"title": "JavaScript"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-script", "start", "out", "script", "in"),
 		execEdge("script-notice", "script", "out", "notice", "in"),
@@ -83,17 +83,17 @@ func TestHTTPResultCanFeedBreakObject(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("request", "action:http", map[string]any{"url": server.URL, "method": "GET"}),
-		v2Node("break", "data:break_object", map[string]any{"outputs": []any{
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("request", "action:http", map[string]any{"url": server.URL, "method": "GET"}),
+		cfgNode("break", "data:break_object", map[string]any{"outputs": []any{
 			map[string]any{"id": "body", "label": "Body", "path": "body", "dataType": "text"},
 			map[string]any{"id": "headers", "label": "Headers", "path": "headers", "dataType": "object"},
 			// HTTP status is a Go int inside the packet; a declared number
 			// (float) contract must still accept it.
 			map[string]any{"id": "status", "label": "Status", "path": "status", "dataType": "number"},
 		}}),
-		v2Node("notice", "action:notification", map[string]any{"title": "HTTP"}),
+		cfgNode("notice", "action:notification", map[string]any{"title": "HTTP"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-request", "start", "out", "request", "in"),
 		execEdge("request-notice", "request", "out", "notice", "in"),
@@ -131,17 +131,17 @@ func TestHTTPStatusSurvivesBreakObjectIntoEqualsAgainstConstant(t *testing.T) {
 	}))
 	defer server.Close()
 
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("request", "action:http", map[string]any{"url": server.URL, "method": "GET"}),
-		v2Node("break", "data:break_object", map[string]any{"outputs": []any{
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("request", "action:http", map[string]any{"url": server.URL, "method": "GET"}),
+		cfgNode("break", "data:break_object", map[string]any{"outputs": []any{
 			map[string]any{"id": "status", "label": "Status", "path": "status", "dataType": "number"},
 		}}),
-		v2Node("constant", "data:constant", map[string]any{"value": 200.0}),
-		v2Node("equal", "data:equals", nil),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("match", "action:notification", map[string]any{"title": "Status", "message": "OK"}),
-		v2Node("mismatch", "action:notification", map[string]any{"title": "Status", "message": "Unexpected"}),
+		cfgNode("constant", "data:constant", map[string]any{"type": "number", "value": 200.0}),
+		cfgNode("equal", "data:equals", nil),
+		cfgNode("branch", "flow:branch", nil),
+		cfgNode("match", "action:notification", map[string]any{"title": "Status", "message": "OK"}),
+		cfgNode("mismatch", "action:notification", map[string]any{"title": "Status", "message": "Unexpected"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-request", "start", "out", "request", "in"),
 		execEdge("request-branch", "request", "out", "branch", "in"),
@@ -197,7 +197,7 @@ func (s *recordingNotificationSender) Send(_ context.Context, title, message str
 	return s.err
 }
 
-func v2Node(id, nodeType string, config map[string]any) domain.FlowNode {
+func cfgNode(id, nodeType string, config map[string]any) domain.FlowNode {
 	return domain.FlowNode{ID: id, Type: nodeType, Data: map[string]any{"config": config}}
 }
 func execEdge(id, source, sourcePin, target, targetPin string) domain.FlowEdge {
@@ -208,11 +208,11 @@ func dataEdge(id, source, sourcePin, target, targetPin string) domain.FlowEdge {
 }
 
 func TestBlueprintCachesPureDataAndRoutesExec(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("truth", "data:constant", map[string]any{"value": true}),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("truth", "data:constant", map[string]any{"type": "boolean", "value": true}),
+		cfgNode("branch", "flow:branch", nil),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-branch", "start", "out", "branch", "in"), dataEdge("truth-condition", "truth", "value", "branch", "condition"), execEdge("true-notice", "branch", "true", "notice", "in"),
 	}}
@@ -240,10 +240,10 @@ func TestBlueprintCachesPureDataAndRoutesExec(t *testing.T) {
 func TestBlueprintWaypointEdgesExecuteLikeDirectEdges(t *testing.T) {
 	waypoints := []domain.Position{{X: 40, Y: 60}, {X: -10, Y: 200}}
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("truth", "data:constant", map[string]any{"value": true, "type": "boolean"}),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("truth", "data:constant", map[string]any{"value": true, "type": "boolean"}),
+		cfgNode("branch", "flow:branch", nil),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		{ID: "start-branch", Source: "start", SourceHandle: "out", Target: "branch", TargetHandle: "in", Kind: domain.PinExec, Waypoints: waypoints},
 		{ID: "truth-condition", Source: "truth", SourceHandle: "value", Target: "branch", TargetHandle: "condition", Kind: domain.PinData, Waypoints: waypoints},
@@ -264,10 +264,10 @@ func TestBlueprintWaypointEdgesExecuteLikeDirectEdges(t *testing.T) {
 
 func TestBlueprintTypeAssertRejectsMismatchedRuntimeValue(t *testing.T) {
 	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("constant", "data:constant", map[string]any{"value": "not a Boolean"}),
-		v2Node("assert", "data:type_assert", map[string]any{"typeSpec": map[string]any{"kind": "bool"}}),
-		v2Node("branch", "flow:branch", nil),
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("constant", "data:constant", map[string]any{"value": "not a Boolean"}),
+		cfgNode("assert", "data:type_assert", map[string]any{"typeSpec": map[string]any{"kind": "bool"}}),
+		cfgNode("branch", "flow:branch", nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("exec", "start", "out", "branch", "in"),
 		dataEdge("source-assert", "constant", "value", "assert", "value"),
@@ -279,9 +279,9 @@ func TestBlueprintTypeAssertRejectsMismatchedRuntimeValue(t *testing.T) {
 }
 
 func TestChatTriggerPassesExplicitPinsToReplyNode(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("chat", "trigger:chat", map[string]any{"label": "Support"}),
-		v2Node("reply", "action:chat_reply", nil),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("chat", "trigger:chat", map[string]any{"label": "Support"}),
+		cfgNode("reply", "action:chat_reply", nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("chat-reply", "chat", "out", "reply", "in"),
 		dataEdge("chat-text", "chat", "text", "reply", "text"),
@@ -337,21 +337,20 @@ func TestGetFieldReadsNestedValueFromPacket(t *testing.T) {
 }
 
 func TestGetFieldEmitsMultipleTypedOutputs(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("source", "data:constant", map[string]any{"value": map[string]any{
-			"terminal": map[string]any{"command": "Get-Date", "output": "Friday"},
-			"ready":    true,
-		}}),
-		v2Node("fields", "data:get_field", map[string]any{"outputs": []any{
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("source", "data:constant", map[string]any{"type": "text", "value": `{"terminal":{"command":"Get-Date","output":"Friday"},"ready":true}`}),
+		cfgNode("parsed", "data:json_parse", nil),
+		cfgNode("fields", "data:get_field", map[string]any{"outputs": []any{
 			map[string]any{"id": "command", "label": "Command", "path": "terminal.command", "dataType": "text"},
 			map[string]any{"id": "ready", "label": "Ready", "path": "ready", "dataType": "boolean"},
 		}}),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
+		cfgNode("branch", "flow:branch", nil),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-branch", "start", "out", "branch", "in"),
-		dataEdge("source-fields", "source", "value", "fields", "source"),
+		dataEdge("source-parsed", "source", "value", "parsed", "text"),
+		dataEdge("parsed-fields", "parsed", "value", "fields", "source"),
 		dataEdge("fields-branch", "fields", "ready", "branch", "condition"),
 		execEdge("branch-notice", "branch", "true", "notice", "in"),
 	}}
@@ -373,19 +372,19 @@ func TestGetFieldEmitsMultipleTypedOutputs(t *testing.T) {
 }
 
 func TestBuildAndBreakObjectUseConfiguredTypedPins(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("name", "data:constant", map[string]any{"value": "Ada"}),
-		v2Node("active", "data:constant", map[string]any{"value": true}),
-		v2Node("build", "data:build_object", map[string]any{"fields": []any{
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("name", "data:constant", map[string]any{"type": "text", "value": "Ada"}),
+		cfgNode("active", "data:constant", map[string]any{"type": "boolean", "value": true}),
+		cfgNode("build", "data:build_object", map[string]any{"fields": []any{
 			map[string]any{"id": "name", "label": "Name", "key": "customer.name", "dataType": "text"},
 			map[string]any{"id": "active", "label": "Active", "key": "customer.active", "dataType": "boolean"},
 		}}),
-		v2Node("break", "data:break_object", map[string]any{"outputs": []any{
+		cfgNode("break", "data:break_object", map[string]any{"outputs": []any{
 			map[string]any{"id": "name", "label": "Name", "path": "customer.name", "dataType": "text"},
 			map[string]any{"id": "active", "label": "Active", "path": "customer.active", "dataType": "boolean"},
 		}}),
-		v2Node("branch", "flow:branch", nil),
+		cfgNode("branch", "flow:branch", nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-branch", "start", "out", "branch", "in"),
 		dataEdge("name-build", "name", "value", "build", "name"),
@@ -446,9 +445,9 @@ func TestDesktopNotificationUsesConfiguredSender(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			sender := &recordingNotificationSender{err: test.sendErr}
-			flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-				v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-				v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Pipeline finished"}),
+			flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+				cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+				cfgNode("notice", "action:notification", map[string]any{"title": "Ready", "message": "Pipeline finished"}),
 			}, Edges: []domain.FlowEdge{
 				execEdge("start-notice", "start", "out", "notice", "in"),
 			}}
@@ -475,11 +474,11 @@ func TestDesktopNotificationUsesConfiguredSender(t *testing.T) {
 }
 
 func TestBlueprintReusesImpureOutputInsteadOfExecutingAgain(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}), v2Node("truth", "data:constant", map[string]any{"value": true}),
-		v2Node("store", "flow:set_variable", map[string]any{"name": "Ready"}), v2Node("branch", "flow:branch", nil),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}), cfgNode("truth", "data:constant", map[string]any{"type": "boolean", "value": true}),
+		cfgNode("store", "flow:set_variable", map[string]any{"name": "Ready"}), cfgNode("branch", "flow:branch", nil), cfgNode("truthCast", "data:cast", map[string]any{"target": "boolean"}),
 	}, Edges: []domain.FlowEdge{
-		execEdge("start-store", "start", "out", "store", "in"), dataEdge("truth-store", "truth", "value", "store", "value"), execEdge("store-branch", "store", "out", "branch", "in"), dataEdge("store-branch-data", "store", "result", "branch", "condition"),
+		execEdge("start-store", "start", "out", "store", "in"), dataEdge("truth-store", "truth", "value", "store", "value"), execEdge("store-branch", "store", "out", "branch", "in"), dataEdge("store-truthCast", "store", "result", "truthCast", "value"), dataEdge("truthCast-branch", "truthCast", "value", "branch", "condition"),
 	}}
 	result, err := NewEngine(catalog.New(), nil, nil).Execute(context.Background(), flow, "start", Packet{})
 	if err != nil {
@@ -496,43 +495,21 @@ func TestBlueprintReusesImpureOutputInsteadOfExecutingAgain(t *testing.T) {
 	}
 }
 
-func TestBlueprintReroutesPreserveExecutionAndData(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("exec-reroute", "flow:reroute", nil),
-		v2Node("truth", "data:constant", map[string]any{"value": true}),
-		v2Node("data-reroute", "data:reroute", nil),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Ready", "message": "Done"}),
-	}, Edges: []domain.FlowEdge{
-		execEdge("start-reroute", "start", "out", "exec-reroute", "in"),
-		execEdge("reroute-branch", "exec-reroute", "out", "branch", "in"),
-		dataEdge("truth-reroute", "truth", "value", "data-reroute", "value"),
-		dataEdge("reroute-condition", "data-reroute", "value", "branch", "condition"),
-		execEdge("branch-notice", "branch", "true", "notice", "in"),
-	}}
-	result, err := NewEngine(catalog.New(), nil, nil).Execute(context.Background(), flow, "start", Packet{})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if len(result.NodeRuns) != 6 || result.NodeRuns[1].NodeID != "exec-reroute" || result.NodeRuns[3].NodeID != "data-reroute" || result.NodeRuns[5].NodeID != "notice" {
-		t.Fatalf("unexpected reroute execution order: %#v", result.NodeRuns)
-	}
-}
-
 func TestBlueprintDoesNotReuseVariablesAcrossRuns(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("write", "trigger:button", map[string]any{"label": "Write"}),
-		v2Node("read", "trigger:button", map[string]any{"label": "Read"}),
-		v2Node("value", "data:constant", map[string]any{"value": true}),
-		v2Node("set", "flow:set_variable", map[string]any{"name": "RunLocal"}),
-		v2Node("get", "data:get_variable", map[string]any{"name": "RunLocal"}),
-		v2Node("branch", "flow:branch", nil),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("write", "trigger:button", map[string]any{"label": "Write"}),
+		cfgNode("read", "trigger:button", map[string]any{"label": "Read"}),
+		cfgNode("value", "data:constant", map[string]any{"type": "boolean", "value": true}),
+		cfgNode("set", "flow:set_variable", map[string]any{"name": "RunLocal"}),
+		cfgNode("get", "data:get_variable", map[string]any{"name": "RunLocal"}),
+		cfgNode("asBool", "data:cast", map[string]any{"target": "boolean"}),
+		cfgNode("branch", "flow:branch", nil),
 	}, Edges: []domain.FlowEdge{
 		execEdge("write-set", "write", "out", "set", "in"),
 		dataEdge("value-set", "value", "value", "set", "value"),
 		execEdge("read-branch", "read", "out", "branch", "in"),
-		dataEdge("get-branch", "get", "value", "branch", "condition"),
+		dataEdge("get-asBool", "get", "value", "asBool", "value"),
+		dataEdge("asBool-branch", "asBool", "value", "branch", "condition"),
 	}}
 	engine := NewEngine(catalog.New(), nil, nil)
 	if _, err := engine.Execute(context.Background(), flow, "write", Packet{}); err != nil {
@@ -544,9 +521,9 @@ func TestBlueprintDoesNotReuseVariablesAcrossRuns(t *testing.T) {
 }
 
 func TestBlueprintFailsWhenImpureDataWasNotExecuted(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}), v2Node("unrun", "flow:set_variable", map[string]any{"name": "Never"}), v2Node("branch", "flow:branch", nil),
-	}, Edges: []domain.FlowEdge{execEdge("start-branch", "start", "out", "branch", "in"), dataEdge("unrun-condition", "unrun", "result", "branch", "condition")}}
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}), cfgNode("unrun", "flow:set_variable", map[string]any{"name": "Never"}), cfgNode("asBool", "data:cast", map[string]any{"target": "boolean"}), cfgNode("branch", "flow:branch", nil),
+	}, Edges: []domain.FlowEdge{execEdge("start-branch", "start", "out", "branch", "in"), dataEdge("unrun-asBool", "unrun", "result", "asBool", "value"), dataEdge("asBool-condition", "asBool", "value", "branch", "condition")}}
 	_, err := NewEngine(catalog.New(), nil, nil).Execute(context.Background(), flow, "start", Packet{})
 	if err == nil || !strings.Contains(err.Error(), "has an Exec pin but has not run") {
 		t.Fatalf("Execute() error = %v, want unexecuted impure-data failure", err)
@@ -554,26 +531,26 @@ func TestBlueprintFailsWhenImpureDataWasNotExecuted(t *testing.T) {
 }
 
 func TestBlueprintForEachScopesIterationData(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}), v2Node("items", "data:constant", map[string]any{"value": []any{"a", "b"}}), v2Node("loop", "flow:for_each", nil), v2Node("store", "flow:set_variable", map[string]any{"name": "Last"}),
-	}, Edges: []domain.FlowEdge{execEdge("start-loop", "start", "out", "loop", "in"), dataEdge("items-loop", "items", "value", "loop", "items"), execEdge("loop-store", "loop", "loop", "store", "in"), dataEdge("item-store", "loop", "item", "store", "value")}}
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}), cfgNode("source", "data:constant", map[string]any{"type": "text", "value": `["a","b"]`}), cfgNode("items", "data:cast", map[string]any{"target": "list"}), cfgNode("loop", "flow:for_each", nil), cfgNode("store", "flow:set_variable", map[string]any{"name": "Last"}),
+	}, Edges: []domain.FlowEdge{execEdge("start-loop", "start", "out", "loop", "in"), dataEdge("source-items", "source", "value", "items", "value"), dataEdge("items-loop", "items", "value", "loop", "items"), execEdge("loop-store", "loop", "loop", "store", "in"), dataEdge("item-store", "loop", "item", "store", "value")}}
 	result, err := NewEngine(catalog.New(), nil, nil).Execute(context.Background(), flow, "start", Packet{})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if len(result.NodeRuns) != 5 {
-		t.Fatalf("NodeRuns = %d, want event, cached array, two body runs, loop completion", len(result.NodeRuns))
+	if len(result.NodeRuns) != 6 {
+		t.Fatalf("NodeRuns = %d, want event, JSON source, cached list, two body runs, loop completion", len(result.NodeRuns))
 	}
 }
 
 func TestBlueprintDoOnceAndBreakRespectControlFlow(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("first", "data:constant", map[string]any{"value": 0}),
-		v2Node("last", "data:constant", map[string]any{"value": 2}),
-		v2Node("loop", "flow:for_loop", nil),
-		v2Node("once", "flow:do_once", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Once", "message": "Only once"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("first", "data:constant", map[string]any{"type": "number", "value": 0}),
+		cfgNode("last", "data:constant", map[string]any{"type": "number", "value": 2}),
+		cfgNode("loop", "flow:for_loop", nil),
+		cfgNode("once", "flow:do_once", nil),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Once", "message": "Only once"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-loop", "start", "out", "loop", "in"),
 		dataEdge("first-loop", "first", "value", "loop", "first"),
@@ -597,14 +574,16 @@ func TestBlueprintDoOnceAndBreakRespectControlFlow(t *testing.T) {
 }
 
 func TestBlueprintBreakStopsInnermostLoop(t *testing.T) {
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("items", "data:constant", map[string]any{"value": []any{"a", "b", "c"}}),
-		v2Node("loop", "flow:for_each", nil),
-		v2Node("break", "flow:break", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Complete", "message": "Loop stopped"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("source", "data:constant", map[string]any{"type": "text", "value": `["a","b","c"]`}),
+		cfgNode("items", "data:cast", map[string]any{"target": "list"}),
+		cfgNode("loop", "flow:for_each", nil),
+		cfgNode("break", "flow:break", nil),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Complete", "message": "Loop stopped"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-loop", "start", "out", "loop", "in"),
+		dataEdge("source-items", "source", "value", "items", "value"),
 		dataEdge("items-loop", "items", "value", "loop", "items"),
 		execEdge("loop-break", "loop", "loop", "break", "in"),
 		execEdge("loop-completed", "loop", "completed", "notice", "in"),
@@ -629,14 +608,14 @@ func TestBlueprintBreakStopsInnermostLoop(t *testing.T) {
 
 func TestDateNodesInBlueprint(t *testing.T) {
 	t.Parallel()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("now", "date:now", map[string]any{"timezone": "utc"}),
-		v2Node("extract", "date:extract", map[string]any{"timezone": "utc"}),
-		v2Node("threshold", "data:constant", map[string]any{"value": -1.0}),
-		v2Node("isWeekday", "data:greater_than", nil),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("notice", "action:notification", map[string]any{"title": "Date Test", "message": "Done"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("now", "date:now", map[string]any{"timezone": "utc"}),
+		cfgNode("extract", "date:extract", map[string]any{"timezone": "utc"}),
+		cfgNode("threshold", "data:constant", map[string]any{"type": "number", "value": -1.0}),
+		cfgNode("isWeekday", "data:greater_than", nil),
+		cfgNode("branch", "flow:branch", nil),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Date Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-branch", "start", "out", "branch", "in"),
 		dataEdge("now-extract-ts", "now", "timestamp", "extract", "timestamp"),
@@ -675,11 +654,11 @@ func TestDateNodesInBlueprint(t *testing.T) {
 
 func TestDateCreateAndFormatInBlueprint(t *testing.T) {
 	t.Parallel()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 14.0, "minute": 30.0, "second": 45.0, "timezone": "utc"}),
-		v2Node("format", "date:format", map[string]any{"format": "2006-01-02 15:04:05", "timezone": "utc"}),
-		v2Node("notice", "action:notification", map[string]any{"title": "Date Test", "message": "Done"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 14.0, "minute": 30.0, "second": 45.0, "timezone": "utc"}),
+		cfgNode("format", "date:format", map[string]any{"format": "2006-01-02 15:04:05", "timezone": "utc"}),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Date Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-notice", "start", "out", "notice", "in"),
 		dataEdge("create-format-ts", "create", "timestamp", "format", "timestamp"),
@@ -699,11 +678,11 @@ func TestDateCreateAndFormatInBlueprint(t *testing.T) {
 
 func TestDateParseInBlueprint(t *testing.T) {
 	t.Parallel()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:chat", map[string]any{"label": "Run"}),
-		v2Node("parse", "date:parse", map[string]any{"timezone": "utc"}),
-		v2Node("extract", "date:extract", map[string]any{"timezone": "utc"}),
-		v2Node("notice", "action:notification", map[string]any{"title": "Parse Test", "message": "Done"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:chat", map[string]any{"label": "Run"}),
+		cfgNode("parse", "date:parse", map[string]any{"timezone": "utc"}),
+		cfgNode("extract", "date:extract", map[string]any{"timezone": "utc"}),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Parse Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-notice", "start", "out", "notice", "in"),
 		dataEdge("start-parse-text", "start", "text", "parse", "text"),
@@ -724,14 +703,14 @@ func TestDateParseInBlueprint(t *testing.T) {
 
 func TestDateCompareWithBranchInBlueprint(t *testing.T) {
 	t.Parallel()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("now", "date:now", map[string]any{"timezone": "utc"}),
-		v2Node("create", "date:create", map[string]any{"year": 2020.0, "month": 1.0, "day": 1.0, "timezone": "utc"}),
-		v2Node("compare", "date:compare", nil),
-		v2Node("branch", "flow:branch", nil),
-		v2Node("noticeBefore", "action:notification", map[string]any{"title": "Compare", "message": "Before"}),
-		v2Node("noticeAfter", "action:notification", map[string]any{"title": "Compare", "message": "After"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("now", "date:now", map[string]any{"timezone": "utc"}),
+		cfgNode("create", "date:create", map[string]any{"year": 2020.0, "month": 1.0, "day": 1.0, "timezone": "utc"}),
+		cfgNode("compare", "date:compare", nil),
+		cfgNode("branch", "flow:branch", nil),
+		cfgNode("noticeBefore", "action:notification", map[string]any{"title": "Compare", "message": "Before"}),
+		cfgNode("noticeAfter", "action:notification", map[string]any{"title": "Compare", "message": "After"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-branch", "start", "out", "branch", "in"),
 		dataEdge("now-compare-left", "now", "timestamp", "compare", "left"),
@@ -754,15 +733,15 @@ func TestDateCompareWithBranchInBlueprint(t *testing.T) {
 
 func TestDateAddSubtractInBlueprint(t *testing.T) {
 	t.Parallel()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "timezone": "utc"}),
-		v2Node("add", "date:add", map[string]any{"days": 10.0, "timezone": "utc"}),
-		v2Node("subtract", "date:subtract", map[string]any{"days": 5.0, "timezone": "utc"}),
-		v2Node("extractAdd", "date:extract", map[string]any{"timezone": "utc"}),
-		v2Node("extractSub", "date:extract", map[string]any{"timezone": "utc"}),
-		v2Node("castDay", "data:cast", map[string]any{"target": "text"}),
-		v2Node("notice", "action:notification", map[string]any{"title": "Math Test", "message": "Done"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "timezone": "utc"}),
+		cfgNode("add", "date:add", map[string]any{"days": 10.0, "timezone": "utc"}),
+		cfgNode("subtract", "date:subtract", map[string]any{"days": 5.0, "timezone": "utc"}),
+		cfgNode("extractAdd", "date:extract", map[string]any{"timezone": "utc"}),
+		cfgNode("extractSub", "date:extract", map[string]any{"timezone": "utc"}),
+		cfgNode("castDay", "data:cast", map[string]any{"target": "text"}),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Math Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-notice", "start", "out", "notice", "in"),
 		dataEdge("create-add-ts", "create", "timestamp", "add", "timestamp"),
@@ -787,13 +766,13 @@ func TestDateAddSubtractInBlueprint(t *testing.T) {
 
 func TestDateToUnixInBlueprint(t *testing.T) {
 	t.Parallel()
-	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV2, Nodes: []domain.FlowNode{
-		v2Node("start", "trigger:button", map[string]any{"label": "Run"}),
-		v2Node("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 14.0, "minute": 30.0, "second": 45.0, "millisecond": 123.0, "timezone": "utc"}),
-		v2Node("toUnix", "date:to_unix", nil),
-		v2Node("toUnixMs", "date:to_unix_ms", nil),
-		v2Node("castValue", "data:cast", map[string]any{"target": "text"}),
-		v2Node("notice", "action:notification", map[string]any{"title": "Unix Test", "message": "Done"}),
+	flow := domain.FlowDefinition{SchemaVersion: domain.GraphSchemaV3, Nodes: []domain.FlowNode{
+		cfgNode("start", "trigger:button", map[string]any{"label": "Run"}),
+		cfgNode("create", "date:create", map[string]any{"year": 2024.0, "month": 6.0, "day": 15.0, "hour": 14.0, "minute": 30.0, "second": 45.0, "millisecond": 123.0, "timezone": "utc"}),
+		cfgNode("toUnix", "date:to_unix", nil),
+		cfgNode("toUnixMs", "date:to_unix_ms", nil),
+		cfgNode("castValue", "data:cast", map[string]any{"target": "text"}),
+		cfgNode("notice", "action:notification", map[string]any{"title": "Unix Test", "message": "Done"}),
 	}, Edges: []domain.FlowEdge{
 		execEdge("start-notice", "start", "out", "notice", "in"),
 		dataEdge("create-toUnix-ts", "create", "timestamp", "toUnix", "timestamp"),
