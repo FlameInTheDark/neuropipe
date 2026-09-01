@@ -23,12 +23,15 @@ func TestResolveJsonParseObjectOutputContract(t *testing.T) {
 	}
 }
 
-func TestResolveJsonParseLegacyConfigStaysUntyped(t *testing.T) {
+func TestResolveJsonParseLegacyConfigDefaultsToObject(t *testing.T) {
 	registry := catalog.New()
 	resolved := resolveNode(t, registry, "data:json_parse", nil)
 	output := resolved.Outputs[0]
-	if output.DataType != domain.DataAny || output.Type == nil || output.Type.Kind != domain.TypeAny {
-		t.Fatalf("legacy output = %#v, want the historical any contract", output)
+	if output.DataType != domain.DataObject {
+		t.Fatalf("legacy output data type = %q, want object", output.DataType)
+	}
+	if output.Type == nil || output.Type.Kind != domain.TypeMap {
+		t.Fatalf("legacy output type = %#v, want map kind", output.Type)
 	}
 }
 
