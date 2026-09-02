@@ -32,6 +32,7 @@ import { Card, ViewShell, EmptyState } from "../components/ViewShell";
 import { Button, Toggle } from "../components/ui";
 import { Icon } from "../components/icons";
 import { Dropdown, type DropdownOption } from "../components/Dropdown";
+import { MarkdownRenderer } from "../components/MarkdownRenderer";
 import { Modal, ModalActions } from "../components/primitives/Modal";
 import { Field, TextInput, TextArea } from "../components/primitives/Field";
 import { RemoteExecutorsPanel } from "./RemoteExecutorsPanel";
@@ -1304,7 +1305,7 @@ function ModelsPanel({
           </div>
         ) : (
           <>
-            <div className="border-b border-seam p-4">
+            <div className="shrink-0 border-b border-seam p-4">
               <div className="flex items-start gap-3">
                 <ModelAvatar id={detail.id} author={detail.author} avatarUrl={detail.avatarUrl} className="h-12 w-12 rounded-2xl text-[18px]" />
                 <div className="min-w-0 flex-1">
@@ -1326,7 +1327,7 @@ function ModelsPanel({
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="shrink-0 p-4">
               <div className="rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
                 <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{t("models.installPackage")}</h3>
                 <div className="grid grid-cols-[1fr_130px] gap-2">
@@ -1355,16 +1356,18 @@ function ModelsPanel({
                   </div>
                 )}
               </div>
-
-              {detail.readme && (
-                <div className="mt-4 rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
-                  <h3 className="mb-2 text-[11px] font-medium tracking-[0.08em] text-fg-subtle uppercase">README</h3>
-                  <pre className="max-h-[240px] overflow-auto rounded-lg border border-ink-700 bg-ink-950/50 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-fg-subtle">
-                    {detail.readme}
-                  </pre>
-                </div>
-              )}
             </div>
+
+            {detail.readme && (
+              <div className="flex min-h-0 flex-1 flex-col p-4 pt-0">
+                <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-ink-700/80 bg-ink-850/40 p-3.5">
+                  <h3 className="mb-2 shrink-0 text-[11px] font-medium tracking-[0.08em] text-fg-subtle uppercase">README</h3>
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-1 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-lg">
+                    <MarkdownRenderer text={detail.readme} className="max-w-none" />
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex h-9 shrink-0 items-center border-t border-seam px-4 text-[11px] text-fg-faint">
               <span className="ml-auto truncate">{draft.contentDirectory}</span>

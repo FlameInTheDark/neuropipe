@@ -1,5 +1,7 @@
 import i18n from "@/i18n";
 
+import { formatByteSize } from "@/lib/format-bytes";
+
 /** Locale-aware date formatting for list rows and headers. */
 export function formatDate(value?: string): string {
   if (!value) return i18n.t("common.never");
@@ -78,14 +80,10 @@ export function formatUsd(value: number): string {
   }).format(value);
 }
 
-/** Locale-aware byte size formatting for install progress. */
+/** Locale-aware SI byte size formatting for file/model sizes and install
+ *  progress: "890 B", "1.2 MB", "53.8 GB". */
 export function formatBytes(bytes: number): string {
-  return new Intl.NumberFormat(i18n.resolvedLanguage ?? "en", {
-    style: "unit",
-    unit: "byte",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(bytes);
+  return formatByteSize(bytes, i18n.resolvedLanguage ?? "en");
 }
 
 /** JSON preview with a hard length clamp for list rows. */
