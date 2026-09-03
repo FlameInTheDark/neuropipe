@@ -2,26 +2,12 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
 )
-
-// captureBody returns a handler that records the JSON body of the requests it
-// serves, plus a canned provider response.
-func captureBody(destination *map[string]any, response string) http.HandlerFunc {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		if err := json.NewDecoder(request.Body).Decode(destination); err != nil {
-			_, _ = writer.Write([]byte(`{"error":{"message":"bad json"}}`))
-			return
-		}
-		_, _ = writer.Write([]byte(response))
-	}
-}
 
 func floatValue(t *testing.T, payload map[string]any, key string) float64 {
 	t.Helper()
@@ -32,9 +18,18 @@ func floatValue(t *testing.T, payload map[string]any, key string) float64 {
 	return value
 }
 
+func optionsValue(t *testing.T, payload map[string]any) map[string]any {
+	t.Helper()
+	value, ok := payload["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload[options] = %#v, want an Ollama options object", payload["options"])
+	}
+	return value
+}
+
 func TestChatOpenAICompatibleAppliesGenerationParameters(t *testing.T) {
 	var captured map[string]any
-	server := httptest.NewServer(captureBody(&captured, `{"choices":[{"message":{"content":"ok"}}]}`))
+	server := httptest.NewServer(openAIStreamHandler(&captured, openAITextChunks("ok", 0, 0)...))
 	defer server.Close()
 
 	temperature, topP, topK, maxTokens := 1.3, 0.8, 64, 200
@@ -58,6 +53,7 @@ func TestChatOpenAICompatibleAppliesGenerationParameters(t *testing.T) {
 		}},
 	}
 	manager := NewManager(domain.Settings{DefaultProviderID: "compat", Providers: []domain.ProviderConfig{provider}}, secretStub{})
+
 	if _, err := manager.Chat(context.Background(), pipeline.ChatRequest{Prompt: "hi"}); err != nil {
 		t.Fatalf("Chat() error = %v", err)
 	}
@@ -68,17 +64,19 @@ func TestChatOpenAICompatibleAppliesGenerationParameters(t *testing.T) {
 	if got := floatValue(t, captured, "top_p"); got != 0.8 {
 		t.Fatalf("top_p = %v, want 0.8", got)
 	}
-	if got := floatValue(t, captured, "top_k"); got != 64 {
-		t.Fatalf("top_k = %v, want the model-level override 64", got)
-	}
 	if got := floatValue(t, captured, "max_tokens"); got != 200 {
 		t.Fatalf("max_tokens = %v, want the model-level override 200", got)
+	}
+	// The ai-sdk openai-compatible provider drops topK with a warning instead
+	// of sending an argument strict OpenAI endpoints reject.
+	if _, exists := captured["top_k"]; exists {
+		t.Fatalf("payload[top_k] = %#v, want top_k dropped for the OpenAI wire", captured["top_k"])
 	}
 }
 
 func TestChatOpenAICompatibleOmitsUnsetParameters(t *testing.T) {
 	var captured map[string]any
-	server := httptest.NewServer(captureBody(&captured, `{"choices":[{"message":{"content":"ok"}}]}`))
+	server := httptest.NewServer(openAIStreamHandler(&captured, openAITextChunks("ok", 0, 0)...))
 	defer server.Close()
 
 	provider := domain.ProviderConfig{
@@ -104,9 +102,32 @@ func TestChatOpenAICompatibleOmitsUnsetParameters(t *testing.T) {
 	}
 }
 
+func TestChatOpenAICompatibleJSONModeUsesJSONObject(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(openAIStreamHandler(&captured, openAITextChunks("{}", 0, 0)...))
+	defer server.Close()
+
+	provider := domain.ProviderConfig{
+		ID:      "compat",
+		Name:    "Compatible",
+		Kind:    domain.ProviderOpenAICompatible,
+		BaseURL: server.URL,
+		Model:   "m",
+		Enabled: true,
+	}
+	manager := NewManager(domain.Settings{DefaultProviderID: "compat", Providers: []domain.ProviderConfig{provider}}, secretStub{})
+	if _, err := manager.Chat(context.Background(), pipeline.ChatRequest{Prompt: "hi", Schema: map[string]any{"type": "object"}}); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	responseFormat, _ := captured["response_format"].(map[string]any)
+	if responseFormat["type"] != "json_object" {
+		t.Fatalf("response_format = %#v, want json_object for structured output", captured["response_format"])
+	}
+}
+
 func TestChatOllamaAppliesGenerationParameters(t *testing.T) {
 	var captured map[string]any
-	server := httptest.NewServer(captureBody(&captured, `{"response":"ok","prompt_eval_count":3,"eval_count":5}`))
+	server := httptest.NewServer(ollamaChatHandler(&captured, `{"message":{"content":"ok"}}`))
 	defer server.Close()
 
 	temperature, topK, maxTokens, contextSize := 0.55, 30, 128, 16384
@@ -129,10 +150,7 @@ func TestChatOllamaAppliesGenerationParameters(t *testing.T) {
 		t.Fatalf("Chat() error = %v", err)
 	}
 
-	options, ok := captured["options"].(map[string]any)
-	if !ok {
-		t.Fatalf("options = %#v, want an Ollama options object", captured["options"])
-	}
+	options := optionsValue(t, captured)
 	if got := floatValue(t, options, "temperature"); got != 0.55 {
 		t.Fatalf("options.temperature = %v, want 0.55", got)
 	}
@@ -149,7 +167,7 @@ func TestChatOllamaAppliesGenerationParameters(t *testing.T) {
 
 func TestChatOllamaOmitsOptionsWhenUnset(t *testing.T) {
 	var captured map[string]any
-	server := httptest.NewServer(captureBody(&captured, `{"response":"ok"}`))
+	server := httptest.NewServer(ollamaChatHandler(&captured, `{"message":{"content":"ok"}}`))
 	defer server.Close()
 
 	provider := domain.ProviderConfig{
@@ -166,7 +184,7 @@ func TestChatOllamaOmitsOptionsWhenUnset(t *testing.T) {
 
 func TestConverseOpenAICompatibleAppliesGenerationParameters(t *testing.T) {
 	var captured map[string]any
-	server := httptest.NewServer(captureBody(&captured, `{"choices":[{"message":{"content":"ok"}}]}`))
+	server := httptest.NewServer(openAIStreamHandler(&captured, openAITextChunks("ok", 0, 0)...))
 	defer server.Close()
 
 	maxTokens := 256
@@ -185,7 +203,7 @@ func TestConverseOpenAICompatibleAppliesGenerationParameters(t *testing.T) {
 
 func TestAnthropicAppliesGenerationParameters(t *testing.T) {
 	var captured map[string]any
-	server := httptest.NewServer(captureBody(&captured, `{"content":[{"type":"text","text":"ok"}]}`))
+	server := httptest.NewServer(anthropicStreamHandler(&captured, anthropicTextEvents("ok", 0, 0)...))
 	defer server.Close()
 
 	temperature, topP, topK, maxTokens := 0.9, 0.7, 20, 1024
@@ -206,10 +224,13 @@ func TestAnthropicAppliesGenerationParameters(t *testing.T) {
 	if got := floatValue(t, captured, "temperature"); got != 0.9 {
 		t.Fatalf("temperature = %v, want 0.9", got)
 	}
-	if got := floatValue(t, captured, "top_p"); got != 0.7 {
-		t.Fatalf("top_p = %v, want 0.7", got)
-	}
 	if got := floatValue(t, captured, "top_k"); got != 20 {
 		t.Fatalf("top_k = %v, want 20", got)
+	}
+	// The ai-sdk Anthropic provider intentionally drops top_p whenever
+	// temperature is set: Anthropic treats them as alternatives, so
+	// temperature wins.
+	if _, exists := captured["top_p"]; exists {
+		t.Fatalf("top_p = %v, want dropped in favor of temperature", captured["top_p"])
 	}
 }

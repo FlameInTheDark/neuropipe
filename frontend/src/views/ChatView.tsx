@@ -4,6 +4,7 @@ import { Events } from "@wailsio/runtime";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { desktop } from "@/lib/bridge";
+import { extractPayload } from "@/App";
 import type {
   ChatApproval,
   ChatConversation,
@@ -211,6 +212,9 @@ export default function ChatView() {
   const [approvals, setApprovals] = useState<ChatApproval[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  /** live assistant text for the run currently streaming; keyed by run so a
+   *  stale or foreign turn can never paint into the wrong transcript */
+  const [liveReply, setLiveReply] = useState<{ chatRunId: string; text: string } | null>(null);
   const [q, setQ] = useState("");
   const [newMode, setNewMode] = useState<"model" | "pipeline">(lastViewedMode ?? "model");
   const [renameTarget, setRenameTarget] = useState<ChatConversation | null>(null);
@@ -406,6 +410,7 @@ export default function ChatView() {
     setRuns([]);
     setApprovals([]);
     setEvents({});
+    setLiveReply(null);
     setHasMore(false);
     loadedCount.current = TRANSCRIPT_PAGE;
     pinnedRef.current = true;
@@ -416,6 +421,8 @@ export default function ChatView() {
   useEffect(() => {
     const offs = [
       Events.On("chat.updated", () => {
+        /* a full reload supersedes any live draft left on screen */
+        setLiveReply(null);
         void refreshList();
         if (selectedId) void loadDetails(selectedId);
       }),
@@ -425,13 +432,26 @@ export default function ChatView() {
       Events.On("chat.approval.requested", () => {
         if (selectedId) void loadDetails(selectedId);
       }),
+      /* coalesced token deltas from the model turn in flight */
+      Events.On("chat.token", (e: unknown) => {
+        const p = extractPayload(e) as { chatRunId?: string; conversationId?: string; delta?: string } | null;
+        if (!p?.delta || p.conversationId !== selectedId) return;
+        setLiveReply((cur) =>
+          cur && cur.chatRunId === p.chatRunId ? { ...cur, text: cur.text + (p.delta ?? "") } : { chatRunId: p.chatRunId ?? "", text: p.delta ?? "" },
+        );
+      }),
+      /* the turn finished: the persisted transcript replaces the draft */
+      Events.On("chat.token.end", (e: unknown) => {
+        const p = extractPayload(e) as { chatRunId?: string } | null;
+        setLiveReply((cur) => (!cur || !p?.chatRunId || cur.chatRunId === p.chatRunId ? null : cur));
+      }),
     ];
     return () => offs.forEach((off) => off());
   }, [selectedId, refreshList, loadDetails]);
 
   /* auto-scroll only while the user is pinned to the bottom; polling during
      a tool round must never yank the view if they scrolled up to read */
-  const transcriptKey = `${selectedId}:${messages.length}:${runs.map((r) => r.status).join(",")}`;
+  const transcriptKey = `${selectedId}:${messages.length}:${runs.map((r) => r.status).join(",")}:${liveReply?.text.length ?? 0}`;
   useEffect(() => {
     if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
@@ -781,21 +801,27 @@ export default function ChatView() {
                 />
               )}
 
-              {(activeRun || sending) && (
-                <div className="flex gap-3">
-                  <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
-                    <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
-                  </span>
-                  <div className="flex items-center gap-1 rounded-2xl bg-ink-850 px-4 py-3">
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-400"
-                        style={{ animationDelay: `${i * 140}ms` }}
-                      />
-                    ))}
+              {/* live token stream replaces the idle dots once the first
+                  deltas land; the persisted row takes over on completion */}
+              {liveReply && liveReply.text !== "" ? (
+                <LiveReplyBubble text={liveReply.text} pipelineMode={selected.mode === "pipeline"} />
+              ) : (
+                (activeRun || sending) && (
+                  <div className="flex gap-3">
+                    <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
+                      <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="flex items-center gap-1 rounded-2xl bg-ink-850 px-4 py-3">
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-400"
+                          style={{ animationDelay: `${i * 140}ms` }}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )
               )}
 
               {activeRun && (
@@ -1097,13 +1123,35 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
   );
 }
 
-const MarkdownBody = memo(function MarkdownBody({ content }: { content: string }) {
+const MarkdownBody = memo(function MarkdownBody({ content, caret }: { content: string; caret?: boolean }) {
   return (
-    <div className="[&_a]:text-info-fg [&_code]:rounded [&_code]:bg-ink-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_li]:ml-4 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-ink-700 [&_pre]:bg-ink-950/60 [&_pre]:p-3">
+    <div
+      className={cn(
+        "[&_a]:text-info-fg [&_code]:rounded [&_code]:bg-ink-800 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px] [&_li]:ml-4 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-ink-700 [&_pre]:bg-ink-950/60 [&_pre]:p-3",
+        /* streaming mode appends the blinking .live-caret block */
+        caret && "live-caret",
+      )}
+    >
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
 });
+
+/** Assistant bubble while the model streams: formatted markdown plus a
+ *  blinking caret at the end of the text. Replaced by the persisted
+ *  transcript row once the turn completes. */
+function LiveReplyBubble({ text, pipelineMode }: { text: string; pipelineMode: boolean }) {
+  return (
+    <div className="flex gap-3">
+      <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
+        <Icon name={pipelineMode ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
+      </span>
+      <div className="max-w-[80%] cursor-default rounded-2xl bg-ink-850 px-4 py-2.5 text-[13px] leading-relaxed text-fg">
+        <MarkdownBody content={text} caret />
+      </div>
+    </div>
+  );
+}
 
 /** Call-to-action for starting a pipeline chat from the empty state. */
 function CtaButton({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {

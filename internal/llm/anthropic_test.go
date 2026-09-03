@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,6 +41,67 @@ func anthropicProvider(serverURL string) domain.ProviderConfig {
 	}
 }
 
+// anthropicStreamHandler serves the Anthropic Messages SSE protocol after
+// recording the JSON request body. Events are given as (name, data) pairs.
+func anthropicStreamHandler(destination *map[string]any, events ...[2]string) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if destination != nil {
+			_ = json.NewDecoder(request.Body).Decode(destination)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range events {
+			_, _ = fmt.Fprintf(writer, "event: %s\ndata: %s\n\n", event[0], event[1])
+		}
+	}
+}
+
+// anthropicTextEvents is the event sequence carrying one assistant text
+// answer with token usage.
+func anthropicTextEvents(content string, input, output int) [][2]string {
+	return [][2]string{
+		{"message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":%d,"output_tokens":1}}}`, input)},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%s}}`, mustJSONString(content))},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":%d}}`, output)},
+		{"message_stop", `{"type":"message_stop"}`},
+	}
+}
+
+// anthropicToolEvents carries one text block plus one tool_use block.
+func anthropicToolEvents(text, toolID, toolName, partialJSON string, input, output int) [][2]string {
+	events := [][2]string{
+		{"message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":%d,"output_tokens":1}}}`, input)},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%s}}`, mustJSONString(text))},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":%s,"name":%s,"input":{}}}`, mustJSONString(toolID), mustJSONString(toolName))},
+		{"content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":%s}}`, mustJSONString(partialJSON))},
+		{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+		{"message_delta", fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":%d}}`, output)},
+		{"message_stop", `{"type":"message_stop"}`},
+	}
+	return events
+}
+
+// blockText extracts the text of the first text block from an Anthropic
+// content value, tolerating both block arrays and plain strings.
+func blockText(value any) string {
+	switch content := value.(type) {
+	case string:
+		return content
+	case []any:
+		for _, block := range content {
+			if item, ok := block.(map[string]any); ok && item["type"] == "text" {
+				if text, ok := item["text"].(string); ok {
+					return text
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func TestAnthropicChatSendsMessagesAPIContract(t *testing.T) {
 	var capturedPath string
 	var capturedHeaders http.Header
@@ -50,7 +112,7 @@ func TestAnthropicChatSendsMessagesAPIContract(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&capturedBody); err != nil {
 			t.Errorf("decode request body: %v", err)
 		}
-		_, _ = writer.Write([]byte(`{"content":[{"type":"text","text":"{\"decision\":\"true\"}"}],"usage":{"input_tokens":12,"output_tokens":34}}`))
+		anthropicStreamHandler(nil, anthropicTextEvents(`{"decision":"true"}`, 12, 34)...)(writer, request)
 	}))
 	defer server.Close()
 
@@ -65,8 +127,8 @@ func TestAnthropicChatSendsMessagesAPIContract(t *testing.T) {
 	if got := capturedHeaders.Get("x-api-key"); got != "sk-test" {
 		t.Fatalf("x-api-key = %q, want the resolved secret", got)
 	}
-	if got := capturedHeaders.Get("anthropic-version"); got != anthropicVersion {
-		t.Fatalf("anthropic-version = %q, want %q", got, anthropicVersion)
+	if got := capturedHeaders.Get("anthropic-version"); got == "" {
+		t.Fatalf("anthropic-version = %q, want the SDK to pin the API version", got)
 	}
 	if got := capturedHeaders.Get("Authorization"); got != "" {
 		t.Fatalf("Authorization = %q, want no bearer header for Anthropic", got)
@@ -85,7 +147,7 @@ func TestAnthropicChatSendsMessagesAPIContract(t *testing.T) {
 	if turn["role"] != "user" {
 		t.Fatalf("role = %v, want user", turn["role"])
 	}
-	if !strings.Contains(turn["content"].(string), `"decision"`) {
+	if !strings.Contains(blockText(turn["content"]), `"decision"`) {
 		t.Fatalf("content = %v, want the structured-output contract", turn["content"])
 	}
 	if response.JSON["decision"] != "true" {
@@ -101,6 +163,7 @@ func TestAnthropicChatSendsMessagesAPIContract(t *testing.T) {
 
 func TestAnthropicChatSurfacesErrorMessage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusUnauthorized)
 		_, _ = writer.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`))
 	}))
 	defer server.Close()
@@ -114,12 +177,7 @@ func TestAnthropicChatSurfacesErrorMessage(t *testing.T) {
 
 func TestAnthropicConverseMapsToolCalls(t *testing.T) {
 	var capturedBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if err := json.NewDecoder(request.Body).Decode(&capturedBody); err != nil {
-			t.Errorf("decode request body: %v", err)
-		}
-		_, _ = writer.Write([]byte(`{"content":[{"type":"text","text":"Checking."},{"type":"tool_use","id":"toolu_1","name":"weather","input":{"city":"Yekaterinburg"}}],"usage":{"input_tokens":7,"output_tokens":9}}`))
-	}))
+	server := httptest.NewServer(anthropicStreamHandler(&capturedBody, anthropicToolEvents("Checking.", "toolu_1", "weather", `{"city":"Yekaterinburg"}`, 7, 9)...))
 	defer server.Close()
 
 	manager := NewManager(domain.Settings{DefaultProviderID: "claude", Providers: []domain.ProviderConfig{anthropicProvider(server.URL)}}, secretStub{"anthropic-key": "sk-test"})
@@ -128,7 +186,7 @@ func TestAnthropicConverseMapsToolCalls(t *testing.T) {
 			{Role: domain.ChatRoleSystem, Content: "You are precise."},
 			{Role: domain.ChatRoleUser, Content: "Weather in Yekaterinburg?"},
 		},
-		Tools: []domain.ChatToolDefinition{{Name: "weather", Description: "Get the forecast", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}}}},
+		Tools: []domain.ChatToolDefinition{{Name: "weather", Description: "Get the forecast", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}, "required": []string{"city"}, "additionalProperties": false}}},
 	})
 	if err != nil {
 		t.Fatalf("Converse() error = %v", err)
@@ -143,7 +201,7 @@ func TestAnthropicConverseMapsToolCalls(t *testing.T) {
 	if call.ID != "toolu_1" || call.Name != "weather" || call.Arguments["city"] != "Yekaterinburg" {
 		t.Fatalf("tool call = %#v", call)
 	}
-	if capturedBody["system"] != "You are precise." {
+	if !strings.Contains(fmt.Sprint(capturedBody["system"]), "You are precise.") {
 		t.Fatalf("system = %v, want the extracted system prompt", capturedBody["system"])
 	}
 	tools, _ := capturedBody["tools"].([]any)
@@ -159,45 +217,71 @@ func TestAnthropicConverseMapsToolCalls(t *testing.T) {
 	}
 }
 
-func TestAnthropicMessagesConvertTranscript(t *testing.T) {
-	system, messages := anthropicMessages([]domain.ChatMessage{
-		{Role: domain.ChatRoleSystem, Content: "sys"},
-		{Role: domain.ChatRoleUser, Content: "question"},
-		{Role: domain.ChatRoleAssistant, Content: "", ToolCalls: []domain.ChatToolCall{{ID: "t1", Name: "weather", Arguments: map[string]any{"city": "Ekb"}}}},
-		{Role: domain.ChatRoleTool, ToolCallID: "t1", Content: "sunny"},
+func TestAnthropicConverseConvertsTranscript(t *testing.T) {
+	var capturedBody map[string]any
+	server := httptest.NewServer(anthropicStreamHandler(&capturedBody, anthropicTextEvents("sunny", 5, 5)...))
+	defer server.Close()
+
+	manager := NewManager(domain.Settings{DefaultProviderID: "claude", Providers: []domain.ProviderConfig{anthropicProvider(server.URL)}}, secretStub{"anthropic-key": "sk-test"})
+	response, err := manager.Converse(context.Background(), domain.AssistantChatRequest{
+		Messages: []domain.ChatMessage{
+			{Role: domain.ChatRoleSystem, Content: "sys"},
+			{Role: domain.ChatRoleUser, Content: "question"},
+			{Role: domain.ChatRoleAssistant, Content: "", ToolCalls: []domain.ChatToolCall{{ID: "t1", Name: "weather", Arguments: map[string]any{"city": "Ekb"}}}},
+			{Role: domain.ChatRoleTool, ToolCallID: "t1", ToolName: "weather", Content: "sunny"},
+		},
 	})
-	if system != "sys" {
-		t.Fatalf("system = %q", system)
+	if err != nil {
+		t.Fatalf("Converse() error = %v", err)
 	}
+	if response.Content != "sunny" {
+		t.Fatalf("content = %q, want the reply", response.Content)
+	}
+	messages, _ := capturedBody["messages"].([]any)
 	if len(messages) != 3 {
-		t.Fatalf("messages = %#v, want user, assistant tool_use, user tool_result", messages)
+		t.Fatalf("messages = %#v, want user, assistant tool_use, user tool_result", capturedBody["messages"])
 	}
-	if messages[0]["role"] != "user" || messages[0]["content"] != "question" {
+	if blockText(messages[0].(map[string]any)["content"]) != "question" {
 		t.Fatalf("first message = %#v", messages[0])
 	}
-	assistantBlocks, _ := messages[1]["content"].([]map[string]any)
-	if len(assistantBlocks) != 1 || assistantBlocks[0]["type"] != "tool_use" || assistantBlocks[0]["id"] != "t1" {
-		t.Fatalf("assistant blocks = %#v, want a tool_use block", assistantBlocks)
+	assistant, _ := messages[1].(map[string]any)
+	if assistant["role"] != "assistant" {
+		t.Fatalf("second message role = %v, want assistant", assistant["role"])
 	}
-	resultBlocks, _ := messages[2]["content"].([]map[string]any)
-	if len(resultBlocks) != 1 || resultBlocks[0]["type"] != "tool_result" || resultBlocks[0]["tool_use_id"] != "t1" || resultBlocks[0]["content"] != "sunny" {
-		t.Fatalf("tool result blocks = %#v", resultBlocks)
+	if !strings.Contains(fmt.Sprint(assistant["content"]), "tool_use") || !strings.Contains(fmt.Sprint(assistant["content"]), "t1") {
+		t.Fatalf("assistant blocks = %#v, want a tool_use block for t1", assistant["content"])
+	}
+	result, _ := messages[2].(map[string]any)
+	if result["role"] != "user" || !strings.Contains(fmt.Sprint(result["content"]), "tool_result") || !strings.Contains(fmt.Sprint(result["content"]), "sunny") {
+		t.Fatalf("tool result turn = %#v, want a tool_result block", result)
 	}
 }
 
-func TestAnthropicMessagesMergesConsecutiveToolResults(t *testing.T) {
-	_, messages := anthropicMessages([]domain.ChatMessage{
-		{Role: domain.ChatRoleUser, Content: "both"},
-		{Role: domain.ChatRoleAssistant, ToolCalls: []domain.ChatToolCall{{ID: "t1", Name: "a"}, {ID: "t2", Name: "b"}}},
-		{Role: domain.ChatRoleTool, ToolCallID: "t1", Content: "one"},
-		{Role: domain.ChatRoleTool, ToolCallID: "t2", Content: "two"},
+func TestAnthropicConverseMergesConsecutiveToolResults(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(anthropicStreamHandler(&captured, anthropicTextEvents("done", 5, 5)...))
+	defer server.Close()
+
+	manager := NewManager(domain.Settings{DefaultProviderID: "claude", Providers: []domain.ProviderConfig{anthropicProvider(server.URL)}}, secretStub{"anthropic-key": "sk-test"})
+	_, err := manager.Converse(context.Background(), domain.AssistantChatRequest{
+		Messages: []domain.ChatMessage{
+			{Role: domain.ChatRoleUser, Content: "both"},
+			{Role: domain.ChatRoleAssistant, ToolCalls: []domain.ChatToolCall{{ID: "t1", Name: "a"}, {ID: "t2", Name: "b"}}},
+			{Role: domain.ChatRoleTool, ToolCallID: "t1", ToolName: "a", Content: "one"},
+			{Role: domain.ChatRoleTool, ToolCallID: "t2", ToolName: "b", Content: "two"},
+		},
 	})
+	if err != nil {
+		t.Fatalf("Converse() error = %v", err)
+	}
+	messages, _ := captured["messages"].([]any)
 	if len(messages) != 3 {
 		t.Fatalf("messages = %#v, want the two tool results merged into one user turn", messages)
 	}
-	blocks, _ := messages[2]["content"].([]map[string]any)
-	if messages[2]["role"] != "user" || len(blocks) != 2 {
-		t.Fatalf("tool result turn = %#v, want one user turn with two blocks", messages[2])
+	final, _ := messages[2].(map[string]any)
+	blocks, _ := final["content"].([]any)
+	if final["role"] != "user" || len(blocks) != 2 {
+		t.Fatalf("tool result turn = %#v, want one user turn with two blocks", final)
 	}
 }
 
@@ -235,11 +319,14 @@ func TestChatResolvesProviderByRequestID(t *testing.T) {
 	var capturedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		capturedPath = request.URL.Path
-		if strings.HasSuffix(request.URL.Path, "/models") {
+		switch {
+		case strings.HasSuffix(request.URL.Path, "/models"):
 			_, _ = writer.Write([]byte(`{"data":[{"id":"m"}]}`))
-			return
+		case strings.HasSuffix(request.URL.Path, "/api/chat"):
+			_, _ = writer.Write([]byte(`{"message":{"content":"ok"}}`))
+		default:
+			openAIStreamHandler(nil, openAITextChunks("ok", 0, 0)...)(writer, request)
 		}
-		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
 	}))
 	defer server.Close()
 
@@ -257,8 +344,8 @@ func TestChatResolvesProviderByRequestID(t *testing.T) {
 	if _, err := manager.Chat(context.Background(), pipeline.ChatRequest{Prompt: "hi"}); err != nil {
 		t.Fatalf("Chat() error = %v", err)
 	}
-	if capturedPath != "/api/generate" {
-		t.Fatalf("path = %s, want the default Ollama endpoint", capturedPath)
+	if capturedPath != "/api/chat" {
+		t.Fatalf("path = %s, want the default provider's native Ollama endpoint", capturedPath)
 	}
 }
 
@@ -285,10 +372,7 @@ func TestChatRejectsDisabledProviderSelection(t *testing.T) {
 
 func TestModelPrecedenceRequestThenProviderDefault(t *testing.T) {
 	var capturedBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		_ = json.NewDecoder(request.Body).Decode(&capturedBody)
-		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
-	}))
+	server := httptest.NewServer(openAIStreamHandler(&capturedBody, openAITextChunks("ok", 0, 0)...))
 	defer server.Close()
 
 	manager := NewManager(domain.Settings{DefaultProviderID: "router", Providers: []domain.ProviderConfig{

@@ -34,6 +34,29 @@ type Assistant interface {
 	Converse(context.Context, domain.AssistantChatRequest) (domain.AssistantChatResponse, error)
 }
 
+// StreamingAssistant is optionally implemented by Assistant backends that can
+// forward assistant text token by token while the model generates. When the
+// configured assistant does not implement it, the service falls back to the
+// blocking Converse turn and live token display is simply disabled.
+type StreamingAssistant interface {
+	ConverseStream(ctx context.Context, request domain.AssistantChatRequest, onDelta func(delta string)) (domain.AssistantChatResponse, error)
+}
+
+// chatTokenEvent is the payload of chat.token events forwarded to the UI while
+// an assistant turn streams. ConversationID lets the renderer drop tokens
+// belonging to a transcript that is not on screen.
+type chatTokenEvent struct {
+	ChatRunID      string `json:"chatRunId"`
+	ConversationID string `json:"conversationId"`
+	Delta          string `json:"delta"`
+}
+
+// tokenFlushInterval coalesces provider deltas into UI events. Local models
+// can emit hundreds of tokens per second, and one webview event per token
+// would flood the renderer; buffered deltas flush on this cadence instead,
+// which keeps the update rate near 25 repaints per second.
+const tokenFlushInterval = 40 * time.Millisecond
+
 // EventSink keeps the service independent from Wails.
 type EventSink func(event string, payload any)
 
@@ -301,12 +324,12 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 	if s.authoring != nil || s.catalog != nil {
 		request.Messages = append([]domain.ChatMessage{{Role: domain.ChatRoleSystem, Content: systemGuidance}}, request.Messages...)
 	}
-	response, err := s.assistant.Converse(runCtx, request)
+	response, err := s.converse(runCtx, job, conversation, request)
 	if err != nil && toolSupportUnavailable(err) {
 		_, _ = s.store.AddChatRunEvent(runCtx, domain.ChatRunEvent{ChatRunID: job.chatRunID, Kind: "notice", Summary: "Model tools are unavailable", Detail: "This provider accepted normal chat but rejected native tool definitions.", Status: domain.RunCompleted})
 		noTools := request
 		noTools.Tools = nil
-		response, err = s.assistant.Converse(runCtx, noTools)
+		response, err = s.converse(runCtx, job, conversation, noTools)
 	}
 	if err != nil {
 		if runCtx.Err() != nil || s.isStopped(job.chatRunID) {
@@ -820,6 +843,53 @@ func (s *Service) emitUpdate(chatRunID string) {
 	}
 }
 
+// converse performs one assistant turn, forwarding tokens to the UI through a
+// coalescing pump when the assistant supports streaming. The pump is fully
+// drained before the turn returns, so its trailing chat.token.end event always
+// lands before the completion events the caller emits afterwards.
+func (s *Service) converse(ctx context.Context, job modelJob, conversation domain.ChatConversation, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
+	streamer, ok := s.assistant.(StreamingAssistant)
+	if !ok || s.emit == nil {
+		return s.assistant.Converse(ctx, request)
+	}
+	deltas := make(chan string, 128)
+	pumped := make(chan struct{})
+	go s.pumpTokens(job, conversation, deltas, pumped)
+	response, err := streamer.ConverseStream(ctx, request, func(delta string) { deltas <- delta })
+	close(deltas)
+	<-pumped
+	return response, err
+}
+
+// pumpTokens coalesces streamed deltas into chat.token events and closes the
+// turn with chat.token.end. It runs until the deltas channel closes.
+func (s *Service) pumpTokens(job modelJob, conversation domain.ChatConversation, deltas <-chan string, done chan<- struct{}) {
+	defer close(done)
+	var buffer strings.Builder
+	flush := func() {
+		if buffer.Len() == 0 {
+			return
+		}
+		s.emit("chat.token", chatTokenEvent{ChatRunID: job.chatRunID, ConversationID: conversation.ID, Delta: buffer.String()})
+		buffer.Reset()
+	}
+	ticker := time.NewTicker(tokenFlushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case delta, ok := <-deltas:
+			if !ok {
+				flush()
+				s.emit("chat.token.end", map[string]string{"chatRunId": job.chatRunID})
+				return
+			}
+			buffer.WriteString(delta)
+		case <-ticker.C:
+			flush()
+		}
+	}
+}
+
 func stringArg(arguments map[string]any, key string) string {
 	value, exists := arguments[key]
 	if !exists || value == nil {
@@ -892,8 +962,16 @@ func toolSummary(call domain.ChatToolCall) string {
 }
 
 func (s *Service) toolDefinitions() []domain.ChatToolDefinition {
+	// object builds an object JSON Schema. `required` is omitted when no
+	// field is mandatory: JSON Schema draft 2020-12 requires it to be an
+	// array of strings, and a nil variadic slice marshals to JSON null,
+	// which schema validators (and strict LLM providers) reject.
 	object := func(properties map[string]any, required ...string) map[string]any {
-		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
+		schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
+		if len(required) > 0 {
+			schema["required"] = required
+		}
+		return schema
 	}
 	text := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}

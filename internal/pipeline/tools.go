@@ -204,12 +204,19 @@ func makeConnectedTool(function domain.CustomFunction) (connectedTool, error) {
 			required = append(required, argumentName)
 		}
 	}
+	// `required` is omitted when no pin is mandatory: JSON Schema draft
+	// 2020-12 requires it to be an array of strings, and an empty slice
+	// marshals to JSON null on some paths, which schema validators reject.
+	inputSchema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
+	if len(required) > 0 {
+		inputSchema["required"] = required
+	}
 	return connectedTool{
 		function: function,
 		definition: domain.ChatToolDefinition{
 			Name:        name,
 			Description: toolDescription(function),
-			InputSchema: map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false},
+			InputSchema: inputSchema,
 		},
 		inputs:  inputs,
 		outputs: outputNames,

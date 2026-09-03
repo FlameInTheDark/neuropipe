@@ -1,8 +1,11 @@
-// Package llm implements provider-neutral local and OpenAI-compatible model access.
+// Package llm implements provider-neutral local and OpenAI-compatible model
+// access on top of the grafana/ai-sdk orchestration. The Manager owns
+// concurrency, usage accounting, secret resolution, and managed llama.cpp
+// routing; provider wire formats live in the ai-sdk's LanguageModel
+// implementations and the local Ollama adapter.
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	aiprovider "github.com/grafana/ai-sdk/provider"
 
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 	"github.com/FlameInTheDark/neuropipe/internal/pipeline"
@@ -119,63 +124,123 @@ func (m *Manager) Chat(ctx context.Context, request pipeline.ChatRequest) (respo
 		provider.BaseURL, model = endpoint, canonical
 	}
 	started := time.Now()
-	switch provider.Kind {
-	case domain.ProviderOllama:
-		response, err = m.chatOllama(ctx, provider, model, request)
-	case domain.ProviderLlamaCPP, domain.ProviderOpenAICompatible:
-		response, err = m.chatOpenAICompatible(ctx, provider, model, request)
-	case domain.ProviderAnthropic:
-		response, err = m.chatAnthropic(ctx, provider, model, request)
-	default:
-		err = fmt.Errorf("unsupported provider kind %q", provider.Kind)
+	result, err := m.generate(ctx, provider, model, generationCall{
+		messages: []aiprovider.Message{aiprovider.UserText(structuredPrompt(request))},
+		jsonMode: request.Schema != nil || len(request.ToolChoices) > 0,
+	})
+	if err != nil {
+		failed := m.completeUsage(provider, model, request.Metrics, domain.LLMUsage{}, queueWait, time.Since(started), err)
+		m.recordUsage(failed)
+		return pipeline.ChatResponse{}, err
 	}
-	response.Usage = m.completeUsage(provider, model, request.Metrics, response.Usage, queueWait, time.Since(started), err)
+	response = parseResponse(result.Text)
+	response.Usage = m.completeUsage(provider, model, request.Metrics, usageFromResult(result.TotalUsage), queueWait, time.Since(started), err)
 	m.recordUsage(response.Usage)
-	return response, err
+	return response, nil
 }
 
-// Converse performs one provider-neutral assistant turn using a persisted
-// transcript and optional native function tools. It intentionally shares the
-// same bounded LLM limiter as pipeline AI nodes.
-func (m *Manager) Converse(ctx context.Context, request domain.AssistantChatRequest) (response domain.AssistantChatResponse, err error) {
+// assistantTurn holds one assistant model call's resolved routing and
+// accounting anchors, shared by the blocking and streaming Converse paths.
+type assistantTurn struct {
+	provider  domain.ProviderConfig
+	model     string
+	queueWait time.Duration
+	started   time.Time
+	release   func()
+}
+
+// beginAssistantTurn acquires the shared LLM limiter slot and resolves the
+// provider, model, and llama.cpp route for one assistant turn. The caller
+// owns releasing the slot through turn.release.
+func (m *Manager) beginAssistantTurn(ctx context.Context, request domain.AssistantChatRequest) (*assistantTurn, error) {
 	m.mu.RLock()
 	limiter := m.limiter
 	m.mu.RUnlock()
 	queued := time.Now()
-	if err = limiter.Acquire(ctx); err != nil {
-		return domain.AssistantChatResponse{}, err
+	if err := limiter.Acquire(ctx); err != nil {
+		return nil, err
 	}
-	defer limiter.Release()
-	queueWait := time.Since(queued)
+	fail := func(err error) (*assistantTurn, error) {
+		limiter.Release()
+		return nil, err
+	}
 	provider, err := m.resolveProvider(request.ProviderID)
 	if err != nil {
-		return domain.AssistantChatResponse{}, err
+		return fail(err)
 	}
 	model, err := m.resolveModel(provider, request.Model)
 	if err != nil {
-		return domain.AssistantChatResponse{}, err
+		return fail(err)
 	}
 	if provider.Kind == domain.ProviderLlamaCPP {
 		endpoint, canonical, err := m.routeLlama(ctx, provider, model)
 		if err != nil {
-			return domain.AssistantChatResponse{}, err
+			return fail(err)
 		}
 		provider.BaseURL, model = endpoint, canonical
 	}
-	started := time.Now()
-	switch provider.Kind {
-	case domain.ProviderOllama:
-		response, err = m.converseOllama(ctx, provider, model, request)
-	case domain.ProviderLlamaCPP, domain.ProviderOpenAICompatible:
-		response, err = m.converseOpenAICompatible(ctx, provider, model, request)
-	case domain.ProviderAnthropic:
-		response, err = m.converseAnthropic(ctx, provider, model, request)
-	default:
-		err = fmt.Errorf("unsupported provider kind %q", provider.Kind)
+	return &assistantTurn{provider: provider, model: model, queueWait: time.Since(queued), started: time.Now(), release: limiter.Release}, nil
+}
+
+// Converse performs one provider-neutral assistant turn using a persisted
+// transcript and optional native function tools. It intentionally shares the
+// same bounded LLM limiter as pipeline AI nodes. Tools are sent without an
+// executor, so the turn returns unresolved tool calls to the caller after one
+// model step; the multi-round loop, approval flow, and persistence stay owned
+// by the chat service and pipeline engine.
+func (m *Manager) Converse(ctx context.Context, request domain.AssistantChatRequest) (response domain.AssistantChatResponse, err error) {
+	turn, err := m.beginAssistantTurn(ctx, request)
+	if err != nil {
+		return domain.AssistantChatResponse{}, err
 	}
-	response.Usage = m.completeUsage(provider, model, request.Metrics, response.Usage, queueWait, time.Since(started), err)
+	defer turn.release()
+	messages, err := modelMessages(request.Messages)
+	if err != nil {
+		return domain.AssistantChatResponse{}, err
+	}
+	result, err := m.generate(ctx, turn.provider, turn.model, generationCall{messages: messages, tools: request.Tools})
+	if err != nil {
+		failed := m.completeUsage(turn.provider, turn.model, request.Metrics, domain.LLMUsage{}, turn.queueWait, time.Since(turn.started), err)
+		m.recordUsage(failed)
+		return domain.AssistantChatResponse{}, err
+	}
+	response, err = assistantResponse(result)
+	if err != nil {
+		return domain.AssistantChatResponse{}, err
+	}
+	response.Usage = m.completeUsage(turn.provider, turn.model, request.Metrics, response.Usage, turn.queueWait, time.Since(turn.started), nil)
 	m.recordUsage(response.Usage)
-	return response, err
+	return response, nil
+}
+
+// ConverseStream performs the same assistant turn as Converse while forwarding
+// assistant text to onDelta token by token as the provider emits it. Tool
+// calls, usage accounting, and limiter behavior are identical to Converse;
+// only the model transport switches from a blocking request to the provider's
+// streaming wire.
+func (m *Manager) ConverseStream(ctx context.Context, request domain.AssistantChatRequest, onDelta func(delta string)) (response domain.AssistantChatResponse, err error) {
+	turn, err := m.beginAssistantTurn(ctx, request)
+	if err != nil {
+		return domain.AssistantChatResponse{}, err
+	}
+	defer turn.release()
+	messages, err := modelMessages(request.Messages)
+	if err != nil {
+		return domain.AssistantChatResponse{}, err
+	}
+	result, err := m.streamGenerate(ctx, turn.provider, turn.model, generationCall{messages: messages, tools: request.Tools}, onDelta)
+	if err != nil {
+		failed := m.completeUsage(turn.provider, turn.model, request.Metrics, domain.LLMUsage{}, turn.queueWait, time.Since(turn.started), err)
+		m.recordUsage(failed)
+		return domain.AssistantChatResponse{}, err
+	}
+	response, err = assistantResponse(result)
+	if err != nil {
+		return domain.AssistantChatResponse{}, err
+	}
+	response.Usage = m.completeUsage(turn.provider, turn.model, request.Metrics, response.Usage, turn.queueWait, time.Since(turn.started), nil)
+	m.recordUsage(response.Usage)
+	return response, nil
 }
 
 type limiter struct{ slots chan struct{} }
@@ -292,201 +357,8 @@ func (m *Manager) provider(id string) (domain.ProviderConfig, error) {
 	return domain.ProviderConfig{}, fmt.Errorf("provider %q not found", id)
 }
 
-func (m *Manager) chatOllama(ctx context.Context, provider domain.ProviderConfig, model string, request pipeline.ChatRequest) (pipeline.ChatResponse, error) {
-	prompt := structuredPrompt(request)
-	payload := map[string]any{"model": model, "prompt": prompt, "stream": false}
-	if request.Schema != nil || len(request.ToolChoices) > 0 {
-		payload["format"] = "json"
-	}
-	if options := ollamaOptions(provider.EffectiveParameters(model)); len(options) > 0 {
-		payload["options"] = options
-	}
-	var response struct {
-		Response        string `json:"response"`
-		Error           string `json:"error"`
-		PromptEvalCount int64  `json:"prompt_eval_count"`
-		EvalCount       int64  `json:"eval_count"`
-	}
-	if err := m.postJSON(ctx, provider, "/api/generate", payload, &response); err != nil {
-		return pipeline.ChatResponse{}, err
-	}
-	if strings.TrimSpace(response.Error) != "" {
-		return pipeline.ChatResponse{}, fmt.Errorf("ollama: %s", response.Error)
-	}
-	result := parseResponse(response.Response)
-	result.Usage = usageFromCounts(response.PromptEvalCount, response.EvalCount)
-	return result, nil
-}
-
-func (m *Manager) chatOpenAICompatible(ctx context.Context, provider domain.ProviderConfig, model string, request pipeline.ChatRequest) (pipeline.ChatResponse, error) {
-	prompt := structuredPrompt(request)
-	payload := map[string]any{
-		"model":       model,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"temperature": 0.2,
-	}
-	applyOpenAIParameters(payload, provider.EffectiveParameters(model))
-	if request.Schema != nil || len(request.ToolChoices) > 0 {
-		payload["response_format"] = map[string]string{"type": "json_object"}
-	}
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-			TotalTokens      int64 `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := m.postJSON(ctx, provider, "/v1/chat/completions", payload, &response); err != nil {
-		return pipeline.ChatResponse{}, err
-	}
-	if response.Error.Message != "" {
-		return pipeline.ChatResponse{}, fmt.Errorf("%s: %s", provider.Name, response.Error.Message)
-	}
-	if len(response.Choices) == 0 {
-		return pipeline.ChatResponse{}, fmt.Errorf("%s returned no choices", provider.Name)
-	}
-	result := parseResponse(response.Choices[0].Message.Content)
-	result.Usage = usageFromCounts(response.Usage.PromptTokens, response.Usage.CompletionTokens)
-	return result, nil
-}
-
-func (m *Manager) converseOpenAICompatible(ctx context.Context, provider domain.ProviderConfig, model string, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
-	payload := map[string]any{"model": model, "messages": assistantMessages(request.Messages), "temperature": 0.2}
-	applyOpenAIParameters(payload, provider.EffectiveParameters(model))
-	if len(request.Tools) > 0 {
-		payload["tools"] = openAITools(request.Tools)
-	}
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
-					ID       string `json:"id"`
-					Function struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-		} `json:"choices"`
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-		} `json:"usage"`
-	}
-	if err := m.postJSON(ctx, provider, "/v1/chat/completions", payload, &response); err != nil {
-		return domain.AssistantChatResponse{}, err
-	}
-	if response.Error.Message != "" {
-		return domain.AssistantChatResponse{}, fmt.Errorf("%s: %s", provider.Name, response.Error.Message)
-	}
-	if len(response.Choices) == 0 {
-		return domain.AssistantChatResponse{}, fmt.Errorf("%s returned no choices", provider.Name)
-	}
-	result, err := decodeAssistantResponse(response.Choices[0].Message.Content, response.Choices[0].Message.ToolCalls)
-	if err != nil {
-		return domain.AssistantChatResponse{}, err
-	}
-	result.Usage = usageFromCounts(response.Usage.PromptTokens, response.Usage.CompletionTokens)
-	return result, nil
-}
-
-func (m *Manager) converseOllama(ctx context.Context, provider domain.ProviderConfig, model string, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
-	payload := map[string]any{"model": model, "messages": assistantMessages(request.Messages), "stream": false}
-	if options := ollamaOptions(provider.EffectiveParameters(model)); len(options) > 0 {
-		payload["options"] = options
-	}
-	if len(request.Tools) > 0 {
-		payload["tools"] = openAITools(request.Tools)
-	}
-	var response struct {
-		Message struct {
-			Content   string `json:"content"`
-			ToolCalls []struct {
-				ID       string `json:"id"`
-				Function struct {
-					Name      string         `json:"name"`
-					Arguments map[string]any `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
-		} `json:"message"`
-		Error           string `json:"error"`
-		PromptEvalCount int64  `json:"prompt_eval_count"`
-		EvalCount       int64  `json:"eval_count"`
-	}
-	if err := m.postJSON(ctx, provider, "/api/chat", payload, &response); err != nil {
-		return domain.AssistantChatResponse{}, err
-	}
-	if strings.TrimSpace(response.Error) != "" {
-		return domain.AssistantChatResponse{}, fmt.Errorf("ollama: %s", response.Error)
-	}
-	calls := make([]domain.ChatToolCall, 0, len(response.Message.ToolCalls))
-	for index, call := range response.Message.ToolCalls {
-		id := strings.TrimSpace(call.ID)
-		if id == "" {
-			id = fmt.Sprintf("ollama-tool-%d", index+1)
-		}
-		calls = append(calls, domain.ChatToolCall{ID: id, Name: call.Function.Name, Arguments: call.Function.Arguments})
-	}
-	return domain.AssistantChatResponse{Content: strings.TrimSpace(response.Message.Content), ToolCalls: calls, Usage: usageFromCounts(response.PromptEvalCount, response.EvalCount)}, nil
-}
-
 func usageFromCounts(prompt, completion int64) domain.LLMUsage {
 	return domain.LLMUsage{PromptTokens: prompt, CompletionTokens: completion, TokensReported: prompt > 0 || completion > 0}
-}
-
-// ollamaOptions maps configured generation parameters to Ollama's options
-// object. Only explicitly configured fields are sent so Ollama keeps its own
-// defaults for the rest.
-func ollamaOptions(params domain.GenerationParameters) map[string]any {
-	options := map[string]any{}
-	if params.Temperature != nil {
-		options["temperature"] = *params.Temperature
-	}
-	if params.TopK != nil {
-		options["top_k"] = *params.TopK
-	}
-	if params.TopP != nil {
-		options["top_p"] = *params.TopP
-	}
-	if params.MaxTokens != nil {
-		options["num_predict"] = *params.MaxTokens
-	}
-	if params.ContextSize != nil {
-		options["num_ctx"] = *params.ContextSize
-	}
-	return options
-}
-
-// applyOpenAIParameters writes configured generation parameters into an
-// OpenAI-compatible request payload. Only explicitly configured fields are
-// sent: a configured temperature replaces the low-variance 0.2 default, and
-// top_k / top_p / max_tokens appear only when the user set them, because
-// hosted OpenAI endpoints reject parameters they do not implement.
-func applyOpenAIParameters(payload map[string]any, params domain.GenerationParameters) {
-	if params.Temperature != nil {
-		payload["temperature"] = *params.Temperature
-	}
-	if params.TopP != nil {
-		payload["top_p"] = *params.TopP
-	}
-	if params.TopK != nil {
-		payload["top_k"] = *params.TopK
-	}
-	if params.MaxTokens != nil {
-		payload["max_tokens"] = *params.MaxTokens
-	}
 }
 
 func (m *Manager) completeUsage(provider domain.ProviderConfig, model string, context domain.LLMMetricContext, usage domain.LLMUsage, queueWait, duration time.Duration, err error) domain.LLMUsage {
@@ -507,58 +379,6 @@ func (m *Manager) recordUsage(usage domain.LLMUsage) {
 		return
 	}
 	_ = m.usage.RecordLLM(context.Background(), usage)
-}
-
-func decodeAssistantResponse(content string, calls []struct {
-	ID       string `json:"id"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}) (domain.AssistantChatResponse, error) {
-	result := domain.AssistantChatResponse{Content: strings.TrimSpace(content), ToolCalls: make([]domain.ChatToolCall, 0, len(calls))}
-	for index, call := range calls {
-		arguments := make(map[string]any)
-		if strings.TrimSpace(call.Function.Arguments) != "" {
-			if err := json.Unmarshal([]byte(call.Function.Arguments), &arguments); err != nil {
-				return domain.AssistantChatResponse{}, fmt.Errorf("decode tool call %q arguments: %w", call.Function.Name, err)
-			}
-		}
-		id := strings.TrimSpace(call.ID)
-		if id == "" {
-			id = fmt.Sprintf("tool-%d", index+1)
-		}
-		result.ToolCalls = append(result.ToolCalls, domain.ChatToolCall{ID: id, Name: call.Function.Name, Arguments: arguments})
-	}
-	return result, nil
-}
-
-func assistantMessages(messages []domain.ChatMessage) []map[string]any {
-	result := make([]map[string]any, 0, len(messages))
-	for _, message := range messages {
-		item := map[string]any{"role": string(message.Role), "content": message.Content}
-		if message.Role == domain.ChatRoleTool && message.ToolCallID != "" {
-			item["tool_call_id"] = message.ToolCallID
-		}
-		if message.Role == domain.ChatRoleAssistant && len(message.ToolCalls) > 0 {
-			calls := make([]map[string]any, 0, len(message.ToolCalls))
-			for _, call := range message.ToolCalls {
-				arguments, _ := json.Marshal(call.Arguments)
-				calls = append(calls, map[string]any{"id": call.ID, "type": "function", "function": map[string]any{"name": call.Name, "arguments": string(arguments)}})
-			}
-			item["tool_calls"] = calls
-		}
-		result = append(result, item)
-	}
-	return result
-}
-
-func openAITools(tools []domain.ChatToolDefinition) []map[string]any {
-	result := make([]map[string]any, 0, len(tools))
-	for _, tool := range tools {
-		result = append(result, map[string]any{"type": "function", "function": map[string]any{"name": tool.Name, "description": tool.Description, "parameters": tool.InputSchema}})
-	}
-	return result
 }
 
 func (m *Manager) listOllama(ctx context.Context, provider domain.ProviderConfig) ([]ModelInfo, error) {
@@ -610,41 +430,6 @@ func (m *Manager) getJSON(ctx context.Context, provider domain.ProviderConfig, p
 	if response.StatusCode/100 != 2 {
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
 		return fmt.Errorf("%s returned %s: %s", provider.Name, response.Status, strings.TrimSpace(string(data)))
-	}
-	if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
-		return fmt.Errorf("decode %s response: %w", provider.Name, err)
-	}
-	return nil
-}
-
-func (m *Manager) postJSON(ctx context.Context, provider domain.ProviderConfig, path string, payload, destination any) error {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("encode provider request: %w", err)
-	}
-	// Derive a per-request timeout from the caller's context. The parent
-	// context may have a 30-minute deadline (from the execution service);
-	// we cap each LLM call at 15 minutes so a single stuck inference does
-	// not consume the entire execution budget. If the parent context has
-	// a shorter deadline, that takes precedence.
-	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
-	request, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint(provider.BaseURL, path), bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	if err := m.authorize(request, provider); err != nil {
-		return err
-	}
-	response, err := m.http.Do(request)
-	if err != nil {
-		return fmt.Errorf("connect to %s: %w", provider.Name, err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
-		return fmt.Errorf("%s returned %s: %s", provider.Name, response.Status, strings.TrimSpace(string(body)))
 	}
 	if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
 		return fmt.Errorf("decode %s response: %w", provider.Name, err)

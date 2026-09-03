@@ -22,7 +22,7 @@ The model list and the provider card collapse behind their headers, so a long co
 Every provider carries an optional set of **generation parameters** under its card, and every model entry carries its own overrides behind the sliders button. Values that are left empty are simply not sent, so the provider keeps its own defaults; a value set on a model wins over the provider value for that field.
 
 - **Temperature** (0–2) scales sampling randomness.
-- **Top P** (0–1) enables nucleus sampling; **Top K** limits sampling to the K most likely tokens.
+- **Top P** (0–1) enables nucleus sampling; **Top K** limits sampling to the K most likely tokens (Ollama and Anthropic; strictly OpenAI-compatible servers ignore it, and Anthropic keeps either temperature or Top P — temperature wins).
 - **Max tokens** caps the completion length — useful for local models whose provider reports no limit (OpenAI `max_tokens`, Anthropic `max_tokens`, Ollama `num_predict`).
 - **Context size** widens the prompt window when it was not discovered from the provider (Ollama `num_ctx`); for the managed llama.cpp provider it is the window llama-server is launched with for that model.
 
