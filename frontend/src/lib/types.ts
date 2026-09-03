@@ -883,6 +883,15 @@ export interface ChatConversation {
   pipelineId?: string;
   triggerBindingId?: string;
   actionPolicy: ChatActionPolicy;
+  /** Per-conversation model routing; empty falls back to the Settings default. */
+  providerId?: string;
+  model?: string;
+  /** Reasoning effort for the model: "", "none", "minimal", "low", "medium", "high". */
+  reasoning?: string;
+  /** Published LLM tool functions offered to the model in this conversation. */
+  toolIds?: string[];
+  /** Set when the model's one-shot rename_conversation tool was used. */
+  renamedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

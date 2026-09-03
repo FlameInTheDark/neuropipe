@@ -27,7 +27,10 @@ const (
 // systemGuidance is the tiny always-present pointer injected before model turns when authoring tools exist. Deep documentation is tool-fetched.
 const systemGuidance = "You are Neuropipe automation assistant with access to the user local pipelines, reports and executions. You can also AUTHOR automations: read get_authoring_guide first, discover nodes via list_nodes/get_node_contract (always fetch a node contract before using that node type), build Blueprint v3 definitions, save them as drafts with save_pipeline_draft / save_function_draft (validation errors come back in the result - fix them), and only then offer publish_* which requires user approval. Deleting anything also requires approval."
 
-// systemGuidance is the tiny always-present pointer injected before model turns when authoring tools exist. Deep documentation is tool-fetched.
+// renameGuidance is injected before model turns while the conversation still
+// carries the model-owned rename. Once rename_conversation succeeds the tool
+// disappears from the tool list and this rule is dropped from the prompt.
+const renameGuidance = "This conversation has no meaningful title yet. After reading the user's first message, call the rename_conversation tool exactly once with a short 2-6 word title that captures the user's main topic or request. Derive the title from that message; do not call the tool again afterwards."
 
 // Assistant performs one provider-neutral, tool-capable model turn.
 type Assistant interface {
@@ -320,9 +323,16 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 		return
 	}
 	metricContext := domain.LLMMetricContext{ChatRunID: job.chatRunID, PipelineID: conversation.PipelineID, Origin: "chat"}
-	request := domain.AssistantChatRequest{Messages: messages, Tools: s.toolDefinitions(), Metrics: metricContext}
-	if s.authoring != nil || s.catalog != nil {
-		request.Messages = append([]domain.ChatMessage{{Role: domain.ChatRoleSystem, Content: systemGuidance}}, request.Messages...)
+	request := domain.AssistantChatRequest{
+		Messages:   messages,
+		Tools:      s.toolDefinitions(runCtx, conversation),
+		ProviderID: conversation.ProviderID,
+		Model:      conversation.Model,
+		Reasoning:  conversation.Reasoning,
+		Metrics:    metricContext,
+	}
+	if prompt := s.systemPrompt(conversation); prompt != "" {
+		request.Messages = append([]domain.ChatMessage{{Role: domain.ChatRoleSystem, Content: prompt}}, request.Messages...)
 	}
 	response, err := s.converse(runCtx, job, conversation, request)
 	if err != nil && toolSupportUnavailable(err) {
@@ -517,7 +527,30 @@ func (s *Service) executeTool(ctx context.Context, conversation domain.ChatConve
 }
 
 func (s *Service) toolResult(ctx context.Context, conversation domain.ChatConversation, chatRunID string, call domain.ChatToolCall) (any, error) {
+	// User-authored LLM tool functions dispatch by their generated tool name
+	// before the built-in switch; their availability is per conversation.
+	for _, tool := range s.conversationTools(ctx, conversation) {
+		if tool.definition.Name == call.Name {
+			if s.runs == nil {
+				return nil, fmt.Errorf("tool functions are unavailable in this conversation")
+			}
+			return s.runs.RunToolFunction(ctx, tool.functionID, call.Arguments)
+		}
+	}
 	switch call.Name {
+	case "rename_conversation":
+		title := strings.TrimSpace(stringArg(call.Arguments, "title"))
+		if title == "" {
+			return nil, fmt.Errorf("title is required")
+		}
+		if len(title) > 120 {
+			title = strings.TrimSpace(title[:120])
+		}
+		updated, err := s.store.RenameChatConversation(ctx, conversation.ID, title)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"renamed": true, "title": updated.Title}, nil
 	case "list_pipelines":
 		items, err := s.store.ListPipelines(ctx)
 		if err != nil {
@@ -916,6 +949,8 @@ func toolSupportUnavailable(err error) bool {
 
 func toolSummary(call domain.ChatToolCall) string {
 	switch call.Name {
+	case "rename_conversation":
+		return "Renamed conversation"
 	case "run_pipeline":
 		return "Ran pipeline"
 	case "send_to_chat_pipeline":
@@ -961,7 +996,7 @@ func toolSummary(call domain.ChatToolCall) string {
 	}
 }
 
-func (s *Service) toolDefinitions() []domain.ChatToolDefinition {
+func (s *Service) toolDefinitions(ctx context.Context, conversation domain.ChatConversation) []domain.ChatToolDefinition {
 	// object builds an object JSON Schema. `required` is omitted when no
 	// field is mandatory: JSON Schema draft 2020-12 requires it to be an
 	// array of strings, and a nil variadic slice marshals to JSON null,
@@ -986,6 +1021,14 @@ func (s *Service) toolDefinitions() []domain.ChatToolDefinition {
 		{Name: "delete_report", Description: "Permanently delete one local report by ID.", InputSchema: object(map[string]any{"reportId": text("Report ID")}, "reportId")},
 		{Name: "get_execution", Description: "Inspect a pipeline execution by ID.", InputSchema: object(map[string]any{"executionId": text("Execution ID")}, "executionId")},
 	}
+	// The one-shot rename tool is offered only until the model uses it.
+	if conversation.RenamedAt == nil {
+		tools = append(tools, domain.ChatToolDefinition{
+			Name:        "rename_conversation",
+			Description: "Rename this chat conversation. Call it exactly once, right after reading the user's first message, with a short descriptive title derived from that message. The tool disappears after its first successful use.",
+			InputSchema: object(map[string]any{"title": text("Short 2-6 word conversation title derived from the user's first message")}, "title"),
+		})
+	}
 	if s.catalog != nil {
 		tools = append(tools,
 			domain.ChatToolDefinition{Name: "list_nodes", Description: "List available Blueprint node types with label and category. Call get_node_contract before using any node.", InputSchema: object(map[string]any{"query": text("Optional filter over type/label/description")})},
@@ -1009,5 +1052,53 @@ func (s *Service) toolDefinitions() []domain.ChatToolDefinition {
 			domain.ChatToolDefinition{Name: "delete_function", Description: "Permanently delete a custom function.", InputSchema: object(map[string]any{"functionId": text("Function ID")}, "functionId")},
 		)
 	}
+	for _, tool := range s.conversationTools(ctx, conversation) {
+		tools = append(tools, tool.definition)
+	}
 	return tools
+}
+
+// systemPrompt assembles the per-conversation system prompt: the authoring
+// pointer when its tools exist, plus the one-shot naming rule while the
+// model-owned rename has not been used yet.
+func (s *Service) systemPrompt(conversation domain.ChatConversation) string {
+	var parts []string
+	if s.authoring != nil || s.catalog != nil {
+		parts = append(parts, systemGuidance)
+	}
+	if conversation.Mode == domain.ChatModeModel && conversation.RenamedAt == nil {
+		parts = append(parts, renameGuidance)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// conversationTool pairs an enabled tool function's provider definition with
+// the function ID its calls dispatch to.
+type conversationTool struct {
+	functionID string
+	definition domain.ChatToolDefinition
+}
+
+// conversationTools resolves the conversation's connected LLM tool functions
+// to provider definitions. Entries that are no longer published, no longer
+// tool-kind, or fail validation are silently dropped - the tools picker
+// surfaces them as unavailable, and a half-deleted tool must never break the
+// whole model turn.
+func (s *Service) conversationTools(ctx context.Context, conversation domain.ChatConversation) []conversationTool {
+	if len(conversation.ToolIDs) == 0 {
+		return nil
+	}
+	result := make([]conversationTool, 0, len(conversation.ToolIDs))
+	for _, functionID := range conversation.ToolIDs {
+		function, err := s.store.GetPublishedFunction(ctx, functionID)
+		if err != nil || function.Kind != domain.FunctionTool {
+			continue
+		}
+		definition, err := pipeline.ToolFunctionDefinition(function)
+		if err != nil {
+			continue
+		}
+		result = append(result, conversationTool{functionID: functionID, definition: definition})
+	}
+	return result
 }

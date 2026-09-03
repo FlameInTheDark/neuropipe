@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -138,7 +139,7 @@ func TestToolSchemasMarshalWithoutNullRequired(t *testing.T) {
 	// Tool definitions without mandatory arguments must omit `required`
 	// entirely instead of emitting a null array.
 	service := &Service{}
-	for _, tool := range service.toolDefinitions() {
+	for _, tool := range service.toolDefinitions(context.Background(), domain.ChatConversation{Mode: domain.ChatModeModel}) {
 		data, err := json.Marshal(tool.InputSchema)
 		if err != nil {
 			t.Fatalf("tool %q schema marshal error = %v", tool.Name, err)
@@ -279,20 +280,187 @@ func TestCancelStreamingTurnStillClosesTokenStream(t *testing.T) {
 	}
 	waitForRunStatus(t, store, run.ID, domain.RunCancelled)
 
-	events := log.snapshot()
+	// The pump drains the stream and emits its closing event from the
+	// worker goroutine, which unblocks concurrently with the store write
+	// observed above; poll for the closing event instead of racing it.
+	var events []string
 	hasTokens, hasEnd := false, false
-	for _, event := range events {
-		switch event {
-		case "chat.token":
-			hasTokens = true
-		case "chat.token.end":
-			hasEnd = true
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events = log.snapshot()
+		hasTokens, hasEnd = false, false
+		for _, event := range events {
+			switch event {
+			case "chat.token":
+				hasTokens = true
+			case "chat.token.end":
+				hasEnd = true
+			}
 		}
+		if hasTokens && hasEnd {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if !hasTokens {
 		t.Fatalf("events = %#v, want the partial chat.token emitted before cancellation", events)
 	}
 	if !hasEnd {
 		t.Fatalf("events = %#v, want chat.token.end even after a cancelled turn", events)
+	}
+}
+
+// systemMessage extracts the injected system prompt from a request.
+func systemMessage(request domain.AssistantChatRequest) string {
+	for _, message := range request.Messages {
+		if message.Role == domain.ChatRoleSystem {
+			return message.Content
+		}
+	}
+	return ""
+}
+
+// renameSequenceAssistant models a well-behaved model: the first turn calls
+// rename_conversation, the second turn answers normally. It fails loudly if
+// the tool's availability or the system-prompt rule does not match the
+// conversation's rename state.
+type renameSequenceAssistant struct {
+	mu    sync.Mutex
+	round int
+}
+
+func (a *renameSequenceAssistant) Converse(_ context.Context, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.round++
+	hasRenameTool := false
+	for _, tool := range request.Tools {
+		if tool.Name == "rename_conversation" {
+			hasRenameTool = true
+			break
+		}
+	}
+	prompt := systemMessage(request)
+	switch a.round {
+	case 1:
+		if !hasRenameTool {
+			return domain.AssistantChatResponse{}, fmt.Errorf("rename_conversation tool missing on the first turn")
+		}
+		if !strings.Contains(prompt, "rename_conversation") {
+			return domain.AssistantChatResponse{}, fmt.Errorf("system prompt misses the naming rule on the first turn")
+		}
+		return domain.AssistantChatResponse{ToolCalls: []domain.ChatToolCall{{ID: "rename-1", Name: "rename_conversation", Arguments: map[string]any{"title": "Weather in Munich"}}}}, nil
+	default:
+		if hasRenameTool {
+			return domain.AssistantChatResponse{}, fmt.Errorf("rename_conversation still offered after the rename")
+		}
+		if strings.Contains(prompt, "rename_conversation") {
+			return domain.AssistantChatResponse{}, fmt.Errorf("naming rule still present after the rename")
+		}
+		return domain.AssistantChatResponse{Content: "Renamed and done"}, nil
+	}
+}
+
+func TestRenameConversationToolIsOneShotAndRemovesPromptRule(t *testing.T) {
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	assistant := &renameSequenceAssistant{}
+	service := NewService(store, nil, assistant, nil)
+	service.Start(context.Background())
+	defer service.Stop()
+	conversation, err := service.CreateConversation(context.Background(), domain.ChatConversation{Mode: domain.ChatModeModel, Title: "New chat"})
+	if err != nil {
+		t.Fatalf("CreateConversation() error = %v", err)
+	}
+	run, err := service.Send(context.Background(), conversation.ID, "What is the weather in Munich?")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	waitForRunStatus(t, store, run.ID, domain.RunCompleted)
+
+	loaded, err := store.GetChatConversation(context.Background(), conversation.ID)
+	if err != nil {
+		t.Fatalf("GetChatConversation() error = %v", err)
+	}
+	if loaded.Title != "Weather in Munich" {
+		t.Fatalf("title = %q, want the model-provided rename", loaded.Title)
+	}
+	if loaded.RenamedAt == nil {
+		t.Fatal("renamed_at was not stamped by the rename tool")
+	}
+
+	// A second turn must no longer offer the tool nor carry the rule; the
+	// second assistant round already asserts both from inside the request.
+	second, err := service.Send(context.Background(), conversation.ID, "Thanks!")
+	if err != nil {
+		t.Fatalf("second Send() error = %v", err)
+	}
+	waitForRunStatus(t, store, second.ID, domain.RunCompleted)
+}
+
+// captureAssistant records the last request it received.
+type captureAssistant struct {
+	mu      sync.Mutex
+	request domain.AssistantChatRequest
+}
+
+func (a *captureAssistant) Converse(_ context.Context, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.request = request
+	return domain.AssistantChatResponse{Content: "ok"}, nil
+}
+
+func (a *captureAssistant) lastRequest() domain.AssistantChatRequest {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.request
+}
+
+func TestModelConversationRoutesProviderModelAndReasoning(t *testing.T) {
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	assistant := &captureAssistant{}
+	service := NewService(store, nil, assistant, nil)
+	service.Start(context.Background())
+	defer service.Stop()
+	conversation, err := service.CreateConversation(context.Background(), domain.ChatConversation{Mode: domain.ChatModeModel, Title: "Routed", ProviderID: "prov-1", Model: "model-a", Reasoning: string(domain.ChatReasoningLow)})
+	if err != nil {
+		t.Fatalf("CreateConversation() error = %v", err)
+	}
+	run, err := service.Send(context.Background(), conversation.ID, "Hello")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	waitForRunStatus(t, store, run.ID, domain.RunCompleted)
+
+	request := assistant.lastRequest()
+	if request.ProviderID != "prov-1" || request.Model != "model-a" {
+		t.Fatalf("request routing = %q/%q, want prov-1/model-a", request.ProviderID, request.Model)
+	}
+	if request.Reasoning != string(domain.ChatReasoningLow) {
+		t.Fatalf("request reasoning = %q, want %q", request.Reasoning, domain.ChatReasoningLow)
+	}
+}
+
+func TestInvalidReasoningLevelIsRejected(t *testing.T) {
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	conversation, err := store.CreateChatConversation(context.Background(), domain.ChatConversation{Mode: domain.ChatModeModel, Title: "Bad"})
+	if err != nil {
+		t.Fatalf("CreateChatConversation() error = %v", err)
+	}
+	conversation.Reasoning = "maximum"
+	if _, err := store.SaveChatConversation(context.Background(), conversation); err == nil {
+		t.Fatal("SaveChatConversation() accepted an unknown reasoning level")
 	}
 }

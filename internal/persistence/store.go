@@ -133,6 +133,11 @@ CREATE TABLE IF NOT EXISTS chat_conversations (
   pipeline_id TEXT NOT NULL DEFAULT '',
   trigger_binding_id TEXT NOT NULL DEFAULT '',
   action_policy TEXT NOT NULL DEFAULT 'ask',
+  provider_id TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  reasoning TEXT NOT NULL DEFAULT '',
+  tool_ids_json TEXT NOT NULL DEFAULT '[]',
+  renamed_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -432,6 +437,9 @@ CREATE TABLE IF NOT EXISTS remote_executors (
 	if err := s.ensureTriggerNodeMetadataColumns(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureChatConversationColumns(ctx); err != nil {
+		return err
+	}
 	if err := s.ensureExecutorColumns(ctx); err != nil {
 		return err
 	}
@@ -576,6 +584,34 @@ func (s *Store) ensureTriggerNodeMetadataColumns(ctx context.Context) error {
 		}
 		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE trigger_bindings ADD COLUMN %s %s", column.name, column.definition)); err != nil {
 			return fmt.Errorf("add trigger_bindings.%s column: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+// ensureChatConversationColumns adds the model-chat routing columns to
+// chat_conversations for stores created before per-conversation model,
+// reasoning, tool-function, and model-rename state existed. Fresh installs
+// get them from the CREATE TABLE statement; this only handles the ALTER
+// TABLE path so partially migrated installations converge.
+func (s *Store) ensureChatConversationColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{name: "provider_id", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "model", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "reasoning", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "tool_ids_json", definition: "TEXT NOT NULL DEFAULT '[]'"},
+		{name: "renamed_at", definition: "TEXT"},
+	}
+	for _, column := range columns {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('chat_conversations') WHERE name = ?`, column.name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect chat_conversations.%s migration: %w", column.name, err)
+		}
+		if exists > 0 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE chat_conversations ADD COLUMN %s %s", column.name, column.definition)); err != nil {
+			return fmt.Errorf("add chat_conversations.%s column: %w", column.name, err)
 		}
 	}
 	return nil
@@ -1611,7 +1647,11 @@ func (s *Store) CreateChatConversation(ctx context.Context, conversation domain.
 	}
 	now := time.Now().UTC()
 	conversation.CreatedAt, conversation.UpdatedAt = now, now
-	_, err := statements(s.db).Insert("chat_conversations").Columns("id", "mode", "title", "pipeline_id", "trigger_binding_id", "action_policy", "created_at", "updated_at").Values(conversation.ID, conversation.Mode, conversation.Title, conversation.PipelineID, conversation.TriggerBindingID, conversation.ActionPolicy, stamp(now), stamp(now)).ExecContext(ctx)
+	toolIDs, err := encode(conversation.ToolIDs)
+	if err != nil {
+		return domain.ChatConversation{}, fmt.Errorf("encode chat tool ids: %w", err)
+	}
+	_, err = statements(s.db).Insert("chat_conversations").Columns("id", "mode", "title", "pipeline_id", "trigger_binding_id", "action_policy", "provider_id", "model", "reasoning", "tool_ids_json", "created_at", "updated_at").Values(conversation.ID, conversation.Mode, conversation.Title, conversation.PipelineID, conversation.TriggerBindingID, conversation.ActionPolicy, conversation.ProviderID, conversation.Model, conversation.Reasoning, toolIDs, stamp(now), stamp(now)).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatConversation{}, fmt.Errorf("create chat conversation: %w", err)
 	}
@@ -1621,7 +1661,7 @@ func (s *Store) CreateChatConversation(ctx context.Context, conversation domain.
 
 // ListChatConversations returns most recently active conversations first.
 func (s *Store) ListChatConversations(ctx context.Context) ([]domain.ChatConversation, error) {
-	rows, err := statements(s.db).Select("id", "mode", "title", "pipeline_id", "trigger_binding_id", "action_policy", "created_at", "updated_at").From("chat_conversations").OrderBy("updated_at DESC").QueryContext(ctx)
+	rows, err := statements(s.db).Select(chatConversationColumns).From("chat_conversations").OrderBy("updated_at DESC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat conversations: %w", err)
 	}
@@ -1639,17 +1679,18 @@ func (s *Store) ListChatConversations(ctx context.Context) ([]domain.ChatConvers
 
 // GetChatConversation loads one persisted conversation.
 func (s *Store) GetChatConversation(ctx context.Context, id string) (domain.ChatConversation, error) {
-	row := statements(s.db).Select("id", "mode", "title", "pipeline_id", "trigger_binding_id", "action_policy", "created_at", "updated_at").From("chat_conversations").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).QueryRowContext(ctx)
-	var item domain.ChatConversation
-	var created, updated string
-	if err := row.Scan(&item.ID, &item.Mode, &item.Title, &item.PipelineID, &item.TriggerBindingID, &item.ActionPolicy, &created, &updated); err != nil {
+	row := statements(s.db).Select(chatConversationColumns).From("chat_conversations").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).QueryRowContext(ctx)
+	item, err := scanChatConversation(row)
+	if err != nil {
 		return domain.ChatConversation{}, fmt.Errorf("get chat conversation: %w", err)
 	}
-	item.CreatedAt, item.UpdatedAt = parseTime(created), parseTime(updated)
 	return item, nil
 }
 
-// SaveChatConversation updates the user-managed title and action policy.
+// SaveChatConversation updates the user-managed fields: title, action
+// policy, model routing (provider/model/reasoning), and the enabled tool
+// function list. The model-owned rename marker is intentionally untouched;
+// use RenameChatConversation for that.
 func (s *Store) SaveChatConversation(ctx context.Context, conversation domain.ChatConversation) (domain.ChatConversation, error) {
 	conversation.Title = strings.TrimSpace(conversation.Title)
 	if conversation.Title == "" {
@@ -1658,10 +1699,44 @@ func (s *Store) SaveChatConversation(ctx context.Context, conversation domain.Ch
 	if conversation.ActionPolicy != domain.ChatActionAlways {
 		conversation.ActionPolicy = domain.ChatActionAsk
 	}
+	if !domain.ValidChatReasoning(conversation.Reasoning) {
+		return domain.ChatConversation{}, fmt.Errorf("invalid chat reasoning level %q", conversation.Reasoning)
+	}
+	toolIDs, err := encode(conversation.ToolIDs)
+	if err != nil {
+		return domain.ChatConversation{}, fmt.Errorf("encode chat tool ids: %w", err)
+	}
 	now := time.Now().UTC()
-	result, err := statements(s.db).Update("chat_conversations").Set("title", conversation.Title).Set("action_policy", conversation.ActionPolicy).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": conversation.ID}).ExecContext(ctx)
+	result, err := statements(s.db).Update("chat_conversations").Set("title", conversation.Title).Set("action_policy", conversation.ActionPolicy).Set("provider_id", conversation.ProviderID).Set("model", conversation.Model).Set("reasoning", conversation.Reasoning).Set("tool_ids_json", toolIDs).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": conversation.ID}).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatConversation{}, fmt.Errorf("save chat conversation: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return domain.ChatConversation{}, fmt.Errorf("chat conversation %q not found", conversation.ID)
+	}
+	return s.GetChatConversation(ctx, conversation.ID)
+}
+
+// RenameChatConversation applies the model's one-shot rename: it sets the
+// title and stamps renamed_at so rename_conversation disappears from the
+// model's tool list and the system-prompt naming rule is dropped. Repeated
+// calls are rejected so the tool stays genuinely single-use.
+func (s *Store) RenameChatConversation(ctx context.Context, id, title string) (domain.ChatConversation, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return domain.ChatConversation{}, fmt.Errorf("chat title is required")
+	}
+	conversation, err := s.GetChatConversation(ctx, id)
+	if err != nil {
+		return domain.ChatConversation{}, err
+	}
+	if conversation.RenamedAt != nil {
+		return domain.ChatConversation{}, fmt.Errorf("this conversation was already renamed by the model")
+	}
+	now := time.Now().UTC()
+	result, err := statements(s.db).Update("chat_conversations").Set("title", title).Set("renamed_at", stamp(now)).Set("updated_at", stamp(now)).Where(squirrel.Eq{"id": conversation.ID}).ExecContext(ctx)
+	if err != nil {
+		return domain.ChatConversation{}, fmt.Errorf("rename chat conversation: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return domain.ChatConversation{}, fmt.Errorf("chat conversation %q not found", conversation.ID)
@@ -2200,11 +2275,25 @@ type chatConversationScanner interface{ Scan(...any) error }
 
 type chatApprovalScanner interface{ Scan(...any) error }
 
+// chatConversationColumns is the shared projection for every conversation
+// read so scanChatConversation can stay in sync with the schema.
+const chatConversationColumns = "id, mode, title, pipeline_id, trigger_binding_id, action_policy, provider_id, model, reasoning, tool_ids_json, renamed_at, created_at, updated_at"
+
 func scanChatConversation(scanner chatConversationScanner) (domain.ChatConversation, error) {
 	var conversation domain.ChatConversation
-	var created, updated string
-	if err := scanner.Scan(&conversation.ID, &conversation.Mode, &conversation.Title, &conversation.PipelineID, &conversation.TriggerBindingID, &conversation.ActionPolicy, &created, &updated); err != nil {
+	var created, updated, toolIDs string
+	var renamed sql.NullString
+	if err := scanner.Scan(&conversation.ID, &conversation.Mode, &conversation.Title, &conversation.PipelineID, &conversation.TriggerBindingID, &conversation.ActionPolicy, &conversation.ProviderID, &conversation.Model, &conversation.Reasoning, &toolIDs, &renamed, &created, &updated); err != nil {
 		return domain.ChatConversation{}, fmt.Errorf("scan chat conversation: %w", err)
+	}
+	if strings.TrimSpace(toolIDs) != "" {
+		if err := decode(toolIDs, &conversation.ToolIDs); err != nil {
+			return domain.ChatConversation{}, fmt.Errorf("decode chat tool ids: %w", err)
+		}
+	}
+	if renamed.Valid && strings.TrimSpace(renamed.String) != "" {
+		value := parseTime(renamed.String)
+		conversation.RenamedAt = &value
 	}
 	conversation.CreatedAt, conversation.UpdatedAt = parseTime(created), parseTime(updated)
 	return conversation, nil

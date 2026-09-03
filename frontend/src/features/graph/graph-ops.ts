@@ -295,17 +295,20 @@ export function splitPins(ports: Port[]): { exec: Port[]; data: Port[] } {
 
 /**
  * Apply the exec-pin rules for a function kind to both boundary nodes:
- * impure keeps exactly one exec in and one exec out, pure/tool have none.
+ * impure and tool keep exactly one exec in and one exec out (tool functions
+ * always execute as an impure subgraph and the backend requires the
+ * entry→return exec path to be visible and re-wirable), pure has none.
  * The existing exec pin id is preserved so saved wires stay connected.
  */
 export function applyFunctionKind(nodes: GraphNode[], kind: FunctionKind): GraphNode[] {
+  const withExec = kind !== "pure";
   return nodes.map((n) => {
     if (n.type === "function:entry") {
       const exec = n.outputs.filter((p) => p.kind === "exec").slice(0, 1);
       const data = n.outputs.filter((p) => p.kind !== "exec");
       return {
         ...n,
-        outputs: kind === "impure" ? [...exec, ...data] : data,
+        outputs: withExec ? [...exec, ...data] : data,
         values: { ...n.values, functionKind: kind },
       };
     }
@@ -314,7 +317,7 @@ export function applyFunctionKind(nodes: GraphNode[], kind: FunctionKind): Graph
       const data = n.inputs.filter((p) => p.kind !== "exec");
       return {
         ...n,
-        inputs: kind === "impure" ? [...exec, ...data] : data,
+        inputs: withExec ? [...exec, ...data] : data,
         values: { ...n.values, functionKind: kind },
       };
     }
@@ -327,12 +330,13 @@ export function applyFunctionInterface(
   nodes: GraphNode[],
   fn: { kind: FunctionKind; inputs: Port[]; outputs: Port[] },
 ): GraphNode[] {
+  const withExec = fn.kind !== "pure";
   return nodes.map((n) => {
     if (n.type === "function:entry") {
       const exec = n.outputs.filter((p) => p.kind === "exec").slice(0, 1);
       return {
         ...n,
-        outputs: fn.kind === "impure" ? [...exec, ...fn.inputs] : [...fn.inputs],
+        outputs: withExec ? [...exec, ...fn.inputs] : [...fn.inputs],
         values: { ...n.values, functionKind: fn.kind },
       };
     }
@@ -342,7 +346,7 @@ export function applyFunctionInterface(
       const returned = fn.outputs;
       return {
         ...n,
-        inputs: fn.kind === "impure" ? [...exec, ...returned] : [...returned],
+        inputs: withExec ? [...exec, ...returned] : [...returned],
         values: { ...n.values, functionKind: fn.kind },
       };
     }

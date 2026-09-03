@@ -419,6 +419,43 @@ func (s *Service) QueueChatBinding(ctx context.Context, bindingID, chatRunID str
 	return s.enqueue(ctx, queueCtx, job)
 }
 
+// RunToolFunction executes one published LLM tool function with
+// model-supplied JSON arguments on behalf of a model chat. It reuses the full
+// pipeline engine wiring a normal run receives, so tool graphs can use HTTP,
+// notifications, storage, and every other node capability; reports created
+// inside a tool function stay disabled because they require a real execution
+// record. Runs synchronously inside the caller's context (the chat service's
+// tool round), never touching the execution queue or history.
+func (s *Service) RunToolFunction(ctx context.Context, functionID string, arguments map[string]any) (map[string]any, error) {
+	function, err := s.store.GetPublishedFunction(ctx, functionID)
+	if err != nil {
+		return nil, err
+	}
+	if function.Kind != domain.FunctionTool {
+		return nil, fmt.Errorf("function %q is not an LLM tool", function.Name)
+	}
+	reportWriter := emittingReportWriter{writer: s.store, emit: s.emit}
+	chatWriter := emittingChatWriter{writer: s.store, emit: s.emit}
+	engine := pipeline.NewEngine(s.registry, s.llm, nil,
+		pipeline.WithFunctionResolver(s.store),
+		pipeline.WithPipelineLister(s.store),
+		pipeline.WithNotificationSender(s.notifier),
+		pipeline.WithChatWriter(chatWriter),
+		pipeline.WithJavaScriptHost(newJavaScriptHost(s.store, reportWriter, chatWriter, s.notifier, "", "")),
+		pipeline.WithTwitchChatSender(s.twitch),
+		pipeline.WithDiscordSender(s.discord),
+		pipeline.WithTelegramSender(s.telegram),
+		pipeline.WithGlobalVariablesStore(s.globals),
+		pipeline.WithSQLExecutor(s.database),
+		pipeline.WithKVExecutor(s.kv),
+		pipeline.WithStorageExecutor(s.storage),
+		pipeline.WithDialogOpener(s.dialogs),
+		pipeline.WithInputDialogOpener(s.inputs),
+		pipeline.WithFormDialogOpener(s.forms),
+	)
+	return pipeline.ExecuteToolFunction(ctx, engine, function, arguments)
+}
+
 // CancelExecution stops a queued or running owned execution. The worker still
 // writes the final redacted record, so cancellation is visible in history.
 func (s *Service) CancelExecution(ctx context.Context, executionID string) error {

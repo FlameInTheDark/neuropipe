@@ -40,6 +40,10 @@ type generationCall struct {
 	// json_object on OpenAI-compatible servers, format "json" on Ollama, and
 	// stays prompt-based on Anthropic, exactly like the previous adapters.
 	jsonMode bool
+	// reasoning carries an optional effort level ("low", "medium", …).
+	// Empty keeps the provider default: the option is never sent so servers
+	// that reject unknown fields stay unaffected.
+	reasoning string
 }
 
 // generate performs one provider-neutral model turn through the ai-sdk.
@@ -146,6 +150,9 @@ func (m *Manager) requestOptions(provider domain.ProviderConfig, model string, c
 			return nil, err
 		}
 		options = append(options, aisdk.WithTools(toolSet))
+	}
+	if effort := strings.TrimSpace(call.reasoning); effort != "" {
+		options = append(options, aisdk.WithReasoning(aiprovider.ReasoningEffort(effort)))
 	}
 	return options, nil
 }

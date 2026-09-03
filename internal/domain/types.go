@@ -364,7 +364,12 @@ const (
 )
 
 // ChatConversation is a local conversation. Pipeline conversations pin a
-// trigger binding; model conversations use the active Settings provider.
+// trigger binding; model conversations use the active Settings provider
+// unless they carry an explicit provider/model override. Model conversations
+// can also offer published LLM tool functions (ToolIDs) and request a
+// reasoning effort; RenamedAt records when the model's one-shot
+// rename_conversation tool was used so both the tool and its system-prompt
+// rule disappear after the first successful rename.
 type ChatConversation struct {
 	ID               string           `json:"id"`
 	Mode             ChatMode         `json:"mode"`
@@ -372,8 +377,36 @@ type ChatConversation struct {
 	PipelineID       string           `json:"pipelineId,omitempty"`
 	TriggerBindingID string           `json:"triggerBindingId,omitempty"`
 	ActionPolicy     ChatActionPolicy `json:"actionPolicy"`
+	ProviderID       string           `json:"providerId,omitempty"`
+	Model            string           `json:"model,omitempty"`
+	Reasoning        string           `json:"reasoning,omitempty"`
+	ToolIDs          []string         `json:"toolIds,omitempty"`
+	RenamedAt        *time.Time       `json:"renamedAt,omitempty"`
 	CreatedAt        time.Time        `json:"createdAt"`
 	UpdatedAt        time.Time        `json:"updatedAt"`
+}
+
+// ChatReasoningEffort enumerates the reasoning effort levels selectable per
+// conversation. Empty means the provider default (no reasoning field sent).
+type ChatReasoningEffort string
+
+const (
+	ChatReasoningDefault ChatReasoningEffort = ""
+	ChatReasoningNone    ChatReasoningEffort = "none"
+	ChatReasoningMinimal ChatReasoningEffort = "minimal"
+	ChatReasoningLow     ChatReasoningEffort = "low"
+	ChatReasoningMedium  ChatReasoningEffort = "medium"
+	ChatReasoningHigh    ChatReasoningEffort = "high"
+)
+
+// ValidChatReasoning reports whether a persisted reasoning value can be
+// forwarded to a provider adapter.
+func ValidChatReasoning(value string) bool {
+	switch ChatReasoningEffort(value) {
+	case ChatReasoningDefault, ChatReasoningNone, ChatReasoningMinimal, ChatReasoningLow, ChatReasoningMedium, ChatReasoningHigh:
+		return true
+	}
+	return false
 }
 
 // ChatToolCall is the structured form returned by a tool-capable provider.
@@ -454,12 +487,15 @@ type ChatToolDefinition struct {
 }
 
 // AssistantChatRequest carries a full persisted transcript to one provider
-// turn. Tool support is optional and adapter capability-dependent.
+// turn. Tool support is optional and adapter capability-dependent. Reasoning
+// uses the ai-sdk effort vocabulary ("", "none", "minimal", "low", "medium",
+// "high"); empty keeps the provider default and sends nothing.
 type AssistantChatRequest struct {
 	Messages   []ChatMessage        `json:"messages"`
 	Tools      []ChatToolDefinition `json:"tools,omitempty"`
 	ProviderID string               `json:"providerId,omitempty"`
 	Model      string               `json:"model,omitempty"`
+	Reasoning  string               `json:"reasoning,omitempty"`
 	Metrics    LLMMetricContext     `json:"metrics,omitempty"`
 }
 

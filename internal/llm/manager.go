@@ -198,7 +198,7 @@ func (m *Manager) Converse(ctx context.Context, request domain.AssistantChatRequ
 	if err != nil {
 		return domain.AssistantChatResponse{}, err
 	}
-	result, err := m.generate(ctx, turn.provider, turn.model, generationCall{messages: messages, tools: request.Tools})
+	result, err := m.generate(ctx, turn.provider, turn.model, generationCall{messages: messages, tools: request.Tools, reasoning: request.Reasoning})
 	if err != nil {
 		failed := m.completeUsage(turn.provider, turn.model, request.Metrics, domain.LLMUsage{}, turn.queueWait, time.Since(turn.started), err)
 		m.recordUsage(failed)
@@ -228,7 +228,7 @@ func (m *Manager) ConverseStream(ctx context.Context, request domain.AssistantCh
 	if err != nil {
 		return domain.AssistantChatResponse{}, err
 	}
-	result, err := m.streamGenerate(ctx, turn.provider, turn.model, generationCall{messages: messages, tools: request.Tools}, onDelta)
+	result, err := m.streamGenerate(ctx, turn.provider, turn.model, generationCall{messages: messages, tools: request.Tools, reasoning: request.Reasoning}, onDelta)
 	if err != nil {
 		failed := m.completeUsage(turn.provider, turn.model, request.Metrics, domain.LLMUsage{}, turn.queueWait, time.Since(turn.started), err)
 		m.recordUsage(failed)

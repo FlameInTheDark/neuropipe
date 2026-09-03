@@ -13,11 +13,14 @@ import type {
   ChatRun,
   ChatRunEvent,
   ChatToolCall,
+  FunctionSummary,
+  ProviderConfig,
 } from "@/lib/types";
 import { conversationGroup, formatDateTime } from "@/lib/format";
 import { ask } from "@/stores/confirmation";
 import { SearchInput } from "../components/ViewShell";
-import { Dropdown } from "../components/Dropdown";
+import { Dropdown, type DropdownOption } from "../components/Dropdown";
+import { ToolsPicker, type ToolsPickerTool } from "../components/ToolsPicker";
 import { Modal } from "../components/primitives/Modal";
 import { Field } from "../components/primitives/Field";
 import { Icon } from "../components/icons";
@@ -36,6 +39,20 @@ const SUGGESTION_KEYS = [
   "chat.suggestion3",
   "chat.suggestion4",
 ];
+
+/** Reasoning effort levels offered per conversation; "" keeps the provider default. */
+const REASONING_LEVELS = ["none", "minimal", "low", "medium", "high"] as const;
+
+/** Composite model-picker value: `""` = app default, `providerId::modelId` otherwise. */
+function modelValue(providerId?: string, model?: string): string {
+  return providerId ? `${providerId}::${model ?? ""}` : "";
+}
+
+function splitModelValue(value: string): { providerId: string; model: string } {
+  const index = value.indexOf("::");
+  if (index === -1) return { providerId: "", model: "" };
+  return { providerId: value.slice(0, index), model: value.slice(index + 2) };
+}
 
 /* Survives ChatView unmounts (navigating away and back) so reopening the
    chat page restores the exact conversation that was open, including its
@@ -205,6 +222,8 @@ export default function ChatView() {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [pipelines, setPipelines] = useState<ChatPipeline[]>([]);
   const [modelLabel, setModelLabel] = useState<string | null>(null);
+  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [toolFunctions, setToolFunctions] = useState<ToolsPickerTool[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(lastViewedId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runs, setRuns] = useState<ChatRun[]>([]);
@@ -213,8 +232,15 @@ export default function ChatView() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   /** live assistant text for the run currently streaming; keyed by run so a
-   *  stale or foreign turn can never paint into the wrong transcript */
-  const [liveReply, setLiveReply] = useState<{ chatRunId: string; text: string } | null>(null);
+   *  stale or foreign turn can never paint into the wrong transcript. Once a
+   *  round finishes (chat.token.end) the draft freezes in place - it keeps
+   *  rendering its own bubble until the persisted transcript row replaces
+   *  it, so consecutive rounds never melt into one growing element. */
+  const [liveReply, setLiveReply] = useState<{ chatRunId: string; text: string; finished?: boolean } | null>(null);
+  /** optimistically painted user turn between hitting Enter and the backend
+   *  round-trip: the user's message must be its own bubble immediately, not
+   *  something that pops in together with the reply later. */
+  const [pendingUser, setPendingUser] = useState<{ id: string; text: string; at: number } | null>(null);
   const [q, setQ] = useState("");
   const [newMode, setNewMode] = useState<"model" | "pipeline">(lastViewedMode ?? "model");
   const [renameTarget, setRenameTarget] = useState<ChatConversation | null>(null);
@@ -240,13 +266,20 @@ export default function ChatView() {
   }, [pipelines, pendingBindingId]);
   const newPipelineBinding = pendingBindingId || pipelines[0]?.bindingId || "";
 
+  /** Model, reasoning, and tool selection for a brand-new model chat, applied
+   *  when the first message implicitly creates the conversation. */
+  const [newModelValue, setNewModelValue] = useState("");
+  const [newReasoning, setNewReasoning] = useState("");
+  const [newToolIds, setNewToolIds] = useState<string[]>([]);
+
   /* ---------- transcript ---------- */
 
   /**
    * Walks messages in stored order and lifts tool activity into inline
    * cards: an assistant turn carrying tool_calls is followed by its result
    * card(s), matching how the harness renders a trajectory. Orphan results
-   * keep their chronological slot instead of disappearing.
+   * keep their chronological slot instead of disappearing. The not-yet-
+   * persisted user turn is appended so every send is visibly its own row.
    */
   const transcript = useMemo<TranscriptItem[]>(() => {
     const items: TranscriptItem[] = [];
@@ -275,8 +308,26 @@ export default function ChatView() {
       if (msg.role === "assistant" && msg.content.trim() === "") continue; // nothing to show
       items.push({ kind: "message", msg });
     }
+    if (pendingUser) {
+      // drop the optimistic row as soon as the persisted copy exists
+      const persisted = messages.some(
+        (m) => m.role === "user" && m.content === pendingUser.text && Date.parse(m.createdAt) >= pendingUser.at,
+      );
+      if (!persisted) {
+        items.push({
+          kind: "message",
+          msg: {
+            id: pendingUser.id,
+            conversationId: selectedId ?? "",
+            role: "user",
+            content: pendingUser.text,
+            createdAt: new Date(pendingUser.at).toISOString(),
+          },
+        });
+      }
+    }
     return items;
-  }, [messages]);
+  }, [messages, pendingUser, selectedId]);
 
   /* ---------- data loading ---------- */
 
@@ -318,6 +369,22 @@ export default function ChatView() {
       if (ticket !== detailSeq.current) return;
       setRuns(rs);
       setApprovals(aps);
+      // reconcile the live draft with the persisted transcript: the frozen
+      // round text is dropped the moment its exact row exists on disk, so
+      // the swap is seamless instead of text-vanishes-then-reappears. A
+      // draft whose run died without producing text goes away as well.
+      setLiveReply((cur) => {
+        if (!cur) return null;
+        if (msgs.some((m) => m.role === "assistant" && m.chatRunId === cur.chatRunId && m.content.trim() === cur.text.trim())) {
+          return null;
+        }
+        const run = rs.find((r) => r.id === cur.chatRunId);
+        if (run && (run.status === "failed" || run.status === "cancelled" || run.status === "skipped")) return null;
+        return cur;
+      });
+      setPendingUser((cur) =>
+        cur && msgs.some((m) => m.role === "user" && m.content === cur.text && Date.parse(m.createdAt) >= cur.at) ? null : cur,
+      );
       const eventEntries = await Promise.all(
         rs.map(async (r) => {
           try {
@@ -374,15 +441,23 @@ export default function ChatView() {
   }, [selectedId, loadingOlder, hasMore, messages]);
 
   const refreshList = useCallback(async () => {
-    const [convs, pipes, settings] = await Promise.all([
+    const [convs, pipes, settings, functions] = await Promise.all([
       desktop.listChatConversations(),
       desktop.listChatPipelines(),
       desktop.getSettings(),
+      desktop.listFunctions().catch(() => [] as FunctionSummary[]),
     ]);
     // newest conversation first regardless of backend ordering
     convs.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     setConversations(convs);
     setPipelines(pipes);
+    setProviders(settings.providers);
+    // only published LLM tool functions can be offered to the model
+    setToolFunctions(
+      functions
+        .filter((f) => f.kind === "tool" && f.publishedRevision > 0)
+        .map((f) => ({ id: f.id, name: f.name, description: f.description })),
+    );
     const provider = settings.providers.find((p) => p.id === settings.defaultProviderId);
     setModelLabel(provider ? (provider.model ? `${provider.name} · ${provider.model}` : provider.name) : null);
     return convs;
@@ -411,6 +486,7 @@ export default function ChatView() {
     setApprovals([]);
     setEvents({});
     setLiveReply(null);
+    setPendingUser(null);
     setHasMore(false);
     loadedCount.current = TRANSCRIPT_PAGE;
     pinnedRef.current = true;
@@ -421,8 +497,9 @@ export default function ChatView() {
   useEffect(() => {
     const offs = [
       Events.On("chat.updated", () => {
-        /* a full reload supersedes any live draft left on screen */
-        setLiveReply(null);
+        /* the reload reconciles the live draft inside loadDetails: clearing
+           it here would blank the finished round's text during the IPC
+           round-trip and make turns appear to melt into one element */
         void refreshList();
         if (selectedId) void loadDetails(selectedId);
       }),
@@ -432,7 +509,8 @@ export default function ChatView() {
       Events.On("chat.approval.requested", () => {
         if (selectedId) void loadDetails(selectedId);
       }),
-      /* coalesced token deltas from the model turn in flight */
+      /* coalesced token deltas from the model turn in flight; a delta from a
+         new run (the next tool round) replaces the finished draft entirely */
       Events.On("chat.token", (e: unknown) => {
         const p = extractPayload(e) as { chatRunId?: string; conversationId?: string; delta?: string } | null;
         if (!p?.delta || p.conversationId !== selectedId) return;
@@ -440,10 +518,13 @@ export default function ChatView() {
           cur && cur.chatRunId === p.chatRunId ? { ...cur, text: cur.text + (p.delta ?? "") } : { chatRunId: p.chatRunId ?? "", text: p.delta ?? "" },
         );
       }),
-      /* the turn finished: the persisted transcript replaces the draft */
+      /* the round finished streaming: freeze its text in place and pull the
+         persisted transcript immediately - the draft hands over to the real
+         row the moment the commit lands, with no dots in between */
       Events.On("chat.token.end", (e: unknown) => {
         const p = extractPayload(e) as { chatRunId?: string } | null;
-        setLiveReply((cur) => (!cur || !p?.chatRunId || cur.chatRunId === p.chatRunId ? null : cur));
+        setLiveReply((cur) => (cur && (!p?.chatRunId || cur.chatRunId === p.chatRunId) ? { ...cur, finished: true } : cur));
+        if (selectedId) void loadDetails(selectedId);
       }),
     ];
     return () => offs.forEach((off) => off());
@@ -451,7 +532,7 @@ export default function ChatView() {
 
   /* auto-scroll only while the user is pinned to the bottom; polling during
      a tool round must never yank the view if they scrolled up to read */
-  const transcriptKey = `${selectedId}:${messages.length}:${runs.map((r) => r.status).join(",")}:${liveReply?.text.length ?? 0}`;
+  const transcriptKey = `${selectedId}:${messages.length}:${pendingUser?.id ?? ""}:${runs.map((r) => r.status).join(",")}:${liveReply?.text.length ?? 0}`;
   useEffect(() => {
     if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
@@ -516,10 +597,21 @@ export default function ChatView() {
     try {
       if (!target) {
         // first message in a fresh chat creates the conversation implicitly
-        const conv = await desktop.createChatConversation(
+        let conv = await desktop.createChatConversation(
           newMode,
           newMode === "pipeline" ? newPipelineBinding : "",
         );
+        if (newMode === "model" && (newModelValue !== "" || newReasoning !== "" || newToolIds.length > 0)) {
+          // carry the pre-send picker choices onto the fresh conversation
+          const { providerId, model } = splitModelValue(newModelValue);
+          conv = await desktop.saveChatConversation({
+            ...conv,
+            providerId,
+            model,
+            reasoning: newReasoning,
+            toolIds: newToolIds,
+          });
+        }
         target = conv;
         setSelectedId(conv.id);
         await refreshList();
@@ -527,7 +619,18 @@ export default function ChatView() {
       if (!target) return;
       setSending(true);
       setDraft("");
-      await desktop.sendChatMessage(target.id, text);
+      // paint the user's turn immediately - it must be its own bubble from
+      // the first frame, not appear together with the reply later
+      setPendingUser({ id: `pending-${Date.now()}`, text, at: Date.now() });
+      try {
+        await desktop.sendChatMessage(target.id, text);
+      } catch (error) {
+        // nothing was persisted: remove the optimistic row and give the
+        // text back so the user can retry without retyping
+        setPendingUser(null);
+        setDraft(text);
+        throw error;
+      }
       await loadDetails(target.id);
       await refreshList();
     } finally {
@@ -547,10 +650,13 @@ export default function ChatView() {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
     setSending(true);
+    setPendingUser({ id: `pending-${Date.now()}`, text: lastUser.content, at: Date.now() });
     try {
       await desktop.sendChatMessage(selectedId, lastUser.content);
       await loadDetails(selectedId);
       await refreshList();
+    } catch {
+      setPendingUser(null);
     } finally {
       setSending(false);
     }
@@ -588,6 +694,35 @@ export default function ChatView() {
     await refreshList();
   };
 
+  /** Persists one conversation patch (model routing, reasoning, tools). */
+  const patchConversation = useCallback(
+    async (conv: ChatConversation, patch: Partial<ChatConversation>) => {
+      try {
+        await desktop.saveChatConversation({ ...conv, ...patch });
+        await refreshList();
+      } catch {
+        notify(t("chat.saveFailed"), "AlertTriangle");
+      }
+    },
+    [refreshList, notify, t],
+  );
+
+  const setModelRouting = (value: string) => {
+    const { providerId, model } = splitModelValue(value);
+    if (selected && selected.mode === "model") void patchConversation(selected, { providerId, model });
+    else setNewModelValue(value);
+  };
+
+  const setReasoning = (level: string) => {
+    if (selected && selected.mode === "model") void patchConversation(selected, { reasoning: level });
+    else setNewReasoning(level);
+  };
+
+  const setEnabledTools = (ids: string[]) => {
+    if (selected && selected.mode === "model") void patchConversation(selected, { toolIds: ids });
+    else setNewToolIds(ids);
+  };
+
   const resolveApproval = async (approved: boolean) => {
     if (!approval) return;
     await desktop.resolveChatApproval(approval.id, approved);
@@ -620,6 +755,67 @@ export default function ChatView() {
   const mode = selected?.mode ?? newMode;
   const headerPipeline =
     selected?.pipelineId != null ? pipelines.find((p) => p.pipelineId === selected.pipelineId)?.pipelineName : null;
+
+  /* ---------- model / reasoning / tools pickers ---------- */
+
+  const enabledProviders = useMemo(() => providers.filter((p) => p.enabled), [providers]);
+  const providerName = useCallback(
+    (id: string) => providers.find((p) => p.id === id)?.name ?? id,
+    [providers],
+  );
+
+  /** Searchable model list across every enabled provider, mirroring the
+   *  provider-configuration dropdown; `""` keeps the Settings default. */
+  const modelOptions = useMemo<DropdownOption[]>(() => {
+    const options: DropdownOption[] = [
+      { value: "", label: t("chat.modelAppDefault"), hint: modelLabel ?? undefined },
+    ];
+    for (const provider of enabledProviders) {
+      if (provider.model) {
+        options.push({
+          value: modelValue(provider.id, ""),
+          label: `${provider.name} · ${provider.model}`,
+          hint: t("chat.modelProviderDefault"),
+        });
+      }
+      for (const model of provider.models ?? []) {
+        if (model.id === provider.model) continue; // already the provider-default entry
+        options.push({ value: modelValue(provider.id, model.id), label: `${provider.name} · ${model.name || model.id}` });
+      }
+    }
+    return options;
+  }, [enabledProviders, modelLabel, t]);
+
+  const currentModelValue = selected?.mode === "model" ? modelValue(selected.providerId, selected.model) : newModelValue;
+  // A saved model that is no longer configured must stay selectable so the
+  // conversation never silently loses its routing (same rule as the editor).
+  if (currentModelValue && !modelOptions.some((o) => o.value === currentModelValue)) {
+    const { providerId: savedProvider, model: savedModel } = splitModelValue(currentModelValue);
+    modelOptions.push({
+      value: currentModelValue,
+      label: `${providerName(savedProvider)}${savedModel ? ` · ${savedModel}` : ""} · ${t("editor.modelSaved")}`,
+    });
+  }
+
+  const reasoningOptions = useMemo<DropdownOption[]>(
+    () => [
+      { value: "", label: t("chat.reasoningDefault") },
+      ...REASONING_LEVELS.map((level) => ({ value: level, label: t(`chat.reasoning_${level}`) })),
+    ],
+    [t],
+  );
+  const currentReasoning = selected?.mode === "model" ? (selected.reasoning ?? "") : newReasoning;
+  const currentToolIds = selected?.mode === "model" ? (selected.toolIds ?? []) : newToolIds;
+
+  /** Header chip label: the conversation's resolved routing or the default. */
+  const headerModelLabel = useMemo(() => {
+    if (!selected || selected.mode !== "model") return modelLabel;
+    if (!selected.providerId) return modelLabel;
+    const provider = providers.find((p) => p.id === selected.providerId);
+    if (!provider) return null;
+    const model = selected.model || provider.model;
+    return model ? `${provider.name} · ${model}` : provider.name;
+  }, [selected, providers, modelLabel]);
 
   return (
     <div className="flex h-full min-h-0 overflow-hidden">
@@ -705,7 +901,7 @@ export default function ChatView() {
                   <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3 w-3 shrink-0 text-fg-faint" />
                   {selected.mode === "pipeline"
                     ? headerPipeline ?? t("chat.publishedPipeline")
-                    : modelLabel ?? t("chat.configureModel")}
+                    : headerModelLabel ?? t("chat.configureModel")}
                 </span>
                 <Dropdown
                   compact
@@ -802,9 +998,10 @@ export default function ChatView() {
               )}
 
               {/* live token stream replaces the idle dots once the first
-                  deltas land; the persisted row takes over on completion */}
+                  deltas land; a finished round freezes in place (caret off)
+                  until the persisted row takes over via the commit reconcile */}
               {liveReply && liveReply.text !== "" ? (
-                <LiveReplyBubble text={liveReply.text} pipelineMode={selected.mode === "pipeline"} />
+                <LiveReplyBubble text={liveReply.text} pipelineMode={selected.mode === "pipeline"} caret={!liveReply.finished} />
               ) : (
                 (activeRun || sending) && (
                   <div className="flex gap-3">
@@ -931,10 +1128,28 @@ export default function ChatView() {
                     />
                   )
                 ) : (
-                  <span className="flex items-center gap-1.5 text-[11px] text-fg-faint">
-                    <Icon name="Sparkles" className="h-3 w-3" />
-                    {modelLabel ?? t("chat.configureModel")}
-                  </span>
+                  <>
+                    {/* model routing: searchable dropdown over every enabled
+                        provider's models, like provider configuration */}
+                    <Dropdown
+                      compact
+                      searchable
+                      searchPlaceholder={t("common.searchModels")}
+                      className="max-w-[240px]"
+                      value={currentModelValue}
+                      onChange={setModelRouting}
+                      options={modelOptions}
+                      placeholder={t("chat.configureModel")}
+                    />
+                    <Dropdown
+                      compact
+                      className="max-w-[130px]"
+                      value={currentReasoning}
+                      onChange={setReasoning}
+                      options={reasoningOptions}
+                    />
+                    <ToolsPicker tools={toolFunctions} enabled={currentToolIds} onChange={setEnabledTools} />
+                  </>
                 )}
 
                 <span className="ml-auto text-[10.5px] text-fg-faint">{t("chat.enterToSend")}</span>
@@ -1138,16 +1353,17 @@ const MarkdownBody = memo(function MarkdownBody({ content, caret }: { content: s
 });
 
 /** Assistant bubble while the model streams: formatted markdown plus a
- *  blinking caret at the end of the text. Replaced by the persisted
- *  transcript row once the turn completes. */
-function LiveReplyBubble({ text, pipelineMode }: { text: string; pipelineMode: boolean }) {
+ *  blinking caret at the end of the text. Once the round finishes the caret
+ *  stops and the bubble freezes until the persisted transcript row replaces
+ *  it, so consecutive rounds never collapse into one growing element. */
+function LiveReplyBubble({ text, pipelineMode, caret = true }: { text: string; pipelineMode: boolean; caret?: boolean }) {
   return (
     <div className="flex gap-3">
       <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
         <Icon name={pipelineMode ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
       </span>
       <div className="max-w-[80%] cursor-default rounded-2xl bg-ink-850 px-4 py-2.5 text-[13px] leading-relaxed text-fg">
-        <MarkdownBody content={text} caret />
+        <MarkdownBody content={text} caret={caret} />
       </div>
     </div>
   );
