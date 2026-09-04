@@ -934,6 +934,37 @@ export interface ChatApproval {
   createdAt: string;
   resolvedAt?: string;
 }
+/** One model-provided answer choice; the description spells out its trade-off. */
+export interface ChatQuestionOption {
+  label: string;
+  description?: string;
+}
+/** One step of the model's clarification form. */
+export interface ChatQuestion {
+  question: string;
+  options?: ChatQuestionOption[];
+}
+/** How one question step was resolved by the user. */
+export interface ChatQuestionAnswer {
+  question: string;
+  source: "option" | "custom" | "rejected";
+  /** Option label when source is "option". */
+  chosenLabel?: string;
+  /** Free-text variant when source is "custom". */
+  custom?: string;
+}
+/** A paused ask_user_questions call awaiting the user's answers. */
+export interface ChatQuestions {
+  id: string;
+  conversationId: string;
+  chatRunId: string;
+  toolCallId: string;
+  questions: ChatQuestion[];
+  answers?: ChatQuestionAnswer[];
+  status: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
 export interface ChatPipeline {
   bindingId: string;
   pipelineId: string;

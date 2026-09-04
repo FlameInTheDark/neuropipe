@@ -15,6 +15,8 @@ import type {
   ChatConversation,
   ChatMessage,
   ChatPipeline,
+  ChatQuestionAnswer,
+  ChatQuestions,
   ChatRun,
   ChatRunEvent,
   Settings,
@@ -37,6 +39,7 @@ const conversations: ChatConversation[] = [];
 const messages: ChatMessage[] = [];
 const runs: ChatRun[] = [];
 const runEvents: ChatRunEvent[] = [];
+const pendingQuestions: ChatQuestions[] = [];
 
 const scenario = new URLSearchParams(window.location.search).get("case") ?? "loaded";
 
@@ -138,6 +141,159 @@ if (scenario === "loaded") {
     detail: '[{"name":"Morning report","id":"p-1"},{"name":"Data sync","id":"p-2"}]',
     status: "completed",
     createdAt: "2026-09-03T08:20:05Z",
+  });
+}
+
+if (scenario === "questions") {
+  conversations.push({
+    id: "conv-q",
+    mode: "model",
+    title: "Database choice",
+    actionPolicy: "ask",
+    providerId: "",
+    model: "",
+    reasoning: "",
+    toolIds: [],
+    createdAt: "2026-09-03T09:00:00Z",
+    updatedAt: "2026-09-03T09:30:00Z",
+  });
+  // A resolved question form from an earlier turn renders as history.
+  messages.push(
+    {
+      id: "qm-1",
+      conversationId: "conv-q",
+      chatRunId: "qrun-1",
+      role: "user",
+      content: "Which reporting stack do we use?",
+      createdAt: "2026-09-03T09:05:00Z",
+    },
+    {
+      id: "qm-2",
+      conversationId: "conv-q",
+      chatRunId: "qrun-1",
+      role: "assistant",
+      content: "",
+      toolCalls: [{ id: "ask-0", name: "ask_user_questions", arguments: {} }],
+      createdAt: "2026-09-03T09:05:04Z",
+    },
+    {
+      id: "qm-3",
+      conversationId: "conv-q",
+      chatRunId: "qrun-1",
+      role: "tool",
+      toolCallId: "ask-0",
+      toolName: "ask_user_questions",
+      content: JSON.stringify({
+        answers: [
+          { question: "Charts or tables?", source: "option", answer: "Charts", description: "Visual summaries per metric" },
+          { question: "Any export format?", source: "custom", answer: "CSV and XLSX" },
+          { question: "Email delivery?", source: "rejected" },
+        ],
+        note: "source vocabulary",
+      }),
+      createdAt: "2026-09-03T09:06:00Z",
+    },
+    {
+      id: "qm-4",
+      conversationId: "conv-q",
+      chatRunId: "qrun-1",
+      role: "assistant",
+      content: "Noted: charts, CSV/XLSX export, no email.",
+      createdAt: "2026-09-03T09:06:05Z",
+    },
+  );
+  runs.push({
+    id: "qrun-1",
+    conversationId: "conv-q",
+    status: "completed",
+    statusText: "Completed",
+    createdAt: "2026-09-03T09:05:00Z",
+    updatedAt: "2026-09-03T09:06:05Z",
+  });
+  // The live paused turn with the open question form under test.
+  messages.push(
+    {
+      id: "qm-5",
+      conversationId: "conv-q",
+      chatRunId: "qrun-2",
+      role: "user",
+      content: "Help me choose a database for the pipeline",
+      createdAt: "2026-09-03T09:20:00Z",
+    },
+    {
+      id: "qm-6",
+      conversationId: "conv-q",
+      chatRunId: "qrun-2",
+      role: "assistant",
+      content: "A few things first:",
+      toolCalls: [
+        { id: "ask-1", name: "ask_user_questions", arguments: {} },
+        { id: "ask-2", name: "list_pipelines", arguments: {} },
+      ],
+      createdAt: "2026-09-03T09:20:04Z",
+    },
+    {
+      id: "qm-7",
+      conversationId: "conv-q",
+      chatRunId: "qrun-2",
+      role: "tool",
+      toolCallId: "ask-2",
+      toolName: "list_pipelines",
+      content: "Skipped: the turn paused to ask the user a question before this tool could run.",
+      createdAt: "2026-09-03T09:20:05Z",
+    },
+  );
+  runs.push({
+    id: "qrun-2",
+    conversationId: "conv-q",
+    status: "pending",
+    statusText: "Waiting for your answers",
+    createdAt: "2026-09-03T09:20:00Z",
+    updatedAt: "2026-09-03T09:20:05Z",
+  });
+  runEvents.push(
+    {
+      id: "qev-1",
+      chatRunId: "qrun-2",
+      kind: "questions",
+      summary: "Asked 3 question(s)",
+      detail: "[]",
+      status: "pending",
+      createdAt: "2026-09-03T09:20:05Z",
+    },
+  );
+  pendingQuestions.push({
+    id: "q-form-1",
+    conversationId: "conv-q",
+    chatRunId: "qrun-2",
+    toolCallId: "ask-1",
+    status: "pending",
+    createdAt: "2026-09-03T09:20:05Z",
+    questions: [
+      {
+        question: "Which database engine should we use?",
+        options: [
+          { label: "PostgreSQL", description: "Relational, strong consistency" },
+          { label: "SQLite", description: "Embedded, zero-ops" },
+          { label: "MongoDB", description: "Document store, flexible schema" },
+        ],
+      },
+      {
+        question: "How much data do we expect per month?",
+        options: [
+          { label: "Under 1 GB" },
+          { label: "1-100 GB", description: "Typical for local pipelines" },
+          { label: "Over 100 GB" },
+        ],
+      },
+      {
+        question: "Do you need built-in full-text search?",
+        options: [
+          { label: "Yes", description: "Indexes every stored payload" },
+          { label: "No", description: "Plain storage only" },
+        ],
+      },
+    ],
   });
 }
 
@@ -295,6 +451,64 @@ export const desktop = {
     await delay(10);
     return [];
   },
+  async listPendingChatQuestions(conversationId: string): Promise<ChatQuestions[]> {
+    await delay(10);
+    return pendingQuestions.filter((q) => q.conversationId === conversationId);
+  },
+  async resolveChatQuestions(id: string, answers: ChatQuestionAnswer[]): Promise<void> {
+    await delay(10);
+    const index = pendingQuestions.findIndex((q) => q.id === id);
+    if (index < 0) throw new Error("question form is no longer pending");
+    const [record] = pendingQuestions.splice(index, 1);
+    record.status = "answered";
+    record.answers = answers;
+    record.resolvedAt = nowISO();
+    messages.push({
+      id: `qm-tool-${id}`,
+      conversationId: record.conversationId,
+      chatRunId: record.chatRunId,
+      role: "tool",
+      toolCallId: record.toolCallId,
+      toolName: "ask_user_questions",
+      content: JSON.stringify({
+        answers: answers.map((answer) => ({
+          question: answer.question,
+          source: answer.source,
+          answer: answer.source === "option" ? answer.chosenLabel : answer.source === "custom" ? answer.custom : undefined,
+        })),
+        note: "source vocabulary",
+      }),
+      createdAt: nowISO(),
+    });
+    const run = runs.find((r) => r.id === record.chatRunId);
+    if (run) {
+      run.status = "running";
+      run.statusText = "Working";
+    }
+    emit("chat.updated", { chatRunId: record.chatRunId });
+    await sleep(120);
+    const reply = "Great choice - PostgreSQL with about 50 GB per month. I will set up the pipeline now.";
+    for (const chunk of reply.match(/.{1,7}/gs) ?? []) {
+      emit("chat.token", { chatRunId: record.chatRunId, conversationId: record.conversationId, delta: chunk });
+      await sleep(20);
+    }
+    emit("chat.token.end", { chatRunId: record.chatRunId });
+    await sleep(60);
+    messages.push({
+      id: `qm-reply-${id}`,
+      conversationId: record.conversationId,
+      chatRunId: record.chatRunId,
+      role: "assistant",
+      content: reply,
+      createdAt: nowISO(),
+    });
+    if (run) {
+      run.status = "completed";
+      run.statusText = "Completed";
+    }
+    emit("chat.run.updated", { chatRunId: record.chatRunId });
+    emit("chat.updated", { chatRunId: record.chatRunId });
+  },
   async listChatRunEvents(runId: string): Promise<ChatRunEvent[]> {
     await delay(10);
     return runEvents.filter((e) => e.chatRunId === runId);
@@ -308,4 +522,5 @@ harness.__chatMock = {
   messages,
   runs,
   events: runEvents,
+  pendingQuestions,
 };

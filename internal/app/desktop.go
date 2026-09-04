@@ -1057,6 +1057,17 @@ func (d *Desktop) ResolveChatApproval(id string, approved bool) error {
 	return d.chat.ResolveApproval(d.context(), id, approved)
 }
 
+// ListPendingChatQuestions returns clarification forms awaiting user answers.
+func (d *Desktop) ListPendingChatQuestions(conversationID string) ([]domain.ChatQuestions, error) {
+	return d.store.ListPendingChatQuestions(d.context(), conversationID)
+}
+
+// ResolveChatQuestions submits the user's answers to one clarification form
+// and resumes the paused model turn with them as the tool result.
+func (d *Desktop) ResolveChatQuestions(id string, answers []domain.ChatQuestionAnswer) error {
+	return d.chat.ResolveQuestions(d.context(), id, answers)
+}
+
 func (d *Desktop) GetRequiredCapabilities(pipelineID string) ([]domain.Capability, error) {
 	if err := d.refreshFunctionRegistry(d.context()); err != nil {
 		return nil, err

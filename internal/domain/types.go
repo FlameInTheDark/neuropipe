@@ -467,6 +467,68 @@ type ChatApproval struct {
 	ResolvedAt     *time.Time   `json:"resolvedAt,omitempty"`
 }
 
+// Question statuses mirror the approval vocabulary: a form is pending until
+// the user submits answers, skips it, or abandons the turn.
+const (
+	ChatQuestionsPending   = "pending"
+	ChatQuestionsAnswered  = "answered"
+	ChatQuestionsExpired   = "expired"
+	ChatQuestionsCancelled = "cancelled"
+)
+
+// Answer sources distinguish how each question step was resolved. "option"
+// means the user picked one of the model-provided choices, "custom" means
+// they typed a free-text variant, and "rejected" means they declined to
+// answer that step at all.
+const (
+	ChatAnswerSourceOption   = "option"
+	ChatAnswerSourceCustom   = "custom"
+	ChatAnswerSourceRejected = "rejected"
+)
+
+// ChatQuestionOption is one model-provided answer choice. The description
+// spells out what choosing it implies so the user can decide in place.
+type ChatQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// ChatQuestion is one step of the model's clarification form: the question
+// text plus the optional concrete choices offered for it.
+type ChatQuestion struct {
+	Question string               `json:"question"`
+	Options  []ChatQuestionOption `json:"options,omitempty"`
+}
+
+// ChatQuestionAnswer is the user's resolution of one question step. Exactly
+// one of ChosenLabel / Custom is set; Rejected steps carry neither.
+type ChatQuestionAnswer struct {
+	Question string `json:"question"`
+	Source   string `json:"source"`
+	// ChosenLabel is the picked option's label when Source is "option".
+	ChosenLabel string `json:"chosenLabel,omitempty"`
+	// ChosenDescription echoes the picked option's description back to the
+	// model so the implied trade-off travels with the answer.
+	ChosenDescription string `json:"chosenDescription,omitempty"`
+	// Custom is the free-text variant when Source is "custom".
+	Custom string `json:"custom,omitempty"`
+}
+
+// ChatQuestions stores one paused ask_user_questions tool call awaiting the
+// user's answers. The app renders its steps as an interactive form and the
+// submitted answers become the tool result that resumes the model turn.
+type ChatQuestions struct {
+	ID             string               `json:"id"`
+	ConversationID string               `json:"conversationId"`
+	ChatRunID      string               `json:"chatRunId"`
+	ToolCallID     string               `json:"toolCallId"`
+	Questions      []ChatQuestion       `json:"questions"`
+	Answers        []ChatQuestionAnswer `json:"answers,omitempty"`
+	Status         string               `json:"status"`
+	CreatedAt      time.Time            `json:"createdAt"`
+	ResolvedAt     *time.Time           `json:"resolvedAt,omitempty"`
+}
+
 // ChatPipeline is the compact picker projection for published chat triggers.
 type ChatPipeline struct {
 	BindingID    string `json:"bindingId"`

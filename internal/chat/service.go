@@ -154,6 +154,9 @@ func (s *Service) Send(ctx context.Context, conversationID, text string) (domain
 	if text == "" {
 		return domain.ChatRun{}, fmt.Errorf("message cannot be empty")
 	}
+	// A delivered message means the user moved on: close any open question
+	// forms first so the new turn starts from a provider-valid transcript.
+	s.expirePendingQuestions(ctx, conversation.ID)
 	run, err := s.store.CreateChatRun(ctx, conversation.ID)
 	if err != nil {
 		return domain.ChatRun{}, err
@@ -241,6 +244,9 @@ func (s *Service) Cancel(ctx context.Context, chatRunID string) error {
 		cancel()
 	}
 	if err := s.store.CancelChatApprovalsForRun(ctx, run.ID); err != nil {
+		return err
+	}
+	if err := s.cancelQuestionsForRun(ctx, run); err != nil {
 		return err
 	}
 	if err := s.store.UpdateChatRun(ctx, run.ID, domain.RunCancelled, "Stopped", run.ExecutionID, "Cancelled by user"); err != nil {
@@ -371,7 +377,36 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 		}
 	}
 	_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleAssistant, Content: response.Content, ToolCalls: response.ToolCalls})
-	for _, call := range response.ToolCalls {
+	for index, call := range response.ToolCalls {
+		// The clarification form parks the turn: its result is only written
+		// once the user submits answers, so it must be handled before the
+		// regular execute path.
+		if call.Name == askUserQuestionsToolName {
+			questions, parseErr := parseQuestions(call.Arguments)
+			if parseErr != nil {
+				// Answer the malformed call with an error result so the model
+				// can correct its arguments on the next round.
+				result := "Tool failed: " + parseErr.Error()
+				_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleTool, ToolCallID: call.ID, ToolName: call.Name, Content: result})
+				_, _ = s.store.AddChatRunEvent(runCtx, domain.ChatRunEvent{ChatRunID: job.chatRunID, Kind: "tool", Summary: toolSummary(call), Detail: result, Status: domain.RunCompleted})
+				continue
+			}
+			// Sibling tool calls in the same response stay unexecuted while
+			// the form is open; explicit skip results keep the resumed
+			// transcript provider-valid.
+			for _, sibling := range response.ToolCalls[index+1:] {
+				s.skipToolCallForPause(runCtx, conversation.ID, job.chatRunID, sibling)
+			}
+			if err := s.pauseForQuestions(runCtx, conversation, job.chatRunID, call, questions); err != nil {
+				if runCtx.Err() != nil || s.isStopped(job.chatRunID) {
+					s.finishStopped(job.chatRunID)
+					return
+				}
+				s.failRun(job.chatRunID, err)
+				return
+			}
+			return
+		}
 		requiresApproval, approvalErr := s.requiresApproval(runCtx, conversation, call)
 		if approvalErr != nil {
 			s.failRun(job.chatRunID, approvalErr)
@@ -949,6 +984,8 @@ func toolSupportUnavailable(err error) bool {
 
 func toolSummary(call domain.ChatToolCall) string {
 	switch call.Name {
+	case askUserQuestionsToolName:
+		return "Asked user questions"
 	case "rename_conversation":
 		return "Renamed conversation"
 	case "run_pipeline":
@@ -1021,6 +1058,9 @@ func (s *Service) toolDefinitions(ctx context.Context, conversation domain.ChatC
 		{Name: "delete_report", Description: "Permanently delete one local report by ID.", InputSchema: object(map[string]any{"reportId": text("Report ID")}, "reportId")},
 		{Name: "get_execution", Description: "Inspect a pipeline execution by ID.", InputSchema: object(map[string]any{"executionId": text("Execution ID")}, "executionId")},
 	}
+	// The clarification form is always offered in model mode so the model
+	// can ask instead of guessing when information is missing.
+	tools = append(tools, AskUserQuestionsToolDefinition())
 	// The one-shot rename tool is offered only until the model uses it.
 	if conversation.RenamedAt == nil {
 		tools = append(tools, domain.ChatToolDefinition{
@@ -1059,12 +1099,15 @@ func (s *Service) toolDefinitions(ctx context.Context, conversation domain.ChatC
 }
 
 // systemPrompt assembles the per-conversation system prompt: the authoring
-// pointer when its tools exist, plus the one-shot naming rule while the
-// model-owned rename has not been used yet.
+// pointer when its tools exist, the clarification-form rule, and the one-shot
+// naming rule while the model-owned rename has not been used yet.
 func (s *Service) systemPrompt(conversation domain.ChatConversation) string {
 	var parts []string
 	if s.authoring != nil || s.catalog != nil {
 		parts = append(parts, systemGuidance)
+	}
+	if conversation.Mode == domain.ChatModeModel {
+		parts = append(parts, questionsGuidance)
 	}
 	if conversation.Mode == domain.ChatModeModel && conversation.RenamedAt == nil {
 		parts = append(parts, renameGuidance)

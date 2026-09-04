@@ -10,6 +10,8 @@ import type {
   ChatConversation,
   ChatMessage,
   ChatPipeline,
+  ChatQuestionAnswer,
+  ChatQuestions,
   ChatRun,
   ChatRunEvent,
   ChatToolCall,
@@ -229,6 +231,11 @@ export default function ChatView() {
   const [runs, setRuns] = useState<ChatRun[]>([]);
   const [events, setEvents] = useState<Record<string, ChatRunEvent[]>>({});
   const [approvals, setApprovals] = useState<ChatApproval[]>([]);
+  /** Clarification forms the model opened and the user has not answered yet;
+   *  each renders as an interactive step list at its tool-call position. */
+  const [pendingQuestions, setPendingQuestions] = useState<ChatQuestions[]>([]);
+  /** Question form currently being submitted (prevents double submits). */
+  const [submittingQuestions, setSubmittingQuestions] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   /** live assistant text for the run currently streaming; keyed by run so a
@@ -366,9 +373,11 @@ export default function ChatView() {
       loadedCount.current = msgs.length;
       const rs = await desktop.listChatRuns(conversationId);
       const aps = await desktop.listPendingChatApprovals(conversationId);
+      const qss = await desktop.listPendingChatQuestions(conversationId);
       if (ticket !== detailSeq.current) return;
       setRuns(rs);
       setApprovals(aps);
+      setPendingQuestions(qss);
       // reconcile the live draft with the persisted transcript: the frozen
       // round text is dropped the moment its exact row exists on disk, so
       // the swap is seamless instead of text-vanishes-then-reappears. A
@@ -484,6 +493,8 @@ export default function ChatView() {
     setMessages([]);
     setRuns([]);
     setApprovals([]);
+    setPendingQuestions([]);
+    setSubmittingQuestions(null);
     setEvents({});
     setLiveReply(null);
     setPendingUser(null);
@@ -509,6 +520,9 @@ export default function ChatView() {
       Events.On("chat.approval.requested", () => {
         if (selectedId) void loadDetails(selectedId);
       }),
+      Events.On("chat.questions.requested", () => {
+        if (selectedId) void loadDetails(selectedId);
+      }),
       /* coalesced token deltas from the model turn in flight; a delta from a
          new run (the next tool round) replaces the finished draft entirely */
       Events.On("chat.token", (e: unknown) => {
@@ -532,7 +546,7 @@ export default function ChatView() {
 
   /* auto-scroll only while the user is pinned to the bottom; polling during
      a tool round must never yank the view if they scrolled up to read */
-  const transcriptKey = `${selectedId}:${messages.length}:${pendingUser?.id ?? ""}:${runs.map((r) => r.status).join(",")}:${liveReply?.text.length ?? 0}`;
+  const transcriptKey = `${selectedId}:${messages.length}:${pendingUser?.id ?? ""}:${runs.map((r) => r.status).join(",")}:${liveReply?.text.length ?? 0}:${pendingQuestions.map((p) => p.id).join("-")}`;
   useEffect(() => {
     if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
@@ -727,6 +741,21 @@ export default function ChatView() {
     if (!approval) return;
     await desktop.resolveChatApproval(approval.id, approved);
     if (selectedId) await loadDetails(selectedId);
+  };
+
+  /** Submits the answered question steps: the backend stores them as the
+   *  tool result and the paused model turn resumes with them. */
+  const resolveQuestions = async (record: ChatQuestions, answers: ChatQuestionAnswer[]) => {
+    setSubmittingQuestions(record.id);
+    try {
+      await desktop.resolveChatQuestions(record.id, answers);
+      if (selectedId) await loadDetails(selectedId);
+      await refreshList();
+    } catch {
+      notify(t("chat.questionsSubmitFailed"), "AlertTriangle");
+    } finally {
+      setSubmittingQuestions(null);
+    }
   };
 
   const onThreadCtx = (e: React.MouseEvent, conv: ChatConversation) => {
@@ -972,9 +1001,22 @@ export default function ChatView() {
               {transcript.map((item) =>
                 item.kind === "tools" ? (
                   <div key={item.key} className="space-y-1.5">
-                    {item.calls.map((entry, callIndex) => (
-                      <ToolCallCard key={`${item.key}:${callIndex}:${entry.call.id || entry.result?.id || "call"}`} entry={entry} />
-                    ))}
+                    {item.calls.map((entry, callIndex) => {
+                      const cardKey = `${item.key}:${callIndex}:${entry.call.id || entry.result?.id || "call"}`;
+                      if (entry.call.name === "ask_user_questions") {
+                        const pending = pendingQuestions.find((pq) => pq.toolCallId === entry.call.id);
+                        return (
+                          <QuestionsToolCard
+                            key={cardKey}
+                            entry={entry}
+                            pending={pending}
+                            submitting={!!pending && submittingQuestions === pending.id}
+                            onSubmit={(record, answers) => void resolveQuestions(record, answers)}
+                          />
+                        );
+                      }
+                      return <ToolCallCard key={cardKey} entry={entry} />;
+                    })}
                   </div>
                 ) : (
                   <TranscriptMessage key={item.msg.id} msg={item.msg} pipelineMode={selected.mode === "pipeline"} onCtx={onBubbleCtx} />
@@ -1003,7 +1045,10 @@ export default function ChatView() {
               {liveReply && liveReply.text !== "" ? (
                 <LiveReplyBubble text={liveReply.text} pipelineMode={selected.mode === "pipeline"} caret={!liveReply.finished} />
               ) : (
-                (activeRun || sending) && (
+                (activeRun || sending) &&
+                /* while the model waits on an open question form the transcript
+                   shows the steps themselves, not idle typing dots */
+                pendingQuestions.length === 0 && (
                   <div className="flex gap-3">
                     <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
                       <Icon name={selected.mode === "pipeline" ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
@@ -1334,6 +1379,279 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Resolved steps parsed out of a persisted ask_user_questions tool result. */
+type ParsedQuestionAnswers = { question: string; source: string; answer?: string; description?: string }[];
+
+function parseQuestionAnswers(content: string): ParsedQuestionAnswers | null {
+  try {
+    const data = JSON.parse(content);
+    if (data && Array.isArray(data.answers)) return data.answers as ParsedQuestionAnswers;
+  } catch {
+    /* not a question result; the caller falls back to the generic card */
+  }
+  return null;
+}
+
+/**
+ * Dispatcher for ask_user_questions transcript cards: the interactive step
+ * form while the model waits for answers, the resolved step summary once the
+ * user replied, or a muted placeholder when the form was abandoned.
+ */
+function QuestionsToolCard({
+  entry,
+  pending,
+  submitting,
+  onSubmit,
+}: {
+  entry: ToolCallEntry;
+  pending?: ChatQuestions;
+  submitting: boolean;
+  onSubmit: (record: ChatQuestions, answers: ChatQuestionAnswer[]) => void;
+}) {
+  if (pending) return <QuestionsCard record={pending} submitting={submitting} onSubmit={onSubmit} />;
+  if (entry.result) {
+    const answers = parseQuestionAnswers(entry.result.content ?? "");
+    if (answers) return <QuestionsResultCard answers={answers} />;
+    return <ToolCallCard entry={entry} />;
+  }
+  return <QuestionsCancelledCard />;
+}
+
+/** Placeholder for a question form that was cancelled or expired before the
+ *  user answered; the skipped tool result keeps the transcript consistent. */
+function QuestionsCancelledCard() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-ink-700/70 bg-ink-850/50 px-3 py-2.5">
+      <Icon name="HelpCircle" className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+      <span className="text-[12px] text-fg-faint">{t("chat.questionsCancelled")}</span>
+    </div>
+  );
+}
+
+/** Read-only step summary of an answered (or skipped) question form. */
+function QuestionsResultCard({ answers }: { answers: ParsedQuestionAnswers }) {
+  const { t } = useTranslation();
+  if (answers.length === 0) {
+    return <QuestionsCancelledCard />;
+  }
+  return (
+    <div className="rounded-xl border border-ink-700/70 bg-ink-850/50 px-3.5 py-2.5">
+      <div className="flex items-center gap-2">
+        <Icon name="HelpCircle" className="h-3.5 w-3.5 shrink-0 text-violet-300/80" />
+        <span className="min-w-0 flex-1 text-[11.5px] font-medium text-fg-muted">{t("chat.questionsTitle")}</span>
+        <Icon name="Check" className="h-3.5 w-3.5 shrink-0 text-success-fg/80" />
+      </div>
+      <ol className="mt-2.5 space-y-2.5">
+        {answers.map((answer, index) => (
+          <li key={index} className="flex items-start gap-2.5">
+            <span className="mt-[1px] grid h-5 w-5 shrink-0 place-items-center rounded-full border border-ink-600 bg-ink-800 text-[10px] font-medium text-fg-subtle">
+              {index + 1}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[12px] leading-snug text-fg-subtle">{answer.question}</span>
+              {answer.source === "rejected" ? (
+                <span className="mt-0.5 block text-[11.5px] italic text-fg-faint">{t("chat.questionsSkipped")}</span>
+              ) : (
+                <span className="mt-1 block">
+                  <span className="inline-block rounded-md border border-ink-600 bg-ink-800 px-2 py-0.5 text-[11.5px] text-fg">{answer.answer}</span>
+                  {answer.description && (
+                    <span className="mt-0.5 block text-[11px] leading-snug text-fg-faint">{answer.description}</span>
+                  )}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/**
+ * Interactive step form for a paused ask_user_questions call. Every question
+ * is one step: pick one of the offered options (label plus description), type
+ * a custom answer, or skip the step. Submitting hands the answers to the
+ * backend, which feeds them to the model as the tool result and resumes the
+ * paused turn. The last interaction wins: picking an option or skipping
+ * clears the typed draft, typing always switches the step back to custom.
+ */
+function QuestionsCard({
+  record,
+  submitting,
+  onSubmit,
+}: {
+  record: ChatQuestions;
+  submitting: boolean;
+  onSubmit: (record: ChatQuestions, answers: ChatQuestionAnswer[]) => void;
+}) {
+  const { t } = useTranslation();
+  type Decision = { source: "option" | "custom" | "rejected"; label?: string; custom?: string };
+  const [decisions, setDecisions] = useState<Record<number, Decision>>({});
+  const [customDrafts, setCustomDrafts] = useState<Record<number, string>>({});
+
+  /** Sets or clears one step's decision; any non-custom choice clears the
+   *  typed draft so exactly one answer path is ever active per step. */
+  const setDecision = (index: number, decision: Decision | undefined) => {
+    setDecisions((cur) => {
+      const next = { ...cur };
+      if (decision) next[index] = decision;
+      else delete next[index];
+      return next;
+    });
+    if (!decision || decision.source !== "custom") {
+      setCustomDrafts((cur) => ({ ...cur, [index]: "" }));
+    }
+  };
+
+  const total = record.questions.length;
+  let answered = 0;
+  for (let index = 0; index < total; index++) {
+    const decision = decisions[index];
+    if (!decision) continue;
+    if (decision.source === "custom" && (decision.custom ?? "").trim() === "") continue;
+    answered++;
+  }
+
+  const submit = () => {
+    const answers: ChatQuestionAnswer[] = record.questions.map((question, index) => {
+      const decision = decisions[index];
+      const base = { question: question.question };
+      if (!decision) return { ...base, source: "rejected" as const };
+      if (decision.source === "option") return { ...base, source: "option" as const, chosenLabel: decision.label ?? "" };
+      if (decision.source === "custom") return { ...base, source: "custom" as const, custom: (decision.custom ?? "").trim() };
+      return { ...base, source: "rejected" as const };
+    });
+    onSubmit(record, answers);
+  };
+
+  const declineAll = () => {
+    const rejected: Record<number, Decision> = {};
+    record.questions.forEach((_, index) => {
+      rejected[index] = { source: "rejected" };
+    });
+    setDecisions(rejected);
+    setCustomDrafts({});
+  };
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-violet-500/30 bg-ink-850/70">
+      <div className="flex items-center gap-2 border-b border-seam px-3.5 py-2.5">
+        <Icon name="HelpCircle" className="h-4 w-4 shrink-0 text-violet-300/80" />
+        <span className="min-w-0 flex-1 text-[12.5px] font-medium text-fg">{t("chat.questionsTitle")}</span>
+        <span className="shrink-0 text-[10.5px] text-fg-faint">{t("chat.questionsProgress", { done: answered, total })}</span>
+      </div>
+      <ol className="space-y-4 px-3.5 py-3">
+        {record.questions.map((question, index) => {
+          const decision = decisions[index];
+          return (
+            <li key={index} className="space-y-2">
+              <div className="flex items-start gap-2.5">
+                <span
+                  className={cn(
+                    "mt-[1px] grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[10px] font-medium",
+                    decision ? "border-violet-400/50 bg-violet-500/15 text-violet-200" : "border-ink-600 bg-ink-800 text-fg-subtle",
+                  )}
+                >
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1 text-[12.5px] leading-snug text-fg">{question.question}</span>
+                <button
+                  type="button"
+                  onClick={() => setDecision(index, decision?.source === "rejected" ? undefined : { source: "rejected" })}
+                  disabled={submitting}
+                  className={cn(
+                    "shrink-0 rounded-md px-2 py-0.5 text-[10.5px] transition disabled:opacity-50",
+                    decision?.source === "rejected"
+                      ? "bg-ink-700 text-fg-muted"
+                      : "text-fg-faint hover:bg-ink-800 hover:text-fg-subtle",
+                  )}
+                >
+                  {t("chat.questionsSkip")}
+                </button>
+              </div>
+              {(question.options?.length ?? 0) > 0 && (
+                <div className="space-y-1.5">
+                  {question.options!.map((option) => {
+                    const active = decision?.source === "option" && decision.label === option.label;
+                    return (
+                      <button
+                        key={option.label}
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setDecision(index, { source: "option", label: option.label })}
+                        className={cn(
+                          "flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition disabled:opacity-60",
+                          active
+                            ? "border-violet-400/50 bg-violet-500/10"
+                            : "border-ink-700 bg-ink-850/60 hover:border-ink-500 hover:bg-ink-800/70",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "mt-[2px] grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border",
+                            active ? "border-violet-300" : "border-ink-500",
+                          )}
+                        >
+                          {active && <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className={cn("block text-[12px] leading-snug", active ? "text-fg" : "text-fg-subtle")}>{option.label}</span>
+                          {option.description && (
+                            <span className="mt-0.5 block text-[11px] leading-snug text-fg-faint">{option.description}</span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <input
+                value={customDrafts[index] ?? ""}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCustomDrafts((cur) => ({ ...cur, [index]: value }));
+                  setDecisions((cur) => ({ ...cur, [index]: { source: "custom", custom: value } }));
+                }}
+                placeholder={t("chat.questionsOwnPlaceholder")}
+                disabled={submitting}
+                className={cn(
+                  "h-8 w-full rounded-md border bg-ink-900 px-2.5 text-[12px] text-fg placeholder:text-fg-faint focus:outline-none disabled:opacity-60",
+                  decision?.source === "custom" ? "border-violet-400/50 focus:border-violet-300/60" : "border-ink-700 focus:border-ink-400",
+                )}
+              />
+            </li>
+          );
+        })}
+      </ol>
+      <div className="flex items-center gap-2 border-t border-seam px-3.5 py-2.5">
+        <button
+          type="button"
+          onClick={declineAll}
+          disabled={submitting}
+          className="rounded-md px-2 py-1 text-[11px] text-fg-faint transition hover:bg-ink-800 hover:text-fg-subtle disabled:opacity-50"
+        >
+          {t("chat.questionsDeclineAll")}
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={answered < total || submitting}
+          className={cn(
+            "ml-auto flex h-7 items-center gap-1.5 rounded-md px-3 text-[11.5px] font-medium transition",
+            answered < total || submitting
+              ? "cursor-not-allowed bg-ink-800 text-fg-faint"
+              : "bg-ink-50 text-fg-onEmphasis hover:bg-ink-25",
+          )}
+        >
+          {submitting && <Icon name="Loader2" className="h-3 w-3 animate-spin" />}
+          {t("chat.questionsSubmit")}
+        </button>
+      </div>
     </div>
   );
 }

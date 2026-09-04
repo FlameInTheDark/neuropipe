@@ -185,6 +185,18 @@ CREATE TABLE IF NOT EXISTS chat_approvals (
   resolved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS chat_approvals_conversation_status ON chat_approvals(conversation_id, status, created_at ASC);
+CREATE TABLE IF NOT EXISTS chat_questions (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  chat_run_id TEXT NOT NULL REFERENCES chat_runs(id) ON DELETE CASCADE,
+  tool_call_id TEXT NOT NULL DEFAULT '',
+  questions_json TEXT NOT NULL,
+  answers_json TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS chat_questions_conversation_status ON chat_questions(conversation_id, status, created_at ASC);
 CREATE TABLE IF NOT EXISTS chat_tool_grants (
   conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
   tool_name TEXT NOT NULL,
@@ -2038,6 +2050,76 @@ func (s *Store) CancelChatApprovalsForRun(ctx context.Context, chatRunID string)
 	return nil
 }
 
+// CreateChatQuestions persists a paused ask_user_questions call until the
+// user's answers arrive.
+func (s *Store) CreateChatQuestions(ctx context.Context, record domain.ChatQuestions) (domain.ChatQuestions, error) {
+	record.ID = uuid.NewString()
+	record.Status = domain.ChatQuestionsPending
+	record.CreatedAt = time.Now().UTC()
+	questions, err := encode(record.Questions)
+	if err != nil {
+		return domain.ChatQuestions{}, fmt.Errorf("encode chat questions: %w", err)
+	}
+	_, err = statements(s.db).Insert("chat_questions").Columns("id", "conversation_id", "chat_run_id", "tool_call_id", "questions_json", "answers_json", "status", "created_at", "resolved_at").Values(record.ID, record.ConversationID, record.ChatRunID, record.ToolCallID, questions, "", record.Status, stamp(record.CreatedAt), nil).ExecContext(ctx)
+	if err != nil {
+		return domain.ChatQuestions{}, fmt.Errorf("create chat questions: %w", err)
+	}
+	return record, nil
+}
+
+// ListPendingChatQuestions returns unanswered question forms for one transcript.
+func (s *Store) ListPendingChatQuestions(ctx context.Context, conversationID string) ([]domain.ChatQuestions, error) {
+	rows, err := statements(s.db).Select(chatQuestionsColumns).From("chat_questions").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID), "status": domain.ChatQuestionsPending}).OrderBy("created_at ASC").QueryContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list chat questions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]domain.ChatQuestions, 0)
+	for rows.Next() {
+		item, err := scanChatQuestions(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// GetChatQuestions resolves a single persisted question form.
+func (s *Store) GetChatQuestions(ctx context.Context, id string) (domain.ChatQuestions, error) {
+	row := statements(s.db).Select(chatQuestionsColumns).From("chat_questions").Where(squirrel.Eq{"id": strings.TrimSpace(id)}).QueryRowContext(ctx)
+	return scanChatQuestions(row)
+}
+
+// ResolveChatQuestions atomically transitions one pending form to its final
+// status and stores the submitted answers for transcript rendering.
+func (s *Store) ResolveChatQuestions(ctx context.Context, id, status string, answers []domain.ChatQuestionAnswer) (domain.ChatQuestions, error) {
+	now := time.Now().UTC()
+	encoded, err := encode(answers)
+	if err != nil {
+		return domain.ChatQuestions{}, fmt.Errorf("encode chat question answers: %w", err)
+	}
+	result, err := statements(s.db).Update("chat_questions").Set("status", status).Set("answers_json", encoded).Set("resolved_at", stamp(now)).Where(squirrel.Eq{"id": strings.TrimSpace(id), "status": domain.ChatQuestionsPending}).ExecContext(ctx)
+	if err != nil {
+		return domain.ChatQuestions{}, fmt.Errorf("resolve chat questions: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		return domain.ChatQuestions{}, fmt.Errorf("chat questions %q are no longer pending", id)
+	}
+	return s.GetChatQuestions(ctx, id)
+}
+
+// CancelChatQuestionsForRun retires outstanding question forms when a user
+// stops a turn. An abandoned turn must never wait for answers again.
+func (s *Store) CancelChatQuestionsForRun(ctx context.Context, chatRunID string) error {
+	now := time.Now().UTC()
+	_, err := statements(s.db).Update("chat_questions").Set("status", domain.ChatQuestionsCancelled).Set("resolved_at", stamp(now)).Where(squirrel.Eq{"chat_run_id": strings.TrimSpace(chatRunID), "status": domain.ChatQuestionsPending}).ExecContext(ctx)
+	if err != nil {
+		return fmt.Errorf("cancel chat questions: %w", err)
+	}
+	return nil
+}
+
 // HasChatToolGrant reports whether a conversation's explicit always-allow
 // choice still matches the published revision targeted by a pipeline tool.
 func (s *Store) HasChatToolGrant(ctx context.Context, conversationID, toolName, targetID string, revision int) (bool, error) {
@@ -2275,6 +2357,8 @@ type chatConversationScanner interface{ Scan(...any) error }
 
 type chatApprovalScanner interface{ Scan(...any) error }
 
+type chatQuestionsScanner interface{ Scan(...any) error }
+
 // chatConversationColumns is the shared projection for every conversation
 // read so scanChatConversation can stay in sync with the schema.
 const chatConversationColumns = "id, mode, title, pipeline_id, trigger_binding_id, action_policy, provider_id, model, reasoning, tool_ids_json, renamed_at, created_at, updated_at"
@@ -2315,6 +2399,35 @@ func scanChatApproval(scanner chatApprovalScanner) (domain.ChatApproval, error) 
 		approval.ResolvedAt = &value
 	}
 	return approval, nil
+}
+
+// chatQuestionsColumns is the shared projection for every question-form read
+// so scanChatQuestions stays in sync with the schema.
+const chatQuestionsColumns = "id, conversation_id, chat_run_id, tool_call_id, questions_json, answers_json, status, created_at, resolved_at"
+
+func scanChatQuestions(scanner chatQuestionsScanner) (domain.ChatQuestions, error) {
+	var record domain.ChatQuestions
+	var questions, answers, created string
+	var resolved sql.NullString
+	if err := scanner.Scan(&record.ID, &record.ConversationID, &record.ChatRunID, &record.ToolCallID, &questions, &answers, &record.Status, &created, &resolved); err != nil {
+		return domain.ChatQuestions{}, fmt.Errorf("scan chat questions: %w", err)
+	}
+	if strings.TrimSpace(questions) != "" {
+		if err := decode(questions, &record.Questions); err != nil {
+			return domain.ChatQuestions{}, fmt.Errorf("decode chat questions: %w", err)
+		}
+	}
+	if strings.TrimSpace(answers) != "" {
+		if err := decode(answers, &record.Answers); err != nil {
+			return domain.ChatQuestions{}, fmt.Errorf("decode chat question answers: %w", err)
+		}
+	}
+	record.CreatedAt = parseTime(created)
+	if resolved.Valid {
+		value := parseTime(resolved.String)
+		record.ResolvedAt = &value
+	}
+	return record, nil
 }
 
 func scanBinding(scanner bindingScanner) (domain.TriggerBinding, error) {
