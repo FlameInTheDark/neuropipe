@@ -25,7 +25,7 @@ const (
 )
 
 // systemGuidance is the tiny always-present pointer injected before model turns when authoring tools exist. Deep documentation is tool-fetched.
-const systemGuidance = "You are Neuropipe automation assistant with access to the user local pipelines, reports and executions. You can also AUTHOR automations: read get_authoring_guide first, discover nodes via list_nodes/get_node_contract (always fetch a node contract before using that node type), build Blueprint v3 definitions, save them as drafts with save_pipeline_draft / save_function_draft (validation errors come back in the result - fix them), and only then offer publish_* which requires user approval. Deleting anything also requires approval."
+const systemGuidance = "You are Neuropipe automation assistant with access to the user local pipelines, reports and executions. You can also AUTHOR automations: read get_authoring_guide first, discover nodes via list_nodes/get_node_contract (always fetch a node contract before using that node type), build Blueprint v3 definitions, save them as drafts with save_pipeline_draft / save_function_draft (validation errors come back in the result - fix them), and only then offer publish_* which requires user approval. Deleting anything also requires approval. When the user asks you to write up, summarize, or document something for later, save it as a Markdown report with create_report instead of only printing it in the chat."
 
 // renameGuidance is injected before model turns while the conversation still
 // carries the model-owned rename. Once rename_conversation succeeds the tool
@@ -671,6 +671,20 @@ func (s *Service) toolResult(ctx context.Context, conversation domain.ChatConver
 			return nil, err
 		}
 		return map[string]any{"deleted": id}, nil
+	case "create_report":
+		markdown := stringArg(call.Arguments, "markdown")
+		if markdown == "" {
+			return nil, fmt.Errorf("markdown is required")
+		}
+		report, err := s.store.CreateReport(ctx, domain.Report{
+			Title:    stringArg(call.Arguments, "title"),
+			Markdown: markdown,
+			Tags:     stringSliceArg(call.Arguments, "tags"),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"reportId": report.ID, "title": report.Title, "tags": report.Tags, "createdAt": report.CreatedAt, "note": "Report saved to the local workspace."}, nil
 	case "get_execution":
 		return s.store.GetExecution(ctx, stringArg(call.Arguments, "executionId"))
 	case "list_nodes":
@@ -966,6 +980,26 @@ func stringArg(arguments map[string]any, key string) string {
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
+// stringSliceArg reads a JSON array of strings from tool arguments, skipping
+// empty entries so providers that degrade arrays to nested values still
+// produce clean tag lists.
+func stringSliceArg(arguments map[string]any, key string) []string {
+	items, ok := arguments[key].([]any)
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		if value := strings.TrimSpace(fmt.Sprint(item)); value != "" {
+			values = append(values, value)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
 func stateChanging(name string) bool {
 	switch name {
 	case "run_pipeline", "send_to_chat_pipeline", "delete_report",
@@ -994,6 +1028,8 @@ func toolSummary(call domain.ChatToolCall) string {
 		return "Ran chat pipeline"
 	case "delete_report":
 		return "Deleted report"
+	case "create_report":
+		return "Created report"
 	case "read_report":
 		return "Read report"
 	case "list_reports":
@@ -1055,6 +1091,7 @@ func (s *Service) toolDefinitions(ctx context.Context, conversation domain.ChatC
 		{Name: "send_to_chat_pipeline", Description: "Send explicit text to a published chat pipeline binding and wait for its replies.", InputSchema: object(map[string]any{"bindingId": text("Chat trigger binding ID"), "text": text("Message to send")}, "bindingId", "text")},
 		{Name: "list_reports", Description: "List and filter recent local pipeline reports.", InputSchema: object(map[string]any{"query": text("Optional title or pipeline search"), "pipelineId": text("Optional pipeline ID"), "tag": text("Optional report tag")})},
 		{Name: "read_report", Description: "Read one local report by ID.", InputSchema: object(map[string]any{"reportId": text("Report ID")}, "reportId")},
+		{Name: "create_report", Description: "Create and save a new standalone Markdown report in the local workspace; it appears in the Reports view and can be read with read_report later. Use it whenever the user asks to keep, save, write up, or document results, summaries, research findings, or instructions - the content must be complete, well-structured Markdown.", InputSchema: object(map[string]any{"title": text("Short report title shown in the Reports list"), "markdown": text("Full report body in Markdown"), "tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional short topic tags, e.g. [\"research\", \"weekly\"]"}}, "title", "markdown")},
 		{Name: "delete_report", Description: "Permanently delete one local report by ID.", InputSchema: object(map[string]any{"reportId": text("Report ID")}, "reportId")},
 		{Name: "get_execution", Description: "Inspect a pipeline execution by ID.", InputSchema: object(map[string]any{"executionId": text("Execution ID")}, "executionId")},
 	}

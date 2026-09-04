@@ -528,7 +528,8 @@ export const ru: typeof en = {
     deleteFailed: "Не удалось удалить отчёт",
     deleteTitle: "Удалить отчёт?",
     deleteDescription: "Удалить «{{name}}»? Будет удалён только сохранённый отчёт.",
-    deleteConfirm: "Удалить отчёт",
+        deleteConfirm: "Удалить отчёт",
+    standaloneSource: "Автономный отчёт",
   },
   functions: {
     title: "Функции",

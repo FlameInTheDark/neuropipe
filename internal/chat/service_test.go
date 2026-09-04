@@ -802,3 +802,140 @@ func dumpString(messages []domain.ChatMessage) string {
 	}
 	return strings.Join(parts, " | ")
 }
+
+type reportSequenceAssistant struct {
+	mu    sync.Mutex
+	round int
+}
+
+func (a *reportSequenceAssistant) Converse(_ context.Context, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.round++
+	switch a.round {
+	case 1:
+		return domain.AssistantChatResponse{ToolCalls: []domain.ChatToolCall{{ID: "report-1", Name: "create_report", Arguments: map[string]any{
+			"title":    "Weekly digest",
+			"markdown": "# Weekly digest\n\nAll systems nominal.",
+			"tags":     []any{"weekly", "ops"},
+		}}}}, nil
+	default:
+		return domain.AssistantChatResponse{Content: "Report saved"}, nil
+	}
+}
+
+func TestCreateReportToolPersistsStandaloneReport(t *testing.T) {
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	service := NewService(store, nil, &reportSequenceAssistant{}, nil)
+	service.Start(context.Background())
+	defer service.Stop()
+	ctx := context.Background()
+	conversation, err := service.CreateConversation(ctx, domain.ChatConversation{Mode: domain.ChatModeModel, Title: "Reports"})
+	if err != nil {
+		t.Fatalf("CreateConversation() error = %v", err)
+	}
+	run, err := service.Send(ctx, conversation.ID, "Write up what you found this week")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	waitForRunStatus(t, store, run.ID, domain.RunCompleted)
+
+	reports, err := store.ListReports(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListReports() error = %v", err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("report count = %d, want the assistant-created report", len(reports))
+	}
+	got := reports[0]
+	if got.Title != "Weekly digest" || got.PipelineID != "" || got.ExecutionID != "" || got.PipelineName != "" {
+		t.Fatalf("report = %#v, want a standalone persisted report", got)
+	}
+	if !strings.Contains(got.Markdown, "All systems nominal.") {
+		t.Fatalf("markdown = %q, want the model-provided body", got.Markdown)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != "weekly" || got.Tags[1] != "ops" {
+		t.Fatalf("tags = %#v, want [weekly ops]", got.Tags)
+	}
+	fetched, err := store.GetReport(ctx, got.ID)
+	if err != nil || fetched.ID != got.ID || fetched.Markdown != got.Markdown {
+		t.Fatalf("GetReport() = %#v, %v", fetched, err)
+	}
+
+	messages, err := store.ListChatMessages(ctx, conversation.ID, 20)
+	if err != nil {
+		t.Fatalf("ListChatMessages() error = %v", err)
+	}
+	foundToolResult := false
+	for _, message := range messages {
+		if message.Role == domain.ChatRoleTool && message.ToolName == "create_report" && strings.Contains(message.Content, "reportId") {
+			foundToolResult = true
+		}
+	}
+	if !foundToolResult {
+		t.Fatalf("transcript misses the create_report tool result: %s", dumpString(messages))
+	}
+	last := messages[len(messages)-1]
+	if last.Role != domain.ChatRoleAssistant || last.Content != "Report saved" {
+		t.Fatalf("last message = %#v, want the resumed assistant reply", last)
+	}
+}
+
+type reportErrorSequenceAssistant struct {
+	mu    sync.Mutex
+	round int
+}
+
+func (a *reportErrorSequenceAssistant) Converse(_ context.Context, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.round++
+	switch a.round {
+	case 1:
+		return domain.AssistantChatResponse{ToolCalls: []domain.ChatToolCall{{ID: "report-err", Name: "create_report", Arguments: map[string]any{"title": "Empty"}}}}, nil
+	default:
+		for _, message := range request.Messages {
+			if message.Role == domain.ChatRoleTool && strings.Contains(message.Content, "markdown is required") {
+				return domain.AssistantChatResponse{Content: "Noted the failure"}, nil
+			}
+		}
+		return domain.AssistantChatResponse{}, fmt.Errorf("tool error did not reach the model as a tool result")
+	}
+}
+
+func TestCreateReportToolRejectsEmptyMarkdownWithoutFailingRun(t *testing.T) {
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	service := NewService(store, nil, &reportErrorSequenceAssistant{}, nil)
+	service.Start(context.Background())
+	defer service.Stop()
+	ctx := context.Background()
+	conversation, err := service.CreateConversation(ctx, domain.ChatConversation{Mode: domain.ChatModeModel, Title: "Reports"})
+	if err != nil {
+		t.Fatalf("CreateConversation() error = %v", err)
+	}
+	run, err := service.Send(ctx, conversation.ID, "Save an empty report")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	waitForRunStatus(t, store, run.ID, domain.RunCompleted)
+
+	if reports, listErr := store.ListReports(ctx, 10); listErr != nil || len(reports) != 0 {
+		t.Fatalf("ListReports() = %#v, %v; want no reports", reports, listErr)
+	}
+	messages, err := store.ListChatMessages(ctx, conversation.ID, 20)
+	if err != nil {
+		t.Fatalf("ListChatMessages() error = %v", err)
+	}
+	last := messages[len(messages)-1]
+	if last.Role != domain.ChatRoleAssistant || last.Content != "Noted the failure" {
+		t.Fatalf("last message = %#v, want the run to continue after the tool error", last)
+	}
+}

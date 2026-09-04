@@ -528,7 +528,8 @@ export const fr: typeof en = {
     deleteFailed: "Impossible de supprimer le rapport",
     deleteTitle: "Supprimer le rapport ?",
     deleteDescription: "Supprimer « {{name}} » ? Cela ne supprime que ce rapport enregistré.",
-    deleteConfirm: "Supprimer le rapport",
+        deleteConfirm: "Supprimer le rapport",
+    standaloneSource: "Rapport autonome",
   },
   functions: {
     title: "Fonctions",

@@ -534,7 +534,8 @@ export const en = {
     deleteFailed: "Unable to delete report",
     deleteTitle: "Delete report?",
     deleteDescription: "Delete “{{name}}”? This only removes this saved report.",
-    deleteConfirm: "Delete report",
+        deleteConfirm: "Delete report",
+    standaloneSource: "Standalone report",
   },
   functions: {
     title: "Functions",

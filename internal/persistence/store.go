@@ -117,9 +117,9 @@ CREATE TABLE IF NOT EXISTS node_runs (
 );
 CREATE TABLE IF NOT EXISTS reports (
   id TEXT PRIMARY KEY,
-  pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
-  execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
-  node_id TEXT NOT NULL,
+  pipeline_id TEXT NOT NULL DEFAULT '',
+  execution_id TEXT NOT NULL DEFAULT '',
+  node_id TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL,
   tags_json TEXT NOT NULL DEFAULT '[]',
   markdown TEXT NOT NULL,
@@ -434,6 +434,9 @@ CREATE TABLE IF NOT EXISTS remote_executors (
 	if err := s.ensureReportTagsColumn(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureReportsStandalone(ctx); err != nil {
+		return err
+	}
 	if err := s.ensurePipelineIconColumn(ctx); err != nil {
 		return err
 	}
@@ -477,6 +480,46 @@ func (s *Store) ensureReportTagsColumn(ctx context.Context) error {
 	}
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE reports ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
 		return fmt.Errorf("add reports tags column: %w", err)
+	}
+	return nil
+}
+
+// ensureReportsStandalone lets reports exist without pipeline provenance so
+// assistant-authored reports can live in the same feed. Legacy workspaces
+// declared pipeline_id/execution_id as NOT NULL foreign keys, which no
+// standalone row could satisfy, so those tables are rebuilt without the
+// constraints. Existing rows keep every column value; deleting a pipeline or
+// execution simply stops providing the joined context instead of cascading
+// the report away.
+func (s *Store) ensureReportsStandalone(ctx context.Context) error {
+	var constraints int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_foreign_key_list('reports')`).Scan(&constraints); err != nil {
+		return fmt.Errorf("inspect reports foreign keys: %w", err)
+	}
+	if constraints == 0 {
+		return nil
+	}
+	statements := []string{
+		`CREATE TABLE reports_standalone (
+                        id TEXT PRIMARY KEY,
+                        pipeline_id TEXT NOT NULL DEFAULT '',
+                        execution_id TEXT NOT NULL DEFAULT '',
+                        node_id TEXT NOT NULL DEFAULT '',
+                        title TEXT NOT NULL,
+                        tags_json TEXT NOT NULL DEFAULT '[]',
+                        markdown TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                )`,
+		`INSERT INTO reports_standalone (id, pipeline_id, execution_id, node_id, title, tags_json, markdown, created_at)
+                        SELECT id, pipeline_id, execution_id, node_id, title, tags_json, markdown, created_at FROM reports`,
+		`DROP TABLE reports`,
+		`ALTER TABLE reports_standalone RENAME TO reports`,
+		`CREATE INDEX IF NOT EXISTS reports_created_at ON reports(created_at DESC)`,
+	}
+	for _, statement := range statements {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("rebuild reports without foreign keys: %w", err)
+		}
 	}
 	return nil
 }
@@ -1591,11 +1634,14 @@ func (s *Store) DeleteReport(ctx context.Context, id string) error {
 }
 
 // ListReports returns a newest-first feed with pipeline and execution context.
+// The joins are LEFT joins because assistant-authored reports carry no
+// pipeline or execution provenance, and reports can also outlive the pipeline
+// that once produced them.
 func (s *Store) ListReports(ctx context.Context, limit int) ([]domain.Report, error) {
 	if limit < 1 || limit > 250 {
 		limit = 100
 	}
-	rows, err := statements(s.db).Select("reports.id", "reports.pipeline_id", "pipelines.name", "reports.execution_id", "reports.node_id", "reports.title", "reports.tags_json", "reports.markdown", "reports.created_at", "executions.started_at").From("reports").Join("pipelines ON pipelines.id = reports.pipeline_id").Join("executions ON executions.id = reports.execution_id").OrderBy("reports.created_at DESC").Limit(uint64(limit)).QueryContext(ctx)
+	rows, err := statements(s.db).Select("reports.id", "reports.pipeline_id", "COALESCE(pipelines.name, '')", "reports.execution_id", "reports.node_id", "reports.title", "reports.tags_json", "reports.markdown", "reports.created_at", "COALESCE(executions.started_at, '')").From("reports").LeftJoin("pipelines ON pipelines.id = reports.pipeline_id").LeftJoin("executions ON executions.id = reports.execution_id").OrderBy("reports.created_at DESC").Limit(uint64(limit)).QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list reports: %w", err)
 	}
@@ -1623,7 +1669,7 @@ func (s *Store) ListReports(ctx context.Context, limit int) ([]domain.Report, er
 
 // GetReport returns one local report for assistant tools and report links.
 func (s *Store) GetReport(ctx context.Context, id string) (domain.Report, error) {
-	row := statements(s.db).Select("reports.id", "reports.pipeline_id", "pipelines.name", "reports.execution_id", "reports.node_id", "reports.title", "reports.tags_json", "reports.markdown", "reports.created_at", "executions.started_at").From("reports").Join("pipelines ON pipelines.id = reports.pipeline_id").Join("executions ON executions.id = reports.execution_id").Where(squirrel.Eq{"reports.id": strings.TrimSpace(id)}).QueryRowContext(ctx)
+	row := statements(s.db).Select("reports.id", "reports.pipeline_id", "COALESCE(pipelines.name, '')", "reports.execution_id", "reports.node_id", "reports.title", "reports.tags_json", "reports.markdown", "reports.created_at", "COALESCE(executions.started_at, '')").From("reports").LeftJoin("pipelines ON pipelines.id = reports.pipeline_id").LeftJoin("executions ON executions.id = reports.execution_id").Where(squirrel.Eq{"reports.id": strings.TrimSpace(id)}).QueryRowContext(ctx)
 	var report domain.Report
 	var created, executionStarted, tags string
 	if err := row.Scan(&report.ID, &report.PipelineID, &report.PipelineName, &report.ExecutionID, &report.NodeID, &report.Title, &tags, &report.Markdown, &created, &executionStarted); err != nil {

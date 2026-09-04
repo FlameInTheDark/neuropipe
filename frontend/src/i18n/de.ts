@@ -528,7 +528,8 @@ export const de: typeof en = {
     deleteFailed: "Bericht konnte nicht gelöscht werden",
     deleteTitle: "Bericht löschen?",
     deleteDescription: "„{{name}}“ löschen? Dies entfernt nur diesen gespeicherten Bericht.",
-    deleteConfirm: "Bericht löschen",
+        deleteConfirm: "Bericht löschen",
+    standaloneSource: "Eigenständiger Bericht",
   },
   functions: {
     title: "Funktionen",

@@ -280,17 +280,26 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                   {dateFmt.format(new Date(r.createdAt))}
                 </span>
                 <span className="mt-1 flex items-center gap-1.5 text-[10.5px] text-fg-faint">
-                  <Icon name="Cable" className="h-3 w-3" />
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openReportPipeline(r);
-                    }}
-                    title={t("reports.openPipeline")}
-                    className="truncate text-left transition hover:text-info-fg"
-                  >
-                    {r.pipelineName}
-                  </button>
+                  {r.pipelineId ? (
+                    <>
+                      <Icon name="Cable" className="h-3 w-3" />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReportPipeline(r);
+                        }}
+                        title={t("reports.openPipeline")}
+                        className="truncate text-left transition hover:text-info-fg"
+                      >
+                        {r.pipelineName}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="Bot" className="h-3 w-3" />
+                      <span className="truncate">{t("reports.standaloneSource")}</span>
+                    </>
+                  )}
                 </span>
                 {r.tags.length > 0 && (
                   <span className="mt-1.5 flex flex-wrap gap-1">
@@ -330,14 +339,23 @@ export function ReportsView({ workspace, nav }: { workspace: Workspace; nav: Nav
                   <Icon name="Clock" className="h-3 w-3" />
                   {dateFmt.format(new Date(active.createdAt))}
                   <span className="h-3 w-px bg-ink-700" />
-                  <Icon name="Cable" className="h-3 w-3" />
-                  <button
-                    onClick={() => openReportPipeline(active)}
-                    title={t("reports.openPipeline")}
-                    className="truncate transition hover:text-info-fg"
-                  >
-                    {active.pipelineName}
-                  </button>
+                  {active.pipelineId ? (
+                    <>
+                      <Icon name="Cable" className="h-3 w-3" />
+                      <button
+                        onClick={() => openReportPipeline(active)}
+                        title={t("reports.openPipeline")}
+                        className="truncate transition hover:text-info-fg"
+                      >
+                        {active.pipelineName}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="Bot" className="h-3 w-3" />
+                      <span className="truncate">{t("reports.standaloneSource")}</span>
+                    </>
+                  )}
                   {active.tags.length > 0 && (
                     <>
                       <span className="h-3 w-px bg-ink-700" />

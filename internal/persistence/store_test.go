@@ -311,6 +311,91 @@ func TestCreateAndListReportsIncludesPipelineAndExecutionContext(t *testing.T) {
 	}
 }
 
+func TestAssistantCreatesStandaloneReport(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	created, err := store.CreateReport(ctx, domain.Report{Title: "Chat digest", Markdown: "# Digest\n\nBody.", Tags: []string{"chat"}})
+	if err != nil {
+		t.Fatalf("CreateReport() error = %v", err)
+	}
+	if created.ID == "" || created.CreatedAt.IsZero() {
+		t.Fatalf("created report = %#v, want id and created timestamp", created)
+	}
+	reports, err := store.ListReports(ctx, 20)
+	if err != nil {
+		t.Fatalf("ListReports() error = %v", err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("report count = %d, want the standalone report", len(reports))
+	}
+	got := reports[0]
+	if got.ID != created.ID || got.PipelineID != "" || got.ExecutionID != "" || got.PipelineName != "" || !got.ExecutionStartedAt.IsZero() {
+		t.Fatalf("report feed item = %#v, want standalone provenance", got)
+	}
+	fetched, err := store.GetReport(ctx, created.ID)
+	if err != nil || fetched.Markdown != created.Markdown || fetched.Title != created.Title {
+		t.Fatalf("GetReport() = %#v, %v", fetched, err)
+	}
+	var constraints int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_list('reports')`).Scan(&constraints); err != nil {
+		t.Fatalf("inspect foreign keys: %v", err)
+	}
+	if constraints != 0 {
+		t.Fatalf("reports foreign keys = %d, want a standalone-capable schema", constraints)
+	}
+}
+
+func TestReportsTableMigratesToStandaloneSchema(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	database, err := sql.Open("sqlite3", filepath.Join(root, "neuropipe.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	legacy := []string{
+		`CREATE TABLE pipelines (id TEXT PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE executions (id TEXT PRIMARY KEY, started_at TEXT NOT NULL)`,
+		`CREATE TABLE reports (id TEXT PRIMARY KEY, pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE, execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE, node_id TEXT NOT NULL, title TEXT NOT NULL, tags_json TEXT NOT NULL DEFAULT '[]', markdown TEXT NOT NULL, created_at TEXT NOT NULL)`,
+		`INSERT INTO pipelines (id, name) VALUES ('p1', 'Daily briefing')`,
+		`INSERT INTO executions (id, started_at) VALUES ('e1', '2026-01-02T10:00:00Z')`,
+		`INSERT INTO reports (id, pipeline_id, execution_id, node_id, title, tags_json, markdown, created_at) VALUES ('r1', 'p1', 'e1', 'report', 'Briefing', '[]', '# Ready', '2026-01-02T11:00:00Z')`,
+	}
+	for _, statement := range legacy {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatalf("legacy setup %q: %v", statement, err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	store, err := New(root)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	var constraints int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_list('reports')`).Scan(&constraints); err != nil {
+		t.Fatalf("inspect foreign keys: %v", err)
+	}
+	if constraints != 0 {
+		t.Fatalf("reports foreign keys = %d, want the rebuilt standalone schema", constraints)
+	}
+	report, err := store.GetReport(context.Background(), "r1")
+	if err != nil {
+		t.Fatalf("GetReport() error = %v", err)
+	}
+	if report.PipelineName != "Daily briefing" || report.ExecutionStartedAt.IsZero() || report.Markdown != "# Ready" || report.PipelineID != "p1" {
+		t.Fatalf("migrated report = %#v, want preserved row with pipeline context", report)
+	}
+}
+
 func TestReportTagsColumnMigratesExistingWorkspace(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "data")
 	if err := os.MkdirAll(root, 0o700); err != nil {
