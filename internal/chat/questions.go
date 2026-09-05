@@ -247,7 +247,7 @@ func (s *Service) pauseForQuestions(ctx context.Context, conversation domain.Cha
 // matching result, which keeps the resumed transcript provider-valid, and
 // the model can repeat the call once the answers arrive.
 func (s *Service) skipToolCallForPause(ctx context.Context, conversationID, chatRunID string, call domain.ChatToolCall) {
-	result := "Skipped: the turn paused to ask the user a question before this tool could run. Call it again after the answers arrive if it is still needed."
+	result := "Skipped: the turn paused before this tool could run. Call it again on the next round if it is still needed."
 	_, _ = s.store.CreateChatMessage(ctx, domain.ChatMessage{ConversationID: conversationID, ChatRunID: chatRunID, Role: domain.ChatRoleTool, ToolCallID: call.ID, ToolName: call.Name, Content: result})
 	_, _ = s.store.AddChatRunEvent(ctx, domain.ChatRunEvent{ChatRunID: chatRunID, Kind: "tool", Summary: toolSummary(call), Detail: result, Status: domain.RunSkipped})
 }

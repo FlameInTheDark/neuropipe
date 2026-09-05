@@ -300,16 +300,42 @@ func contextSizeFor(params domain.GenerationParameters) int {
 
 // modelMessages converts the durable transcript into provider messages:
 // assistant tool calls become tool-call parts and tool results become
-// tool-result parts keyed by their call ID.
+// tool-result parts keyed by their call ID. Any orphaned assistant tool calls
+// (from interrupted, stopped, or cancelled turns) are automatically paired with
+// a synthetic tool-error response so provider validation never crashes.
 func modelMessages(messages []domain.ChatMessage) ([]aiprovider.Message, error) {
 	result := make([]aiprovider.Message, 0, len(messages))
+	unresolved := make(map[string]domain.ChatToolCall)
+	unresolvedOrder := make([]string, 0)
+
+	flushUnresolved := func() {
+		for _, id := range unresolvedOrder {
+			call := unresolved[id]
+			name := call.Name
+			if name == "" {
+				name = "tool"
+			}
+			result = append(result, aiprovider.NewToolMessage(aiprovider.ContentPart{
+				Type:       aiprovider.ContentPartTypeToolResult,
+				ToolCallID: id,
+				ToolName:   name,
+				Output:     &aiprovider.ToolResultOutput{Type: aiprovider.ToolOutputText, Text: "Tool error: tool execution was stopped, cancelled, or the tool does not exist."},
+			}))
+		}
+		unresolved = make(map[string]domain.ChatToolCall)
+		unresolvedOrder = unresolvedOrder[:0]
+	}
+
 	for _, message := range messages {
 		switch message.Role {
 		case domain.ChatRoleSystem:
+			flushUnresolved()
 			result = append(result, aiprovider.NewSystemMessage(message.Content))
 		case domain.ChatRoleUser:
+			flushUnresolved()
 			result = append(result, aiprovider.UserText(message.Content))
 		case domain.ChatRoleAssistant:
+			flushUnresolved()
 			parts := []aiprovider.ContentPart{}
 			if strings.TrimSpace(message.Content) != "" {
 				parts = append(parts, aiprovider.TextPart(message.Content))
@@ -325,12 +351,23 @@ func modelMessages(messages []domain.ChatMessage) ([]aiprovider.Message, error) 
 					ToolName:   call.Name,
 					Input:      arguments,
 				})
+				if call.ID != "" {
+					unresolved[call.ID] = call
+					unresolvedOrder = append(unresolvedOrder, call.ID)
+				}
 			}
 			if len(parts) == 0 {
 				parts = append(parts, aiprovider.TextPart(""))
 			}
 			result = append(result, aiprovider.NewAssistantMessage(parts...))
 		case domain.ChatRoleTool:
+			delete(unresolved, message.ToolCallID)
+			for i, id := range unresolvedOrder {
+				if id == message.ToolCallID {
+					unresolvedOrder = append(unresolvedOrder[:i], unresolvedOrder[i+1:]...)
+					break
+				}
+			}
 			result = append(result, aiprovider.NewToolMessage(aiprovider.ContentPart{
 				Type:       aiprovider.ContentPartTypeToolResult,
 				ToolCallID: message.ToolCallID,
@@ -341,6 +378,7 @@ func modelMessages(messages []domain.ChatMessage) ([]aiprovider.Message, error) 
 			return nil, fmt.Errorf("unsupported chat message role %q", message.Role)
 		}
 	}
+	flushUnresolved()
 	if len(result) == 0 {
 		result = append(result, aiprovider.UserText(""))
 	}

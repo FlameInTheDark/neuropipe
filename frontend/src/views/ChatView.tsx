@@ -514,6 +514,17 @@ export default function ChatView() {
         void refreshList();
         if (selectedId) void loadDetails(selectedId);
       }),
+      /* the model renamed its own conversation: the backend pushes the full
+         updated conversation the moment the tool runs, so the header and the
+         list retitle immediately instead of after a page reopen */
+      Events.On("chat.conversation.updated", (e: unknown) => {
+        const conv = extractPayload(e) as ChatConversation | null;
+        if (!conv?.id) return;
+        setConversations((cur) => {
+          const next = cur.some((c) => c.id === conv.id) ? cur.map((c) => (c.id === conv.id ? { ...c, ...conv } : c)) : [...cur, conv];
+          return next.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+        });
+      }),
       Events.On("chat.run.updated", () => {
         if (selectedId) void loadDetails(selectedId);
       }),

@@ -88,6 +88,54 @@ func TestModelMessagesConvertsTranscript(t *testing.T) {
 	}
 }
 
+func TestModelMessagesSynthesizesMissingToolResults(t *testing.T) {
+	// Replicates the scenario where a model calls two tools in parallel
+	// (e.g. t1 and t2), but t2 was never answered because the run paused or stopped.
+	messages, err := modelMessages([]domain.ChatMessage{
+		{Role: domain.ChatRoleUser, Content: "do things"},
+		{
+			Role: domain.ChatRoleAssistant,
+			ToolCalls: []domain.ChatToolCall{
+				{ID: "call_function_ol710acn85p7_1", Name: "save_pipeline_draft", Arguments: map[string]any{}},
+				{ID: "call_function_ol710acn85p7_2", Name: "publish_pipeline", Arguments: map[string]any{}},
+			},
+		},
+		{Role: domain.ChatRoleTool, ToolCallID: "call_function_ol710acn85p7_1", ToolName: "save_pipeline_draft", Content: `{"saved":true}`},
+		// Notice call_function_ol710acn85p7_2 is missing here!
+		{Role: domain.ChatRoleUser, Content: "retry prompt"},
+	})
+	if err != nil {
+		t.Fatalf("modelMessages() error = %v", err)
+	}
+
+	// Expected order:
+	// 0: user "do things"
+	// 1: assistant with tool calls
+	// 2: tool result for call 1
+	// 3: synthesized tool result for call 2 (flushed before user message!)
+	// 4: user "retry prompt"
+	if len(messages) != 5 {
+		t.Fatalf("len(messages) = %d, want 5 (including synthesized tool result for call 2)", len(messages))
+	}
+	synth := messages[3]
+	if synth.Role != "tool" || len(synth.Content) != 1 {
+		t.Fatalf("synthesized message = %#v, want tool message", synth)
+	}
+	synthPart := synth.Content[0]
+	if synthPart.ToolCallID != "call_function_ol710acn85p7_2" {
+		t.Errorf("synthesized tool call ID = %q, want call_function_ol710acn85p7_2", synthPart.ToolCallID)
+	}
+	if synthPart.ToolName != "publish_pipeline" {
+		t.Errorf("synthesized tool name = %q, want publish_pipeline", synthPart.ToolName)
+	}
+	if synthPart.Output == nil || !strings.Contains(synthPart.Output.Text, "Tool error") {
+		t.Errorf("synthesized tool output = %#v, want containing 'Tool error'", synthPart.Output)
+	}
+	if messages[4].Role != "user" || messages[4].Content[0].Text != "retry prompt" {
+		t.Errorf("last message = %#v, want user retry prompt", messages[4])
+	}
+}
+
 func TestModelMessagesKeepsEmptyTranscriptValid(t *testing.T) {
 	messages, err := modelMessages(nil)
 	if err != nil {

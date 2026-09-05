@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +21,12 @@ import (
 )
 
 const (
-	maxAssistantToolRounds = 8
+	// maxAssistantToolRounds is a runaway guard, not a feature limit. One turn
+	// may legitimately chain dozens of tool calls (research, multi-step
+	// authoring, questionnaires plus follow-up lookups), so the ceiling is
+	// deliberately high; it only exists to stop a model stuck in a loop from
+	// burning tokens forever.
+	maxAssistantToolRounds = 64
 	chatPipelineWait       = 90 * time.Second
 )
 
@@ -155,8 +161,9 @@ func (s *Service) Send(ctx context.Context, conversationID, text string) (domain
 		return domain.ChatRun{}, fmt.Errorf("message cannot be empty")
 	}
 	// A delivered message means the user moved on: close any open question
-	// forms first so the new turn starts from a provider-valid transcript.
+	// forms or pending approvals first so the new turn starts from a provider-valid transcript.
 	s.expirePendingQuestions(ctx, conversation.ID)
+	s.expirePendingApprovals(ctx, conversation.ID)
 	run, err := s.store.CreateChatRun(ctx, conversation.ID)
 	if err != nil {
 		return domain.ChatRun{}, err
@@ -243,7 +250,7 @@ func (s *Service) Cancel(ctx context.Context, chatRunID string) error {
 	if cancel != nil {
 		cancel()
 	}
-	if err := s.store.CancelChatApprovalsForRun(ctx, run.ID); err != nil {
+	if err := s.cancelApprovalsForRun(ctx, run); err != nil {
 		return err
 	}
 	if err := s.cancelQuestionsForRun(ctx, run); err != nil {
@@ -262,6 +269,59 @@ func (s *Service) Cancel(ctx context.Context, chatRunID string) error {
 	}
 	s.emitUpdate(run.ID)
 	return nil
+}
+
+func (s *Service) expirePendingApprovals(ctx context.Context, conversationID string) {
+	pending, err := s.store.ListPendingChatApprovals(ctx, conversationID)
+	if err != nil {
+		return
+	}
+	for _, record := range pending {
+		if _, err := s.store.ResolveChatApproval(ctx, record.ID, false); err != nil {
+			continue
+		}
+		result := "The user sent a new message without approving this action. Treat this action as denied."
+		_, _ = s.store.CreateChatMessage(ctx, domain.ChatMessage{
+			ConversationID: record.ConversationID,
+			ChatRunID:      record.ChatRunID,
+			Role:           domain.ChatRoleTool,
+			ToolCallID:     record.ToolCall.ID,
+			ToolName:       record.ToolCall.Name,
+			Content:        result,
+		})
+		_, _ = s.store.AddChatRunEvent(ctx, domain.ChatRunEvent{
+			ChatRunID: record.ChatRunID,
+			Kind:      "approval",
+			Summary:   "Approval denied by new message",
+			Detail:    result,
+			Status:    domain.RunCompleted,
+		})
+		if run, runErr := s.store.GetChatRun(ctx, record.ChatRunID); runErr == nil && !isFinished(run.Status) {
+			_ = s.store.UpdateChatRun(ctx, record.ChatRunID, domain.RunCancelled, "Superseded", run.ExecutionID, "Superseded by a new message")
+		}
+	}
+}
+
+func (s *Service) cancelApprovalsForRun(ctx context.Context, run domain.ChatRun) error {
+	approvals, err := s.store.ListPendingChatApprovals(ctx, run.ConversationID)
+	if err != nil {
+		return err
+	}
+	for _, approval := range approvals {
+		if approval.ChatRunID != run.ID {
+			continue
+		}
+		result := "The turn was stopped before this action was approved."
+		_, _ = s.store.CreateChatMessage(ctx, domain.ChatMessage{
+			ConversationID: approval.ConversationID,
+			ChatRunID:      approval.ChatRunID,
+			Role:           domain.ChatRoleTool,
+			ToolCallID:     approval.ToolCall.ID,
+			ToolName:       approval.ToolCall.Name,
+			Content:        result,
+		})
+	}
+	return s.store.CancelChatApprovalsForRun(ctx, run.ID)
 }
 
 func (s *Service) enqueue(ctx context.Context, job modelJob) error {
@@ -325,7 +385,7 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 		}
 	}
 	if toolRounds >= maxAssistantToolRounds {
-		s.failRun(job.chatRunID, fmt.Errorf("assistant reached the %d-tool safety limit", maxAssistantToolRounds))
+		s.failRun(job.chatRunID, fmt.Errorf("assistant hit the runaway guard of %d tool rounds in one turn", maxAssistantToolRounds))
 		return
 	}
 	metricContext := domain.LLMMetricContext{ChatRunID: job.chatRunID, PipelineID: conversation.PipelineID, Origin: "chat"}
@@ -378,6 +438,13 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 	}
 	_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleAssistant, Content: response.Content, ToolCalls: response.ToolCalls})
 	for index, call := range response.ToolCalls {
+		if runCtx.Err() != nil || s.isStopped(job.chatRunID) {
+			for _, remaining := range response.ToolCalls[index:] {
+				s.skipToolCallForPause(runCtx, conversation.ID, job.chatRunID, remaining)
+			}
+			s.finishStopped(job.chatRunID)
+			return
+		}
 		// The clarification form parks the turn: its result is only written
 		// once the user submits answers, so it must be handled before the
 		// regular execute path.
@@ -398,6 +465,8 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 				s.skipToolCallForPause(runCtx, conversation.ID, job.chatRunID, sibling)
 			}
 			if err := s.pauseForQuestions(runCtx, conversation, job.chatRunID, call, questions); err != nil {
+				result := "Tool failed: " + err.Error()
+				_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleTool, ToolCallID: call.ID, ToolName: call.Name, Content: result})
 				if runCtx.Err() != nil || s.isStopped(job.chatRunID) {
 					s.finishStopped(job.chatRunID)
 					return
@@ -409,12 +478,22 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 		}
 		requiresApproval, approvalErr := s.requiresApproval(runCtx, conversation, call)
 		if approvalErr != nil {
-			s.failRun(job.chatRunID, approvalErr)
-			return
+			result := "Tool failed: " + approvalErr.Error()
+			_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleTool, ToolCallID: call.ID, ToolName: call.Name, Content: result})
+			_, _ = s.store.AddChatRunEvent(runCtx, domain.ChatRunEvent{ChatRunID: job.chatRunID, Kind: "tool", Summary: toolSummary(call), Detail: result, Status: domain.RunFailed})
+			continue
 		}
 		if requiresApproval {
+			// Sibling tool calls in the same response stay unexecuted while
+			// the approval is open; explicit skip results keep the resumed
+			// transcript provider-valid.
+			for _, sibling := range response.ToolCalls[index+1:] {
+				s.skipToolCallForPause(runCtx, conversation.ID, job.chatRunID, sibling)
+			}
 			approval, err := s.store.CreateChatApproval(runCtx, domain.ChatApproval{ConversationID: conversation.ID, ChatRunID: job.chatRunID, ToolCall: call})
 			if err != nil {
+				result := "Tool failed: " + err.Error()
+				_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleTool, ToolCallID: call.ID, ToolName: call.Name, Content: result})
 				if runCtx.Err() != nil || s.isStopped(job.chatRunID) {
 					s.finishStopped(job.chatRunID)
 					return
@@ -584,6 +663,13 @@ func (s *Service) toolResult(ctx context.Context, conversation domain.ChatConver
 		updated, err := s.store.RenameChatConversation(ctx, conversation.ID, title)
 		if err != nil {
 			return nil, err
+		}
+		// Push the new title the moment the tool runs instead of waiting
+		// for the turn to finish: the UI patches the conversation in
+		// place from this event, so the header and list never show a
+		// stale name.
+		if s.emit != nil {
+			s.emit("chat.conversation.updated", updated)
 		}
 		return map[string]any{"renamed": true, "title": updated.Title}, nil
 	case "list_pipelines":
@@ -790,7 +876,107 @@ func (s *Service) authoringToolResult(ctx context.Context, call domain.ChatToolC
 		}
 		return map[string]any{"deleted": id}, nil
 	default:
-		return nil, fmt.Errorf("unknown tool %q", call.Name)
+		return nil, fmt.Errorf("tool %q does not exist; check available tools in tool definitions", call.Name)
+	}
+}
+
+// normalizeDefinitionMap repairs common LLM structural mistakes before JSON decoding:
+// - single edge object instead of []FlowEdge
+// - single node object or columnar node dictionary instead of []FlowNode
+// - string "3" for schemaVersion
+// - string numeric coordinates in node positions and viewport
+func normalizeDefinitionMap(raw map[string]any) {
+	if raw == nil {
+		return
+	}
+
+	// 1. schemaVersion coercion
+	if verStr, ok := raw["schemaVersion"].(string); ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(verStr)); err == nil {
+			raw["schemaVersion"] = n
+		}
+	} else if raw["schemaVersion"] == nil {
+		raw["schemaVersion"] = domain.GraphSchemaV3
+	}
+
+	// 2. edges normalization (single object -> 1-element array)
+	if edgeMap, ok := raw["edges"].(map[string]any); ok {
+		raw["edges"] = []any{edgeMap}
+	} else if raw["edges"] == nil {
+		raw["edges"] = []any{}
+	}
+
+	// 3. nodes normalization
+	if nodeMap, ok := raw["nodes"].(map[string]any); ok {
+		// Detect columnar format: {"id": [...], "type": [...], "data": [...], "position": [...]}
+		ids, hasIDs := nodeMap["id"].([]any)
+		types, hasTypes := nodeMap["type"].([]any)
+		if hasIDs || hasTypes {
+			n := len(ids)
+			if len(types) > n {
+				n = len(types)
+			}
+			datas, _ := nodeMap["data"].([]any)
+			positions, _ := nodeMap["position"].([]any)
+			rowNodes := make([]any, 0, n)
+			for i := 0; i < n; i++ {
+				node := make(map[string]any)
+				if i < len(ids) {
+					node["id"] = ids[i]
+				}
+				if i < len(types) {
+					node["type"] = types[i]
+				}
+				if i < len(positions) {
+					node["position"] = positions[i]
+				}
+				if i < len(datas) {
+					node["data"] = datas[i]
+				}
+				rowNodes = append(rowNodes, node)
+			}
+			raw["nodes"] = rowNodes
+		} else if idVal, ok := nodeMap["id"].(string); ok && idVal != "" {
+			// Single node object
+			raw["nodes"] = []any{nodeMap}
+		} else if typeVal, ok := nodeMap["type"].(string); ok && typeVal != "" {
+			raw["nodes"] = []any{nodeMap}
+		}
+	} else if raw["nodes"] == nil {
+		raw["nodes"] = []any{}
+	}
+
+	// 4. Coordinates normalization in nodes (position.x / position.y as strings)
+	if nodesSlice, ok := raw["nodes"].([]any); ok {
+		for _, item := range nodesSlice {
+			nMap, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if pos, ok := nMap["position"].(map[string]any); ok {
+				if xStr, ok := pos["x"].(string); ok {
+					if xVal, err := strconv.ParseFloat(strings.TrimSpace(xStr), 64); err == nil {
+						pos["x"] = xVal
+					}
+				}
+				if yStr, ok := pos["y"].(string); ok {
+					if yVal, err := strconv.ParseFloat(strings.TrimSpace(yStr), 64); err == nil {
+						pos["y"] = yVal
+					}
+				}
+			}
+		}
+	}
+
+	// 5. Viewport coordinates normalization
+	if vp, ok := raw["viewport"].(map[string]any); ok {
+		for _, key := range []string{"x", "y", "zoom"} {
+			if strVal, ok := vp[key].(string); ok {
+				if fVal, err := strconv.ParseFloat(strings.TrimSpace(strVal), 64); err == nil {
+					vp[key] = fVal
+				}
+			}
+		}
 	}
 }
 
@@ -804,12 +990,13 @@ func definitionFrom(value any) (domain.FlowDefinition, error) {
 	case domain.FlowDefinition:
 		definition = typed
 	case map[string]any:
+		normalizeDefinitionMap(typed)
 		data, err := json.Marshal(typed)
 		if err != nil {
 			return domain.FlowDefinition{}, fmt.Errorf("encode definition: %w", err)
 		}
 		if err := json.Unmarshal(data, &definition); err != nil {
-			return domain.FlowDefinition{}, fmt.Errorf("decode definition: %w", err)
+			return domain.FlowDefinition{}, fmt.Errorf("decode definition: %w (ensure 'nodes' is an array of FlowNode objects, 'edges' is an array of FlowEdge objects, and 'schemaVersion' is integer 3)", err)
 		}
 	default:
 		return domain.FlowDefinition{}, fmt.Errorf("definition must be a Blueprint v3 object")
@@ -1109,22 +1296,40 @@ func (s *Service) toolDefinitions(ctx context.Context, conversation domain.ChatC
 	if s.catalog != nil {
 		tools = append(tools,
 			domain.ChatToolDefinition{Name: "list_nodes", Description: "List available Blueprint node types with label and category. Call get_node_contract before using any node.", InputSchema: object(map[string]any{"query": text("Optional filter over type/label/description")})},
-			domain.ChatToolDefinition{Name: "get_node_contract", Description: "Full machine contract for one node type: pins (ids, kinds, data types, required), config field keys, capabilities. Required before composing that node.", InputSchema: object(map[string]any{"nodeType": text("Node type, e.g. action:http")}, "nodeType")},
+			domain.ChatToolDefinition{Name: "get_node_contract", Description: "Full machine contract for one node type: pins (ids, kinds, data types, required), config field keys, blueprint guidance, and ready-to-use exampleNode for definition.nodes. Required before composing that node.", InputSchema: object(map[string]any{"nodeType": text("Node type, e.g. action:http")}, "nodeType")},
 		)
 	}
 	if s.authoring != nil {
 		objectArray := func(description string) map[string]any {
 			return map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": description}
 		}
+		flowDefinitionSchema := map[string]any{
+			"type":        "object",
+			"description": "Blueprint v3 FlowDefinition JSON. 'nodes' and 'edges' MUST be arrays; 'schemaVersion' must be integer 3.",
+			"properties": map[string]any{
+				"schemaVersion": map[string]any{"type": "integer", "description": "Must be integer 3"},
+				"nodes": map[string]any{
+					"type":        "array",
+					"description": "Array of FlowNode objects (e.g. [{\"id\":\"n1\",\"type\":\"...\",\"position\":{\"x\":100,\"y\":100},\"data\":{\"config\":{...}}}])",
+					"items":       map[string]any{"type": "object"},
+				},
+				"edges": map[string]any{
+					"type":        "array",
+					"description": "Array of FlowEdge objects (e.g. [{\"id\":\"e1\",\"source\":\"n1\",\"target\":\"n2\",\"sourceHandle\":\"out\",\"targetHandle\":\"in\",\"kind\":\"exec\"|\"data\"}])",
+					"items":       map[string]any{"type": "object"},
+				},
+			},
+			"required": []string{"schemaVersion", "nodes", "edges"},
+		}
 		tools = append(tools,
 			domain.ChatToolDefinition{Name: "get_authoring_guide", Description: "How Neuropipe graphs are structured (v3 wire format, pins, triggers) and how custom functions work. Read before authoring.", InputSchema: object(map[string]any{"section": text(`"authoring" (default) or "functions"`)})},
 			domain.ChatToolDefinition{Name: "get_pipeline", Description: "Read one pipeline's full draft definition for editing.", InputSchema: object(map[string]any{"pipelineId": text("Pipeline ID")}, "pipelineId")},
-			domain.ChatToolDefinition{Name: "save_pipeline_draft", Description: "Create (empty pipelineId) or update a pipeline draft from a Blueprint v3 definition. Validates; fix reported errors and save again. Publishing is a separate call.", InputSchema: object(map[string]any{"pipelineId": text("Existing pipeline ID, empty to create"), "name": text("Pipeline name"), "definition": map[string]any{"type": "object", "description": "Blueprint v3 FlowDefinition JSON"}, "description": text("Optional description")}, "name", "definition")},
+			domain.ChatToolDefinition{Name: "save_pipeline_draft", Description: "Create (empty pipelineId) or update a pipeline draft from a Blueprint v3 definition. Validates; fix reported errors and save again. Publishing is a separate call.", InputSchema: object(map[string]any{"pipelineId": text("Existing pipeline ID, empty to create"), "name": text("Pipeline name"), "definition": flowDefinitionSchema, "description": text("Optional description")}, "name", "definition")},
 			domain.ChatToolDefinition{Name: "publish_pipeline", Description: "Publish the current draft of a pipeline so it becomes runnable.", InputSchema: object(map[string]any{"pipelineId": text("Pipeline ID")}, "pipelineId")},
 			domain.ChatToolDefinition{Name: "delete_pipeline", Description: "Permanently delete a pipeline and its history.", InputSchema: object(map[string]any{"pipelineId": text("Pipeline ID")}, "pipelineId")},
 			domain.ChatToolDefinition{Name: "list_functions", Description: "List custom functions available for reuse inside pipelines.", InputSchema: object(map[string]any{})},
 			domain.ChatToolDefinition{Name: "get_function", Description: "Read one custom function including its draft graph.", InputSchema: object(map[string]any{"functionId": text("Function ID")}, "functionId")},
-			domain.ChatToolDefinition{Name: "save_function_draft", Description: "Create (empty functionId) or update a custom function draft: boundary pins plus a Blueprint v3 graph wrapped in function boundary nodes. See get_authoring_guide section functions.", InputSchema: object(map[string]any{"functionId": text("Existing function ID, empty to create"), "name": text("Function name"), "mode": text("pure or impure"), "inputs": objectArray("Boundary input pins with id/name/dataType/required/type"), "outputs": objectArray("Boundary output pins"), "draftDefinition": map[string]any{"type": "object", "description": "Graph containing function boundary nodes"}}, "name", "mode", "draftDefinition")},
+			domain.ChatToolDefinition{Name: "save_function_draft", Description: "Create (empty functionId) or update a custom function draft: boundary pins plus a Blueprint v3 graph wrapped in function boundary nodes. See get_authoring_guide section functions.", InputSchema: object(map[string]any{"functionId": text("Existing function ID, empty to create"), "name": text("Function name"), "mode": text("pure or impure"), "inputs": objectArray("Boundary input pins with id/name/dataType/required/type"), "outputs": objectArray("Boundary output pins"), "draftDefinition": flowDefinitionSchema}, "name", "mode", "draftDefinition")},
 			domain.ChatToolDefinition{Name: "publish_function", Description: "Publish a function draft so pipelines can call it as function:<id>.", InputSchema: object(map[string]any{"functionId": text("Function ID")}, "functionId")},
 			domain.ChatToolDefinition{Name: "delete_function", Description: "Permanently delete a custom function.", InputSchema: object(map[string]any{"functionId": text("Function ID")}, "functionId")},
 		)

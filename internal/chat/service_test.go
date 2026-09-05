@@ -401,6 +401,65 @@ func TestRenameConversationToolIsOneShotAndRemovesPromptRule(t *testing.T) {
 	waitForRunStatus(t, store, second.ID, domain.RunCompleted)
 }
 
+type payloadLog struct {
+	mu     sync.Mutex
+	names  []string
+	values map[string][]any
+}
+
+func (l *payloadLog) sink(event string, payload any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.names = append(l.names, event)
+	if l.values == nil {
+		l.values = make(map[string][]any)
+	}
+	l.values[event] = append(l.values[event], payload)
+}
+
+func (l *payloadLog) latest(event string) (any, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	items := l.values[event]
+	if len(items) == 0 {
+		return nil, false
+	}
+	return items[len(items)-1], true
+}
+
+func TestRenameToolEmitsLiveConversationUpdate(t *testing.T) {
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	log := &payloadLog{}
+	service := NewService(store, nil, &renameSequenceAssistant{}, log.sink)
+	service.Start(context.Background())
+	defer service.Stop()
+	conversation, err := service.CreateConversation(context.Background(), domain.ChatConversation{Mode: domain.ChatModeModel, Title: "New chat"})
+	if err != nil {
+		t.Fatalf("CreateConversation() error = %v", err)
+	}
+	run, err := service.Send(context.Background(), conversation.ID, "What is the weather in Munich?")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	waitForRunStatus(t, store, run.ID, domain.RunCompleted)
+
+	payload, ok := log.latest("chat.conversation.updated")
+	if !ok {
+		t.Fatalf("events = %#v, want chat.conversation.updated while the rename runs", log.names)
+	}
+	updated, cast := payload.(domain.ChatConversation)
+	if !cast {
+		t.Fatalf("rename payload = %#v, want a ChatConversation", payload)
+	}
+	if updated.ID != conversation.ID || updated.Title != "Weather in Munich" {
+		t.Fatalf("rename payload = %#v, want the renamed conversation", updated)
+	}
+}
+
 // captureAssistant records the last request it received.
 type captureAssistant struct {
 	mu      sync.Mutex

@@ -108,16 +108,67 @@ type fieldContract struct {
 
 // nodeContract is the full get_node_contract payload.
 type nodeContract struct {
-	Type         string          `json:"type"`
-	Label        string          `json:"label"`
-	Category     string          `json:"category"`
-	Description  string          `json:"description"`
-	Mode         string          `json:"executionMode,omitempty"`
-	TriggerKind  string          `json:"triggerKind,omitempty"`
-	Capabilities []string        `json:"capabilities,omitempty"`
-	Inputs       []pinContract   `json:"inputs"`
-	Outputs      []pinContract   `json:"outputs"`
-	Fields       []fieldContract `json:"fields"`
+	Type              string          `json:"type"`
+	Label             string          `json:"label"`
+	Category          string          `json:"category"`
+	Description       string          `json:"description"`
+	Mode              string          `json:"executionMode,omitempty"`
+	TriggerKind       string          `json:"triggerKind,omitempty"`
+	Capabilities      []string        `json:"capabilities,omitempty"`
+	Inputs            []pinContract   `json:"inputs"`
+	Outputs           []pinContract   `json:"outputs"`
+	Fields            []fieldContract `json:"fields"`
+	BlueprintGuidance string          `json:"blueprintGuidance"`
+	ExampleNode       domain.FlowNode `json:"exampleNode"`
+}
+
+const blueprintGuidance = "Blueprint v3 authoring rules:\n" +
+	"1. In save_pipeline_draft / save_function_draft, 'nodes' MUST be a JSON array of FlowNode objects (like exampleNode) - NEVER a columnar object {id: [...], type: [...]}.\n" +
+	"2. 'edges' MUST be a JSON array of FlowEdge objects ([{\"id\":\"e1\",\"source\":\"...\",\"target\":\"...\",\"sourceHandle\":\"...\",\"targetHandle\":\"...\",\"kind\":\"exec\"|\"data\"}]) - NEVER a single object.\n" +
+	"3. 'schemaVersion' must be integer 3 (never string \"3\").\n" +
+	"4. Coordinates (position.x, position.y) must be numeric values (never strings).\n" +
+	"5. sourceHandle and targetHandle must match pin IDs from node contracts."
+
+func sampleValueForField(kind string, options []domain.Option) any {
+	if len(options) > 0 {
+		return options[0].Value
+	}
+	switch kind {
+	case "number", "integer":
+		return 0
+	case "boolean", "bool":
+		return false
+	case "json", "object":
+		return map[string]any{}
+	case "array", "list":
+		return []any{}
+	default:
+		return ""
+	}
+}
+
+func exampleConfigFor(definition domain.NodeDefinition) map[string]any {
+	config := make(map[string]any)
+	for _, field := range definition.Fields {
+		if def, ok := definition.DefaultConfig[field.Name]; ok && def != nil {
+			config[field.Name] = def
+		} else if field.Required {
+			config[field.Name] = sampleValueForField(field.Kind, field.Options)
+		}
+	}
+	return config
+}
+
+func exampleNodeFor(definition domain.NodeDefinition) domain.FlowNode {
+	cleanID := strings.NewReplacer(":", "_", "-", "_").Replace(definition.Type) + "_1"
+	return domain.FlowNode{
+		ID:       cleanID,
+		Type:     definition.Type,
+		Position: domain.Position{X: 100, Y: 100},
+		Data: map[string]any{
+			"config": exampleConfigFor(definition),
+		},
+	}
 }
 
 func pinsToContracts(pins []domain.NodePort) []pinContract {
@@ -165,16 +216,18 @@ func nodeContractFor(registry *catalog.Registry, nodeType string) (nodeContract,
 		return nodeContract{}, fmt.Errorf("unknown node type %q; call list_nodes to see available types", nodeType)
 	}
 	contract := nodeContract{
-		Type:         definition.Type,
-		Label:        definition.Label,
-		Category:     definition.Category,
-		Description:  definition.Description,
-		Mode:         string(definition.Mode),
-		TriggerKind:  string(definition.TriggerKind),
-		Capabilities: capabilitiesToStrings(definition.Capabilities),
-		Inputs:       pinsToContracts(definition.Inputs),
-		Outputs:      pinsToContracts(definition.Outputs),
-		Fields:       fieldsToContracts(definition, definition.DefaultConfig),
+		Type:              definition.Type,
+		Label:             definition.Label,
+		Category:          definition.Category,
+		Description:       definition.Description,
+		Mode:              string(definition.Mode),
+		TriggerKind:       string(definition.TriggerKind),
+		Capabilities:      capabilitiesToStrings(definition.Capabilities),
+		Inputs:            pinsToContracts(definition.Inputs),
+		Outputs:           pinsToContracts(definition.Outputs),
+		Fields:            fieldsToContracts(definition, definition.DefaultConfig),
+		BlueprintGuidance: blueprintGuidance,
+		ExampleNode:       exampleNodeFor(definition),
 	}
 	return contract, nil
 }

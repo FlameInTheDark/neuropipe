@@ -29,6 +29,8 @@ Rules:
 
 - `node.id`: any unique string. `type`: exactly one value returned by
   `list_nodes` / `get_node_contract`.
+- `nodes` and `edges` MUST ALWAYS be JSON arrays (`[...]`), even when there is only one node or edge. Never format nodes as a columnar dictionary (`{id: [...], ...}`) and never format edges as a single object.
+- Numbers (`schemaVersion`, `position.x`, `position.y`, `viewport.zoom`) MUST be JSON numbers (e.g. `3`, `100`), NEVER quoted strings (`"3"`, `"100"`).
 - `data.config`: plain object whose keys are the CONFIG FIELD keys of the
   contract (`fields[].key`). Omitted fields use their defaults.
 - Edges connect one output pin to one input pin. `sourceHandle` /

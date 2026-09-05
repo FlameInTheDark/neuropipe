@@ -297,6 +297,21 @@ if (scenario === "questions") {
   });
 }
 
+if (scenario === "rename") {
+  conversations.push({
+    id: "conv-r",
+    mode: "model",
+    title: "New chat",
+    actionPolicy: "ask",
+    providerId: "",
+    model: "",
+    reasoning: "",
+    toolIds: [],
+    createdAt: "2026-09-03T10:00:00Z",
+    updatedAt: "2026-09-03T10:00:00Z",
+  });
+}
+
 function emit(event: string, payload?: unknown): void {
   const handlers = harness.__wailsEvents.get(event) ?? [];
   for (const handler of [...handlers]) handler({ data: payload });
@@ -377,6 +392,85 @@ async function simulateModelTurn(conversationId: string, text: string): Promise<
 
 const delay = (ms: number) => sleep(ms);
 
+/** Replays the model-owned rename turn exactly like the chat service does:
+ *  the conversation title is patched and pushed via chat.conversation.updated
+ *  the moment the rename tool runs (mid-turn), before the final reply. */
+async function simulateRenameTurn(conversationId: string, text: string): Promise<void> {
+  sendCounter += 1;
+  const runId = `run-live-${sendCounter}`;
+  const run: ChatRun = {
+    id: runId,
+    conversationId,
+    status: "pending",
+    statusText: "Working",
+    createdAt: nowISO(),
+    updatedAt: nowISO(),
+  };
+  runs.push(run);
+  messages.push({
+    id: `m-live-user-${sendCounter}`,
+    conversationId,
+    chatRunId: runId,
+    role: "user",
+    content: text,
+    createdAt: nowISO(),
+  });
+  emit("chat.updated", { chatRunId: runId });
+  await sleep(120);
+  run.status = "running";
+  emit("chat.run.updated", { chatRunId: runId });
+  await sleep(120);
+
+  // round 1: the model calls rename_conversation
+  messages.push({
+    id: `m-live-rename-call-${sendCounter}`,
+    conversationId,
+    chatRunId: runId,
+    role: "assistant",
+    content: "",
+    toolCalls: [{ id: "rename-1", name: "rename_conversation", arguments: { title: "Weather in Munich" } }],
+    createdAt: nowISO(),
+  });
+  messages.push({
+    id: `m-live-rename-result-${sendCounter}`,
+    conversationId,
+    chatRunId: runId,
+    role: "tool",
+    toolCallId: "rename-1",
+    toolName: "rename_conversation",
+    content: '{"renamed":true,"title":"Weather in Munich"}',
+    createdAt: nowISO(),
+  });
+  const convIndex = conversations.findIndex((c) => c.id === conversationId);
+  if (convIndex >= 0) {
+    conversations[convIndex] = { ...conversations[convIndex], title: "Weather in Munich", updatedAt: nowISO() };
+    emit("chat.conversation.updated", conversations[convIndex]);
+  }
+  emit("chat.updated", { chatRunId: runId });
+  await sleep(200);
+
+  // round 2: the final streamed reply
+  const reply = "Today in Munich: 18 degrees and sunny.";
+  for (const chunk of reply.match(/.{1,7}/gs) ?? []) {
+    emit("chat.token", { chatRunId: runId, conversationId, delta: chunk });
+    await sleep(25);
+  }
+  emit("chat.token.end", { chatRunId: runId });
+  await sleep(80);
+  run.status = "completed";
+  run.statusText = "Completed";
+  messages.push({
+    id: `m-live-assistant-${sendCounter}`,
+    conversationId,
+    chatRunId: runId,
+    role: "assistant",
+    content: reply,
+    createdAt: nowISO(),
+  });
+  emit("chat.run.updated", { chatRunId: runId });
+  emit("chat.updated", { chatRunId: runId });
+}
+
 export const desktop = {
   async listChatConversations(): Promise<ChatConversation[]> {
     await delay(10);
@@ -415,7 +509,11 @@ export const desktop = {
   },
   async sendChatMessage(conversationId: string, text: string): Promise<ChatRun> {
     await delay(10);
-    void simulateModelTurn(conversationId, text);
+    if (scenario === "rename") {
+      void simulateRenameTurn(conversationId, text);
+    } else {
+      void simulateModelTurn(conversationId, text);
+    }
     return {
       id: `run-live-${sendCounter + 1}`,
       conversationId,
