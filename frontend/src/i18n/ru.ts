@@ -896,6 +896,8 @@ export const ru: typeof en = {
     reasoning_low: "Рассуждение: низкое",
     reasoning_medium: "Рассуждение: среднее",
     reasoning_high: "Рассуждение: высокое",
+    reasoningTitle: "Размышления",
+    reasoningToggle: "Показать или скрыть размышления модели",
     saveFailed: "Не удалось сохранить настройки чата",
     loadFailed: "Не удалось загрузить историю чата.",
     model: "Модель",

@@ -64,7 +64,7 @@ let lastViewedMode: "model" | "pipeline" | null = null;
 
 /** Ordered transcript entry: a plain bubble or an inline tool-call group. */
 type TranscriptItem =
-  | { kind: "message"; msg: ChatMessage }
+  | { kind: "message"; msg: ChatMessage; key?: string }
   | { kind: "tools"; key: string; calls: ToolCallEntry[] };
 
 /* ── sidebar row ── */
@@ -238,12 +238,13 @@ export default function ChatView() {
   const [submittingQuestions, setSubmittingQuestions] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  /** live assistant text for the run currently streaming; keyed by run so a
-   *  stale or foreign turn can never paint into the wrong transcript. Once a
-   *  round finishes (chat.token.end) the draft freezes in place - it keeps
-   *  rendering its own bubble until the persisted transcript row replaces
+  /** live assistant output for the run currently streaming; keyed by run so a
+   *  stale or foreign turn can never paint into the wrong transcript. Reasoning
+   *  and answer text accumulate separately from the kind-tagged token events.
+   *  Once a round finishes (chat.token.end) the draft freezes in place - it
+   *  keeps rendering its own bubble until the persisted transcript row replaces
    *  it, so consecutive rounds never melt into one growing element. */
-  const [liveReply, setLiveReply] = useState<{ chatRunId: string; text: string; finished?: boolean } | null>(null);
+  const [liveReply, setLiveReply] = useState<{ chatRunId: string; text: string; reasoning: string; finished?: boolean } | null>(null);
   /** optimistically painted user turn between hitting Enter and the backend
    *  round-trip: the user's message must be its own bubble immediately, not
    *  something that pops in together with the reply later. */
@@ -307,12 +308,15 @@ export default function ChatView() {
         continue;
       }
       if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
-        // some models emit prose alongside the calls — keep it, then the cards
-        if (msg.content.trim() !== "") items.push({ kind: "message", msg });
+        // some models emit prose or a reasoning trace alongside the calls —
+        // keep it, then the cards
+        if (msg.content.trim() !== "" || msg.reasoning) {
+          items.push({ kind: "message", msg, key: msg.content.trim() === "" ? `${msg.id}:thinking` : undefined });
+        }
         items.push({ kind: "tools", key: msg.id, calls: msg.toolCalls.map((call) => ({ call })) });
         continue;
       }
-      if (msg.role === "assistant" && msg.content.trim() === "") continue; // nothing to show
+      if (msg.role === "assistant" && msg.content.trim() === "" && !msg.reasoning) continue; // nothing to show
       items.push({ kind: "message", msg });
     }
     if (pendingUser) {
@@ -534,13 +538,24 @@ export default function ChatView() {
       Events.On("chat.questions.requested", () => {
         if (selectedId) void loadDetails(selectedId);
       }),
-      /* coalesced token deltas from the model turn in flight; a delta from a
-         new run (the next tool round) replaces the finished draft entirely */
+      /* coalesced token deltas from the model turn in flight; the kind field
+         separates reasoning deltas from answer text (a missing or unknown
+         kind is answer text). A delta from a new run (the next tool round)
+         replaces the finished draft entirely. */
       Events.On("chat.token", (e: unknown) => {
-        const p = extractPayload(e) as { chatRunId?: string; conversationId?: string; delta?: string } | null;
+        const p = extractPayload(e) as { chatRunId?: string; conversationId?: string; kind?: string; delta?: string } | null;
         if (!p?.delta || p.conversationId !== selectedId) return;
+        const isReasoning = p.kind === "reasoning";
         setLiveReply((cur) =>
-          cur && cur.chatRunId === p.chatRunId ? { ...cur, text: cur.text + (p.delta ?? "") } : { chatRunId: p.chatRunId ?? "", text: p.delta ?? "" },
+          cur && cur.chatRunId === p.chatRunId
+            ? isReasoning
+              ? { ...cur, reasoning: cur.reasoning + (p.delta ?? "") }
+              : { ...cur, text: cur.text + (p.delta ?? "") }
+            : {
+                chatRunId: p.chatRunId ?? "",
+                reasoning: isReasoning ? p.delta ?? "" : "",
+                text: isReasoning ? "" : p.delta ?? "",
+              },
         );
       }),
       /* the round finished streaming: freeze its text in place and pull the
@@ -557,7 +572,7 @@ export default function ChatView() {
 
   /* auto-scroll only while the user is pinned to the bottom; polling during
      a tool round must never yank the view if they scrolled up to read */
-  const transcriptKey = `${selectedId}:${messages.length}:${pendingUser?.id ?? ""}:${runs.map((r) => r.status).join(",")}:${liveReply?.text.length ?? 0}:${pendingQuestions.map((p) => p.id).join("-")}`;
+  const transcriptKey = `${selectedId}:${messages.length}:${pendingUser?.id ?? ""}:${runs.map((r) => r.status).join(",")}:${liveReply?.text.length ?? 0}:${liveReply?.reasoning.length ?? 0}:${pendingQuestions.map((p) => p.id).join("-")}`;
   useEffect(() => {
     if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
@@ -1030,7 +1045,7 @@ export default function ChatView() {
                     })}
                   </div>
                 ) : (
-                  <TranscriptMessage key={item.msg.id} msg={item.msg} pipelineMode={selected.mode === "pipeline"} onCtx={onBubbleCtx} />
+                  <TranscriptMessage key={item.key ?? item.msg.id} msg={item.msg} pipelineMode={selected.mode === "pipeline"} onCtx={onBubbleCtx} />
                 ),
               )}
 
@@ -1051,10 +1066,18 @@ export default function ChatView() {
               )}
 
               {/* live token stream replaces the idle dots once the first
-                  deltas land; a finished round freezes in place (caret off)
-                  until the persisted row takes over via the commit reconcile */}
-              {liveReply && liveReply.text !== "" ? (
-                <LiveReplyBubble text={liveReply.text} pipelineMode={selected.mode === "pipeline"} caret={!liveReply.finished} />
+                  deltas land (reasoning or answer); a finished round freezes
+                  in place (caret off) until the persisted row takes over via
+                  the commit reconcile. Reasoning stays the visibly active
+                  phase until answer text starts. */}
+              {liveReply && (liveReply.text !== "" || liveReply.reasoning !== "") ? (
+                <LiveReplyBubble
+                  text={liveReply.text}
+                  reasoning={liveReply.reasoning}
+                  reasoningActive={!liveReply.finished && liveReply.text === ""}
+                  pipelineMode={selected.mode === "pipeline"}
+                  caret={!liveReply.finished}
+                />
               ) : (
                 (activeRun || sending) &&
                 /* while the model waits on an open question form the transcript
@@ -1305,7 +1328,9 @@ export default function ChatView() {
   );
 }
 
-/** One non-tool transcript row: user or assistant bubble. */
+/** One non-tool transcript row: user or assistant bubble. Assistant turns
+ *  with a persisted reasoning trace render the collapsible thinking card
+ *  above the answer. */
 function TranscriptMessage({
   msg,
   pipelineMode,
@@ -1322,14 +1347,19 @@ function TranscriptMessage({
           <Icon name={pipelineMode ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
         </span>
       )}
-      <div
-        onContextMenu={(e) => onCtx(e, msg.content)}
-        className={cn(
-          "max-w-[80%] cursor-default rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
-          msg.role === "user" ? "bg-ink-50 text-fg-onEmphasis" : "bg-ink-850 text-fg",
+      <div className="flex min-w-0 max-w-[80%] flex-col gap-1.5">
+        {msg.role === "assistant" && msg.reasoning ? <ReasoningBlock reasoning={msg.reasoning} /> : null}
+        {msg.content.trim() !== "" && (
+          <div
+            onContextMenu={(e) => onCtx(e, msg.content)}
+            className={cn(
+              "cursor-default rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
+              msg.role === "user" ? "bg-ink-50 text-fg-onEmphasis" : "bg-ink-850 text-fg",
+            )}
+          >
+            {msg.role === "user" ? msg.content : <MarkdownBody content={msg.content} />}
+          </div>
         )}
-      >
-        {msg.role === "user" ? msg.content : <MarkdownBody content={msg.content} />}
       </div>
     </div>
   );
@@ -1681,18 +1711,81 @@ const MarkdownBody = memo(function MarkdownBody({ content, caret }: { content: s
   );
 });
 
-/** Assistant bubble while the model streams: formatted markdown plus a
- *  blinking caret at the end of the text. Once the round finishes the caret
- *  stops and the bubble freezes until the persisted transcript row replaces
- *  it, so consecutive rounds never collapse into one growing element. */
-function LiveReplyBubble({ text, pipelineMode, caret = true }: { text: string; pipelineMode: boolean; caret?: boolean }) {
+/**
+ * Collapsible card for one assistant turn's model reasoning, rendered above
+ * the answer. While the trace is still streaming it stays expanded with a
+ * pulsing indicator; once the phase completes it collapses. A manual toggle
+ * always wins until the next active phase starts, so auto behavior never
+ * fights the user.
+ */
+function ReasoningBlock({ reasoning, active = false }: { reasoning: string; active?: boolean }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(active);
+  const manualRef = useRef(false);
+  useEffect(() => {
+    if (active) {
+      manualRef.current = false;
+      setOpen(true);
+      return;
+    }
+    if (!manualRef.current) setOpen(false);
+  }, [active]);
+  return (
+    <div className="overflow-hidden rounded-xl border border-ink-700/70 bg-ink-850/50">
+      <button
+        type="button"
+        onClick={() => {
+          manualRef.current = true;
+          setOpen((v) => !v);
+        }}
+        aria-expanded={open}
+        aria-label={t("chat.reasoningToggle")}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+      >
+        <Icon name="ChevronRight" className={cn("h-3 w-3 shrink-0 text-fg-faint transition-transform", open && "rotate-90")} />
+        <Icon name="Brain" className={cn("h-3.5 w-3.5 shrink-0", active ? "animate-pulse text-info-fg" : "text-violet-300/80")} />
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-fg-muted">{t("chat.reasoningTitle")}</span>
+        {active && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-info" />}
+      </button>
+      {open && (
+        <p className="max-h-[240px] overflow-y-auto whitespace-pre-wrap border-t border-seam px-3 py-2 text-[12px] leading-relaxed text-fg-subtle">
+          {reasoning}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Assistant bubble while the model streams: the reasoning card while the
+ *  trace generates, then the formatted markdown answer with a blinking caret
+ *  at the end of the text. Once the round finishes the caret stops and the
+ *  bubble freezes until the persisted transcript row replaces it, so
+ *  consecutive rounds never collapse into one growing element. */
+function LiveReplyBubble({
+  text,
+  reasoning,
+  reasoningActive,
+  pipelineMode,
+  caret = true,
+}: {
+  text: string;
+  reasoning: string;
+  reasoningActive: boolean;
+  pipelineMode: boolean;
+  caret?: boolean;
+}) {
   return (
     <div className="flex gap-3">
       <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-ink-700 bg-ink-850 text-fg-muted">
         <Icon name={pipelineMode ? "Cable" : "Bot"} className="h-3.5 w-3.5" />
       </span>
-      <div className="max-w-[80%] cursor-default rounded-2xl bg-ink-850 px-4 py-2.5 text-[13px] leading-relaxed text-fg">
-        <MarkdownBody content={text} caret={caret} />
+      <div className="flex min-w-0 max-w-[80%] flex-col gap-1.5">
+        {reasoning !== "" && <ReasoningBlock reasoning={reasoning} active={reasoningActive} />}
+        {text !== "" && (
+          <div className="cursor-default rounded-2xl bg-ink-850 px-4 py-2.5 text-[13px] leading-relaxed text-fg">
+            <MarkdownBody content={text} caret={caret} />
+          </div>
+        )}
       </div>
     </div>
   );

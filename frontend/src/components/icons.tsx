@@ -17,6 +17,7 @@ import {
   Bot,
   Boxes,
   Braces,
+  Brain,
   Cable,
   CalendarDays,
   Camera,
@@ -146,7 +147,7 @@ import type { LucideIcon } from "lucide-react";
 export const icons = {
   Activity, AlignCenterHorizontal, AlignEndVertical, AlignLeft, AlignRight, AlignStartVertical,
   AlertTriangle, ArrowDownToLine, ArrowLeft, ArrowRightLeft, ArrowUpRight, ArrowUpToLine,
-  Binary, Bold, BookOpen, Bot, Boxes, Braces,
+  Binary, Bold, BookOpen, Bot, Boxes, Braces, Brain,
   Cable, CalendarDays, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, ChevronsDown, ChevronsDownUp, ChevronsUp, ChevronsUpDown, CircleDot, CircleHelp, Clock, Cloud, Code, Columns3, Command, Copy, CornerDownLeft, Crosshair,
   Database, Download,
   Expand, ExternalLink, Eye, EyeOff,

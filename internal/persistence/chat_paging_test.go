@@ -70,3 +70,50 @@ func TestListChatMessagesPagesBackwards(t *testing.T) {
 		t.Fatalf("beyond-end page = %+v, want empty with total intact", beyond)
 	}
 }
+
+func TestChatMessageReasoningRoundTrip(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+
+	conversation, err := store.CreateChatConversation(ctx, domain.ChatConversation{ID: "conv-r", Mode: domain.ChatModeModel, Title: "Reasoning"})
+	if err != nil {
+		t.Fatalf("CreateChatConversation() error = %v", err)
+	}
+	run, err := store.CreateChatRun(ctx, conversation.ID)
+	if err != nil {
+		t.Fatalf("CreateChatRun() error = %v", err)
+	}
+	if _, err := store.CreateChatMessage(ctx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: run.ID, Role: domain.ChatRoleUser, Content: "question"}); err != nil {
+		t.Fatalf("CreateChatMessage() error = %v", err)
+	}
+	if _, err := store.CreateChatMessage(ctx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: run.ID, Role: domain.ChatRoleAssistant, Content: "answer", Reasoning: "worked it out"}); err != nil {
+		t.Fatalf("CreateChatMessage() error = %v", err)
+	}
+
+	messages, err := store.ListChatMessages(ctx, conversation.ID, 10)
+	if err != nil {
+		t.Fatalf("ListChatMessages() error = %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want 2", len(messages))
+	}
+	// The user row has no reasoning; the assistant row round-trips it.
+	if messages[0].Reasoning != "" {
+		t.Fatalf("user reasoning = %q, want empty", messages[0].Reasoning)
+	}
+	if messages[1].Reasoning != "worked it out" {
+		t.Fatalf("assistant reasoning = %q, want the persisted trace", messages[1].Reasoning)
+	}
+
+	page, err := store.ListChatMessagesPaged(ctx, conversation.ID, 0, 10)
+	if err != nil {
+		t.Fatalf("ListChatMessagesPaged() error = %v", err)
+	}
+	if len(page.Messages) != 2 || page.Messages[1].Reasoning != "worked it out" {
+		t.Fatalf("paged messages = %#v, want the reasoning on the assistant row", page.Messages)
+	}
+}

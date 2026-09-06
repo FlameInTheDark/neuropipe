@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   chat_run_id TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL,
   content TEXT NOT NULL,
+  reasoning TEXT NOT NULL DEFAULT '',
   tool_call_id TEXT NOT NULL DEFAULT '',
   tool_name TEXT NOT NULL DEFAULT '',
   tool_calls_json TEXT NOT NULL DEFAULT '[]',
@@ -455,6 +456,9 @@ CREATE TABLE IF NOT EXISTS remote_executors (
 	if err := s.ensureChatConversationColumns(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureChatMessageColumns(ctx); err != nil {
+		return err
+	}
 	if err := s.ensureExecutorColumns(ctx); err != nil {
 		return err
 	}
@@ -667,6 +671,29 @@ func (s *Store) ensureChatConversationColumns(ctx context.Context) error {
 		}
 		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE chat_conversations ADD COLUMN %s %s", column.name, column.definition)); err != nil {
 			return fmt.Errorf("add chat_conversations.%s column: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+// ensureChatMessageColumns adds the reasoning column to chat_messages for
+// stores created before model thinking traces were captured. Fresh installs
+// get it from the CREATE TABLE statement; this only handles the ALTER TABLE
+// path so partially migrated installations converge.
+func (s *Store) ensureChatMessageColumns(ctx context.Context) error {
+	columns := []struct{ name, definition string }{
+		{name: "reasoning", definition: "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, column := range columns {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('chat_messages') WHERE name = ?`, column.name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect chat_messages.%s migration: %w", column.name, err)
+		}
+		if exists > 0 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE chat_messages ADD COLUMN %s %s", column.name, column.definition)); err != nil {
+			return fmt.Errorf("add chat_messages.%s column: %w", column.name, err)
 		}
 	}
 	return nil
@@ -1830,7 +1857,7 @@ func (s *Store) CreateChatMessage(ctx context.Context, message domain.ChatMessag
 		return domain.ChatMessage{}, fmt.Errorf("encode chat tool calls: %w", err)
 	}
 	message.CreatedAt = time.Now().UTC()
-	_, err = statements(s.db).Insert("chat_messages").Columns("id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at").Values(message.ID, message.ConversationID, message.ChatRunID, message.Role, message.Content, message.ToolCallID, message.ToolName, toolCalls, stamp(message.CreatedAt)).ExecContext(ctx)
+	_, err = statements(s.db).Insert("chat_messages").Columns("id", "conversation_id", "chat_run_id", "role", "content", "reasoning", "tool_call_id", "tool_name", "tool_calls_json", "created_at").Values(message.ID, message.ConversationID, message.ChatRunID, message.Role, message.Content, message.Reasoning, message.ToolCallID, message.ToolName, toolCalls, stamp(message.CreatedAt)).ExecContext(ctx)
 	if err != nil {
 		return domain.ChatMessage{}, fmt.Errorf("create chat message: %w", err)
 	}
@@ -1845,8 +1872,8 @@ func (s *Store) ListChatMessages(ctx context.Context, conversationID string, lim
 	if limit < 1 || limit > 500 {
 		limit = 200
 	}
-	recentMessages := sqliteStatements.Select("rowid AS ordinal", "id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at").From("chat_messages").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID)}).OrderBy("created_at DESC", "rowid DESC").Limit(uint64(limit))
-	rows, err := statements(s.db).Select("id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at").FromSelect(recentMessages, "recent_messages").OrderBy("created_at ASC", "ordinal ASC").QueryContext(ctx)
+	recentMessages := sqliteStatements.Select("rowid AS ordinal", "id", "conversation_id", "chat_run_id", "role", "content", "reasoning", "tool_call_id", "tool_name", "tool_calls_json", "created_at").From("chat_messages").Where(squirrel.Eq{"conversation_id": strings.TrimSpace(conversationID)}).OrderBy("created_at DESC", "rowid DESC").Limit(uint64(limit))
+	rows, err := statements(s.db).Select("id", "conversation_id", "chat_run_id", "role", "content", "reasoning", "tool_call_id", "tool_name", "tool_calls_json", "created_at").FromSelect(recentMessages, "recent_messages").OrderBy("created_at ASC", "ordinal ASC").QueryContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list chat messages: %w", err)
 	}
@@ -1855,7 +1882,7 @@ func (s *Store) ListChatMessages(ctx context.Context, conversationID string, lim
 	for rows.Next() {
 		var item domain.ChatMessage
 		var toolCalls, created string
-		if err := rows.Scan(&item.ID, &item.ConversationID, &item.ChatRunID, &item.Role, &item.Content, &item.ToolCallID, &item.ToolName, &toolCalls, &created); err != nil {
+		if err := rows.Scan(&item.ID, &item.ConversationID, &item.ChatRunID, &item.Role, &item.Content, &item.Reasoning, &item.ToolCallID, &item.ToolName, &toolCalls, &created); err != nil {
 			return nil, fmt.Errorf("scan chat message: %w", err)
 		}
 		if err := decode(toolCalls, &item.ToolCalls); err != nil {
@@ -1885,7 +1912,7 @@ func (s *Store) ListChatMessagesPaged(ctx context.Context, conversationID string
 	if offset < 0 {
 		offset = 0
 	}
-	columns := []string{"id", "conversation_id", "chat_run_id", "role", "content", "tool_call_id", "tool_name", "tool_calls_json", "created_at"}
+	columns := []string{"id", "conversation_id", "chat_run_id", "role", "content", "reasoning", "tool_call_id", "tool_name", "tool_calls_json", "created_at"}
 	recent := sqliteStatements.Select("rowid AS ordinal").
 		Columns(append([]string(nil), columns...)...).
 		From("chat_messages").
@@ -1901,7 +1928,7 @@ func (s *Store) ListChatMessagesPaged(ctx context.Context, conversationID string
 	for rows.Next() {
 		var item domain.ChatMessage
 		var toolCalls, created string
-		if err := rows.Scan(&item.ID, &item.ConversationID, &item.ChatRunID, &item.Role, &item.Content, &item.ToolCallID, &item.ToolName, &toolCalls, &created); err != nil {
+		if err := rows.Scan(&item.ID, &item.ConversationID, &item.ChatRunID, &item.Role, &item.Content, &item.Reasoning, &item.ToolCallID, &item.ToolName, &toolCalls, &created); err != nil {
 			return ChatMessagePage{}, fmt.Errorf("scan chat message: %w", err)
 		}
 		if err := decode(toolCalls, &item.ToolCalls); err != nil {

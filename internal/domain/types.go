@@ -419,12 +419,15 @@ type ChatToolCall struct {
 
 // ChatMessage is a durable transcript item. ToolCalls are retained so an
 // OpenAI-compatible provider can resume a paused approval turn correctly.
+// Reasoning carries the provider's thinking output for display only: it is
+// persisted with the assistant turn but never replayed into outgoing requests.
 type ChatMessage struct {
 	ID             string          `json:"id"`
 	ConversationID string          `json:"conversationId"`
 	ChatRunID      string          `json:"chatRunId,omitempty"`
 	Role           ChatMessageRole `json:"role"`
 	Content        string          `json:"content"`
+	Reasoning      string          `json:"reasoning,omitempty"`
 	ToolCallID     string          `json:"toolCallId,omitempty"`
 	ToolName       string          `json:"toolName,omitempty"`
 	ToolCalls      []ChatToolCall  `json:"toolCalls,omitempty"`
@@ -562,10 +565,31 @@ type AssistantChatRequest struct {
 }
 
 // AssistantChatResponse contains normal text and/or native tool calls.
+// Reasoning carries the provider's thinking output for display only.
 type AssistantChatResponse struct {
 	Content   string         `json:"content"`
+	Reasoning string         `json:"reasoning,omitempty"`
 	ToolCalls []ChatToolCall `json:"toolCalls,omitempty"`
 	Usage     LLMUsage       `json:"usage,omitempty"`
+}
+
+// AssistantStreamKind discriminates the output channel of a streaming
+// assistant turn: visible answer text versus the model's reasoning trace.
+type AssistantStreamKind string
+
+const (
+	// AssistantStreamText carries the user-visible answer deltas.
+	AssistantStreamText AssistantStreamKind = "text"
+	// AssistantStreamReasoning carries the model's reasoning deltas.
+	AssistantStreamReasoning AssistantStreamKind = "reasoning"
+)
+
+// AssistantStreamDelta is one forwarded piece of a streaming assistant turn.
+// The chat service coalesces consecutive deltas per kind before they reach
+// the UI as chat.token events.
+type AssistantStreamDelta struct {
+	Kind AssistantStreamKind `json:"kind"`
+	Text string              `json:"text"`
 }
 
 // ParseTags turns a comma, semicolon, or line-separated tag configuration

@@ -896,6 +896,8 @@ export const de: typeof en = {
     reasoning_low: "Denkleistung: niedrig",
     reasoning_medium: "Denkleistung: mittel",
     reasoning_high: "Denkleistung: hoch",
+    reasoningTitle: "Denkprozess",
+    reasoningToggle: "Denkprozess ein- oder ausklappen",
     saveFailed: "Chat-Einstellungen konnten nicht gespeichert werden",
     loadFailed: "Chatverlauf konnte nicht geladen werden.",
     model: "Modell",

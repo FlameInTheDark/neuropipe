@@ -78,10 +78,13 @@ type ollamaCallFn struct {
 }
 
 // ollamaChatResponse is the native /api/chat reply: complete message, optional
-// tool calls, and token counts on the terminal line.
+// tool calls, and token counts on the terminal line. Thinking is present on
+// servers (Ollama >= 0.9) that split a thinking model's reasoning trace out of
+// the content; it stays empty otherwise.
 type ollamaChatResponse struct {
 	Message struct {
 		Content   string         `json:"content"`
+		Thinking  string         `json:"thinking"`
 		ToolCalls []ollamaCallIn `json:"tool_calls"`
 	} `json:"message"`
 	Error           string `json:"error"`
@@ -96,6 +99,7 @@ type ollamaChatResponse struct {
 type ollamaStreamChunk struct {
 	Message struct {
 		Content   string         `json:"content"`
+		Thinking  string         `json:"thinking"`
 		ToolCalls []ollamaCallIn `json:"tool_calls"`
 	} `json:"message"`
 	Error           string `json:"error"`
@@ -144,6 +148,15 @@ func (m *ollamaModel) ollamaRequest(opts aiprovider.CallOptions) (map[string]any
 	}
 	if opts.ResponseFormat != nil && opts.ResponseFormat.Type == aiprovider.ResponseFormatJSON {
 		body["format"] = "json"
+	}
+	// Ollama >= 0.9 splits a thinking model's reasoning trace into
+	// message.thinking and enables it by default for capable models, so the
+	// trace is simply captured when the server emits one. "none" explicitly
+	// disables thinking; older servers ignore the unknown field. Other effort
+	// levels keep the server default instead of forcing think=true, which
+	// fails on models without thinking support.
+	if opts.Reasoning != nil && *opts.Reasoning == aiprovider.ReasoningNone {
+		body["think"] = false
 	}
 	return body, nil
 }
@@ -357,7 +370,10 @@ func (m *ollamaModel) DoGenerate(ctx context.Context, opts aiprovider.CallOption
 	if err != nil {
 		return nil, err
 	}
-	content := make([]aiprovider.GenerateContentPart, 0, len(toolParts)+1)
+	content := make([]aiprovider.GenerateContentPart, 0, len(toolParts)+2)
+	if response.Message.Thinking != "" {
+		content = append(content, aiprovider.GenerateContentPart{Type: aiprovider.ContentReasoning, Text: response.Message.Thinking})
+	}
 	if strings.TrimSpace(response.Message.Content) != "" {
 		content = append(content, aiprovider.GenerateContentPart{Type: aiprovider.ContentText, Text: response.Message.Content})
 	}
@@ -420,11 +436,12 @@ func (m *ollamaModel) DoStream(ctx context.Context, opts aiprovider.CallOptions)
 		}
 
 		var (
-			textOpen    bool
-			toolParts   []aiprovider.GenerateContentPart
-			finish      aiprovider.FinishReason
-			usage       aiprovider.Usage
-			streamError error
+			textOpen     bool
+			thinkingOpen bool
+			toolParts    []aiprovider.GenerateContentPart
+			finish       aiprovider.FinishReason
+			usage        aiprovider.Usage
+			streamError  error
 		)
 		fail := func(message string) {
 			streamError = fmt.Errorf("%s: %s", m.provider, message)
@@ -441,6 +458,17 @@ func (m *ollamaModel) DoStream(ctx context.Context, opts aiprovider.CallOptions)
 				if strings.TrimSpace(chunk.Error) != "" {
 					fail(chunk.Error)
 					break
+				}
+				if chunk.Message.Thinking != "" {
+					if !thinkingOpen {
+						if !send(aiprovider.StreamPart{Type: aiprovider.PartReasoningStart, ID: "reasoning-0"}) {
+							return
+						}
+						thinkingOpen = true
+					}
+					if !send(aiprovider.StreamPart{Type: aiprovider.PartReasoningDelta, ID: "reasoning-0", Delta: chunk.Message.Thinking}) {
+						return
+					}
 				}
 				if chunk.Message.Content != "" {
 					if !textOpen {
@@ -487,6 +515,11 @@ func (m *ollamaModel) DoStream(ctx context.Context, opts aiprovider.CallOptions)
 		}
 		if textOpen {
 			if !send(aiprovider.StreamPart{Type: aiprovider.PartTextEnd, ID: "txt-0"}) {
+				return
+			}
+		}
+		if thinkingOpen {
+			if !send(aiprovider.StreamPart{Type: aiprovider.PartReasoningEnd, ID: "reasoning-0"}) {
 				return
 			}
 		}

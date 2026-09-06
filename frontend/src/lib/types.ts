@@ -901,6 +901,8 @@ export interface ChatMessage {
   chatRunId?: string;
   role: ChatMessageRole;
   content: string;
+  /** Model thinking trace for the assistant turn; display-only, never replayed to providers. */
+  reasoning?: string;
   toolCallId?: string;
   toolName?: string;
   toolCalls?: ChatToolCall[];

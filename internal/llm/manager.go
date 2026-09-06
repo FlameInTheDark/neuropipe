@@ -214,11 +214,11 @@ func (m *Manager) Converse(ctx context.Context, request domain.AssistantChatRequ
 }
 
 // ConverseStream performs the same assistant turn as Converse while forwarding
-// assistant text to onDelta token by token as the provider emits it. Tool
-// calls, usage accounting, and limiter behavior are identical to Converse;
-// only the model transport switches from a blocking request to the provider's
-// streaming wire.
-func (m *Manager) ConverseStream(ctx context.Context, request domain.AssistantChatRequest, onDelta func(delta string)) (response domain.AssistantChatResponse, err error) {
+// assistant text and reasoning deltas to onDelta as the provider emits them.
+// Tool calls, usage accounting, and limiter behavior are identical to
+// Converse; only the model transport switches from a blocking request to the
+// provider's streaming wire.
+func (m *Manager) ConverseStream(ctx context.Context, request domain.AssistantChatRequest, onDelta func(delta domain.AssistantStreamDelta)) (response domain.AssistantChatResponse, err error) {
 	turn, err := m.beginAssistantTurn(ctx, request)
 	if err != nil {
 		return domain.AssistantChatResponse{}, err

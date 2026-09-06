@@ -44,19 +44,29 @@ type Assistant interface {
 }
 
 // StreamingAssistant is optionally implemented by Assistant backends that can
-// forward assistant text token by token while the model generates. When the
-// configured assistant does not implement it, the service falls back to the
-// blocking Converse turn and live token display is simply disabled.
+// forward assistant text and reasoning deltas while the model generates. When
+// the configured assistant does not implement it, the service falls back to
+// the blocking Converse turn and live token display is simply disabled.
 type StreamingAssistant interface {
-	ConverseStream(ctx context.Context, request domain.AssistantChatRequest, onDelta func(delta string)) (domain.AssistantChatResponse, error)
+	ConverseStream(ctx context.Context, request domain.AssistantChatRequest, onDelta func(delta domain.AssistantStreamDelta)) (domain.AssistantChatResponse, error)
 }
+
+// Kinds carried by chatTokenEvent.Kind. The text kind is also emitted
+// explicitly so consumers can rely on a stable value; a missing or unknown
+// kind still means text for backward compatibility with older frontends.
+const (
+	tokenKindText      = string(domain.AssistantStreamText)
+	tokenKindReasoning = string(domain.AssistantStreamReasoning)
+)
 
 // chatTokenEvent is the payload of chat.token events forwarded to the UI while
 // an assistant turn streams. ConversationID lets the renderer drop tokens
-// belonging to a transcript that is not on screen.
+// belonging to a transcript that is not on screen; Kind separates answer text
+// from the model's reasoning trace.
 type chatTokenEvent struct {
 	ChatRunID      string `json:"chatRunId"`
 	ConversationID string `json:"conversationId"`
+	Kind           string `json:"kind"`
 	Delta          string `json:"delta"`
 }
 
@@ -423,7 +433,7 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 		if strings.TrimSpace(response.Content) == "" {
 			response.Content = "The model completed without a response."
 		}
-		_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleAssistant, Content: response.Content})
+		_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleAssistant, Content: response.Content, Reasoning: response.Reasoning})
 		_ = s.store.UpdateChatRun(runCtx, job.chatRunID, domain.RunCompleted, "Completed", "", "")
 		s.emitUpdate(job.chatRunID)
 		return
@@ -436,7 +446,7 @@ func (s *Service) runModel(ctx context.Context, job modelJob) {
 			response.ToolCalls[index].ID = uuid.NewString()
 		}
 	}
-	_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleAssistant, Content: response.Content, ToolCalls: response.ToolCalls})
+	_, _ = s.store.CreateChatMessage(runCtx, domain.ChatMessage{ConversationID: conversation.ID, ChatRunID: job.chatRunID, Role: domain.ChatRoleAssistant, Content: response.Content, Reasoning: response.Reasoning, ToolCalls: response.ToolCalls})
 	for index, call := range response.ToolCalls {
 		if runCtx.Err() != nil || s.isStopped(job.chatRunID) {
 			for _, remaining := range response.ToolCalls[index:] {
@@ -1112,35 +1122,64 @@ func (s *Service) emitUpdate(chatRunID string) {
 	}
 }
 
-// converse performs one assistant turn, forwarding tokens to the UI through a
-// coalescing pump when the assistant supports streaming. The pump is fully
-// drained before the turn returns, so its trailing chat.token.end event always
-// lands before the completion events the caller emits afterwards.
+// converse performs one assistant turn, forwarding text and reasoning tokens
+// to the UI through a coalescing pump when the assistant supports streaming.
+// The pump is fully drained before the turn returns, so its trailing
+// chat.token.end event always lands before the completion events the caller
+// emits afterwards.
 func (s *Service) converse(ctx context.Context, job modelJob, conversation domain.ChatConversation, request domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
 	streamer, ok := s.assistant.(StreamingAssistant)
 	if !ok || s.emit == nil {
 		return s.assistant.Converse(ctx, request)
 	}
-	deltas := make(chan string, 128)
+	deltas := make(chan domain.AssistantStreamDelta, 128)
 	pumped := make(chan struct{})
 	go s.pumpTokens(job, conversation, deltas, pumped)
-	response, err := streamer.ConverseStream(ctx, request, func(delta string) { deltas <- delta })
+	response, err := streamer.ConverseStream(ctx, request, func(delta domain.AssistantStreamDelta) { deltas <- delta })
 	close(deltas)
 	<-pumped
 	return response, err
 }
 
+// tokenSegment is one buffered run of consecutive same-kind deltas waiting to
+// be flushed as a single chat.token event.
+type tokenSegment struct {
+	kind string
+	text *strings.Builder
+}
+
 // pumpTokens coalesces streamed deltas into chat.token events and closes the
-// turn with chat.token.end. It runs until the deltas channel closes.
-func (s *Service) pumpTokens(job modelJob, conversation domain.ChatConversation, deltas <-chan string, done chan<- struct{}) {
+// turn with chat.token.end. Consecutive deltas of the same kind collapse into
+// one buffered segment while kind switches (reasoning → text) open a new one,
+// preserving the provider's emission order. It runs until the deltas channel
+// closes.
+func (s *Service) pumpTokens(job modelJob, conversation domain.ChatConversation, deltas <-chan domain.AssistantStreamDelta, done chan<- struct{}) {
 	defer close(done)
-	var buffer strings.Builder
-	flush := func() {
-		if buffer.Len() == 0 {
+	var pending []tokenSegment
+	appendDelta := func(delta domain.AssistantStreamDelta) {
+		if delta.Text == "" {
 			return
 		}
-		s.emit("chat.token", chatTokenEvent{ChatRunID: job.chatRunID, ConversationID: conversation.ID, Delta: buffer.String()})
-		buffer.Reset()
+		kind := tokenKindText
+		if delta.Kind == domain.AssistantStreamReasoning {
+			kind = tokenKindReasoning
+		}
+		if len(pending) > 0 && pending[len(pending)-1].kind == kind {
+			pending[len(pending)-1].text.WriteString(delta.Text)
+			return
+		}
+		builder := &strings.Builder{}
+		builder.WriteString(delta.Text)
+		pending = append(pending, tokenSegment{kind: kind, text: builder})
+	}
+	flush := func() {
+		for _, segment := range pending {
+			if segment.text.Len() == 0 {
+				continue
+			}
+			s.emit("chat.token", chatTokenEvent{ChatRunID: job.chatRunID, ConversationID: conversation.ID, Kind: segment.kind, Delta: segment.text.String()})
+		}
+		pending = pending[:0]
 	}
 	ticker := time.NewTicker(tokenFlushInterval)
 	defer ticker.Stop()
@@ -1152,7 +1191,7 @@ func (s *Service) pumpTokens(job modelJob, conversation domain.ChatConversation,
 				s.emit("chat.token.end", map[string]string{"chatRunId": job.chatRunID})
 				return
 			}
-			buffer.WriteString(delta)
+			appendDelta(delta)
 		case <-ticker.C:
 			flush()
 		}

@@ -164,10 +164,26 @@ func (streamingAssistant) Converse(_ context.Context, _ domain.AssistantChatRequ
 	return domain.AssistantChatResponse{Content: "blocking reply"}, nil
 }
 
-func (streamingAssistant) ConverseStream(_ context.Context, _ domain.AssistantChatRequest, onDelta func(string)) (domain.AssistantChatResponse, error) {
-	onDelta("Hel")
-	onDelta("lo")
+func (streamingAssistant) ConverseStream(_ context.Context, _ domain.AssistantChatRequest, onDelta func(domain.AssistantStreamDelta)) (domain.AssistantChatResponse, error) {
+	onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamText, Text: "Hel"})
+	onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamText, Text: "lo"})
 	return domain.AssistantChatResponse{Content: "Hello"}, nil
+}
+
+// reasoningAssistant streams a reasoning trace before the answer text and
+// completes with both fields populated, like a thinking provider would.
+type reasoningAssistant struct{}
+
+func (reasoningAssistant) Converse(_ context.Context, _ domain.AssistantChatRequest) (domain.AssistantChatResponse, error) {
+	return domain.AssistantChatResponse{Content: "blocking reply"}, nil
+}
+
+func (reasoningAssistant) ConverseStream(_ context.Context, _ domain.AssistantChatRequest, onDelta func(domain.AssistantStreamDelta)) (domain.AssistantChatResponse, error) {
+	onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamReasoning, Text: "let me "})
+	onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamReasoning, Text: "think"})
+	onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamText, Text: "Hel"})
+	onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamText, Text: "lo"})
+	return domain.AssistantChatResponse{Content: "Hello", Reasoning: "let me think"}, nil
 }
 
 // streamingCancelAssistant streams one delta then blocks until cancellation.
@@ -177,9 +193,9 @@ func (a streamingCancelAssistant) Converse(_ context.Context, _ domain.Assistant
 	return domain.AssistantChatResponse{Content: "blocking reply"}, nil
 }
 
-func (a streamingCancelAssistant) ConverseStream(ctx context.Context, _ domain.AssistantChatRequest, onDelta func(string)) (domain.AssistantChatResponse, error) {
+func (a streamingCancelAssistant) ConverseStream(ctx context.Context, _ domain.AssistantChatRequest, onDelta func(domain.AssistantStreamDelta)) (domain.AssistantChatResponse, error) {
 	close(a.started)
-	onDelta("par")
+	onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamText, Text: "par"})
 	<-ctx.Done()
 	return domain.AssistantChatResponse{}, ctx.Err()
 }
@@ -248,6 +264,72 @@ func TestStreamingAssistantForwardsTokenEvents(t *testing.T) {
 	messages, err := store.ListChatMessages(context.Background(), conversation.ID, 10)
 	if err != nil || len(messages) != 2 || messages[1].Content != "Hello" {
 		t.Fatalf("messages = %#v, %v, want the persisted assistant reply", messages, err)
+	}
+}
+
+func TestStreamingAssistantRoutesReasoningDeltas(t *testing.T) {
+	store, err := persistence.New(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	log := &payloadLog{}
+	service := NewService(store, nil, reasoningAssistant{}, log.sink)
+	service.Start(context.Background())
+	defer service.Stop()
+	conversation, err := service.CreateConversation(context.Background(), domain.ChatConversation{Mode: domain.ChatModeModel, Title: "Reason"})
+	if err != nil {
+		t.Fatalf("CreateConversation() error = %v", err)
+	}
+	run, err := service.Send(context.Background(), conversation.ID, "Think")
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	waitForRunStatus(t, store, run.ID, domain.RunCompleted)
+
+	// Reasoning deltas must reach the UI as kind-tagged chat.token events in
+	// provider order (reasoning before text), coalesced per kind so the kind
+	// sequence is exactly one reasoning run followed by one text run.
+	var kinds []string
+	var reasoning, text strings.Builder
+	for _, item := range log.events("chat.token") {
+		payload, ok := item.(chatTokenEvent)
+		if !ok {
+			t.Fatalf("chat.token payload = %#v, want chatTokenEvent", item)
+		}
+		if payload.ConversationID != conversation.ID || payload.Delta == "" {
+			t.Fatalf("chat.token payload = %#v, want the streamed conversation and a non-empty delta", payload)
+		}
+		kinds = append(kinds, payload.Kind)
+		switch payload.Kind {
+		case tokenKindReasoning:
+			reasoning.WriteString(payload.Delta)
+		case tokenKindText:
+			text.WriteString(payload.Delta)
+		default:
+			t.Fatalf("chat.token kind = %q, want a known kind", payload.Kind)
+		}
+	}
+	if _, ok := log.latest("chat.token.end"); !ok {
+		t.Fatalf("events = %#v, want chat.token.end closing the turn", log.names)
+	}
+	if got, want := strings.Join(kinds, ","), tokenKindReasoning+","+tokenKindText; got != want {
+		t.Fatalf("token kinds = %q, want %q", got, want)
+	}
+	if reasoning.String() != "let me think" {
+		t.Fatalf("reasoning deltas = %q, want the full reasoning trace", reasoning.String())
+	}
+	if text.String() != "Hello" {
+		t.Fatalf("text deltas = %q, want the full answer", text.String())
+	}
+
+	// The persisted transcript must carry the answer and its reasoning trace.
+	messages, err := store.ListChatMessages(context.Background(), conversation.ID, 10)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages = %#v, %v, want the persisted user and assistant rows", messages, err)
+	}
+	if messages[1].Content != "Hello" || messages[1].Reasoning != "let me think" {
+		t.Fatalf("assistant row = %#v, want content and reasoning persisted", messages[1])
 	}
 }
 
@@ -425,6 +507,14 @@ func (l *payloadLog) latest(event string) (any, bool) {
 		return nil, false
 	}
 	return items[len(items)-1], true
+}
+
+// events returns every recorded payload of one event in emission order so
+// token-kind routing can be asserted across the whole stream.
+func (l *payloadLog) events(name string) []any {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]any(nil), l.values[name]...)
 }
 
 func TestRenameToolEmitsLiveConversationUpdate(t *testing.T) {

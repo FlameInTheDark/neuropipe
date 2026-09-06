@@ -86,11 +86,11 @@ func asStreamOptions(options []aisdk.Option) []aisdk.StreamOption {
 }
 
 // streamGenerate performs one model turn through the ai-sdk streaming path,
-// forwarding every text delta to onDelta as it arrives. The returned result
-// carries the same fields GenerateText produces, so response mapping, usage
-// accounting, and unresolved tool-call handling stay identical between both
-// paths. onDelta may be nil when only the result is wanted.
-func (m *Manager) streamGenerate(ctx context.Context, provider domain.ProviderConfig, model string, call generationCall, onDelta func(delta string)) (*aisdk.GenerateTextResult, error) {
+// forwarding every text and reasoning delta to onDelta as it arrives. The
+// returned result carries the same fields GenerateText produces, so response
+// mapping, usage accounting, and unresolved tool-call handling stay identical
+// between both paths. onDelta may be nil when only the result is wanted.
+func (m *Manager) streamGenerate(ctx context.Context, provider domain.ProviderConfig, model string, call generationCall, onDelta func(delta domain.AssistantStreamDelta)) (*aisdk.GenerateTextResult, error) {
 	languageModel, err := m.languageModel(provider, model)
 	if err != nil {
 		return nil, err
@@ -103,11 +103,21 @@ func (m *Manager) streamGenerate(ctx context.Context, provider domain.ProviderCo
 	defer cancel()
 	result := aisdk.StreamText(requestContext, languageModel, asStreamOptions(options)...)
 	// Drain the stream synchronously like GenerateText does, forwarding text
-	// deltas on the way. The orchestration loop blocks once its part buffer
-	// fills, so the stream must always be consumed to completion.
+	// and reasoning deltas on the way. The orchestration loop blocks once its
+	// part buffer fills, so the stream must always be consumed to completion.
 	for part := range result.FullStream() {
-		if delta, ok := part.(aisdk.StreamTextDelta); ok && onDelta != nil && delta.Text != "" {
-			onDelta(delta.Text)
+		if onDelta == nil {
+			continue
+		}
+		switch delta := part.(type) {
+		case aisdk.StreamTextDelta:
+			if delta.Text != "" {
+				onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamText, Text: delta.Text})
+			}
+		case aisdk.StreamReasoningDelta:
+			if delta.Text != "" {
+				onDelta(domain.AssistantStreamDelta{Kind: domain.AssistantStreamReasoning, Text: delta.Text})
+			}
 		}
 	}
 	result.Wait()
@@ -122,6 +132,7 @@ func (m *Manager) streamGenerate(ctx context.Context, provider domain.ProviderCo
 	}
 	return &aisdk.GenerateTextResult{
 		Text:       result.Text(),
+		Reasoning:  result.Reasoning(),
 		ToolCalls:  result.ToolCalls(),
 		TotalUsage: result.TotalUsage(),
 	}, nil
@@ -303,6 +314,10 @@ func contextSizeFor(params domain.GenerationParameters) int {
 // tool-result parts keyed by their call ID. Any orphaned assistant tool calls
 // (from interrupted, stopped, or cancelled turns) are automatically paired with
 // a synthetic tool-error response so provider validation never crashes.
+//
+// ChatMessage.Reasoning is deliberately not converted: reasoning is
+// display-only and must never be replayed to the provider as assistant
+// content on follow-up turns.
 func modelMessages(messages []domain.ChatMessage) ([]aiprovider.Message, error) {
 	result := make([]aiprovider.Message, 0, len(messages))
 	unresolved := make(map[string]domain.ChatToolCall)
@@ -417,6 +432,7 @@ func aiToolSet(tools []domain.ChatToolDefinition) (aisdk.ToolSet, error) {
 func assistantResponse(result *aisdk.GenerateTextResult) (domain.AssistantChatResponse, error) {
 	response := domain.AssistantChatResponse{
 		Content:   strings.TrimSpace(result.Text),
+		Reasoning: reasoningFromResult(result.Reasoning),
 		ToolCalls: make([]domain.ChatToolCall, 0, len(result.ToolCalls)),
 		Usage:     usageFromResult(result.TotalUsage),
 	}
@@ -434,6 +450,19 @@ func assistantResponse(result *aisdk.GenerateTextResult) (domain.AssistantChatRe
 		response.ToolCalls = append(response.ToolCalls, domain.ChatToolCall{ID: id, Name: call.ToolName, Arguments: arguments})
 	}
 	return response, nil
+}
+
+// reasoningFromResult flattens the ai-sdk reasoning outputs of one turn into
+// a single display-only text block. File-shaped reasoning artifacts carry no
+// text and are skipped.
+func reasoningFromResult(outputs []aisdk.ReasoningOutput) string {
+	var builder strings.Builder
+	for _, output := range outputs {
+		if text, ok := output.(aisdk.ReasoningTextOutput); ok {
+			builder.WriteString(text.Text)
+		}
+	}
+	return strings.TrimSpace(builder.String())
 }
 
 // usageFromResult converts ai-sdk usage into the local usage record.

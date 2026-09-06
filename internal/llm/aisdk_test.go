@@ -5,8 +5,26 @@ import (
 	"strings"
 	"testing"
 
+	aisdk "github.com/grafana/ai-sdk"
+
 	"github.com/FlameInTheDark/neuropipe/internal/domain"
 )
+
+func TestReasoningFromResultFlattensTextOutputs(t *testing.T) {
+	// Reasoning outputs flatten into one display-only text block; file-shaped
+	// artifacts carry no text and are skipped.
+	outputs := []aisdk.ReasoningOutput{
+		aisdk.ReasoningTextOutput{Text: "2+2 "},
+		aisdk.ReasoningFileOutput{},
+		aisdk.ReasoningTextOutput{Text: "= 4"},
+	}
+	if got := reasoningFromResult(outputs); got != "2+2 = 4" {
+		t.Fatalf("reasoningFromResult() = %q, want the concatenated trace", got)
+	}
+	if got := reasoningFromResult(nil); got != "" {
+		t.Fatalf("reasoningFromResult(nil) = %q, want empty", got)
+	}
+}
 
 func TestChatCompletionsBaseURL(t *testing.T) {
 	tests := []struct {

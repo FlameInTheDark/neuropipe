@@ -896,6 +896,8 @@ export const fr: typeof en = {
     reasoning_low: "Raisonnement : faible",
     reasoning_medium: "Raisonnement : moyen",
     reasoning_high: "Raisonnement : élevé",
+    reasoningTitle: "Réflexion",
+    reasoningToggle: "Afficher ou masquer le raisonnement du modèle",
     saveFailed: "Impossible d'enregistrer les paramètres de la discussion",
     loadFailed: "Impossible de charger l'historique des discussions.",
     model: "Modèle",

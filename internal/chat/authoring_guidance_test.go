@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/FlameInTheDark/neuropipe/internal/catalog"

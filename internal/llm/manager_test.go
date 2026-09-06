@@ -359,25 +359,103 @@ func openAIDeltaChunks(prompt, completion int64) []string {
 	return chunks
 }
 
+// openAIReasoningDeltaChunks streams a reasoning_content trace before the
+// answer, like OpenAI-compatible servers (OpenRouter, llama.cpp, vLLM) that
+// expose a thinking model's reasoning as delta.reasoning_content.
+func openAIReasoningDeltaChunks() []string {
+	return []string{
+		`{"id":"c","model":"m","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`{"id":"c","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"2+2 "},"finish_reason":null}]}`,
+		`{"id":"c","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"= 4"},"finish_reason":null}]}`,
+		`{"id":"c","model":"m","choices":[{"index":0,"delta":{"content":"4"},"finish_reason":null}]}`,
+		`{"id":"c","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	}
+}
+
+// collectedDeltas joins streamed deltas per kind so tests can assert order.
+type collectedDeltas struct {
+	text      []string
+	reasoning []string
+}
+
+func (c *collectedDeltas) onDelta(delta domain.AssistantStreamDelta) {
+	if delta.Kind == domain.AssistantStreamReasoning {
+		c.reasoning = append(c.reasoning, delta.Text)
+		return
+	}
+	c.text = append(c.text, delta.Text)
+}
+
 func TestConverseStreamForwardsDeltasAndUsage(t *testing.T) {
 	server := httptest.NewServer(openAIStreamHandler(nil, openAIDeltaChunks(11, 13)...))
 	defer server.Close()
 	manager := NewManager(domain.Settings{DefaultProviderID: "compat", Providers: []domain.ProviderConfig{
 		{ID: "compat", Name: "Compatible", Kind: domain.ProviderOpenAICompatible, BaseURL: server.URL, Model: "m", Enabled: true},
 	}}, nil)
-	var deltas []string
-	response, err := manager.ConverseStream(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "hello"}}}, func(delta string) { deltas = append(deltas, delta) })
+	var deltas collectedDeltas
+	response, err := manager.ConverseStream(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "hello"}}}, deltas.onDelta)
 	if err != nil {
 		t.Fatalf("ConverseStream() error = %v", err)
 	}
-	if strings.Join(deltas, "") != "Hello" || len(deltas) != 2 {
-		t.Fatalf("deltas = %#v, want Hel and lo forwarded separately in order", deltas)
+	if strings.Join(deltas.text, "") != "Hello" || len(deltas.text) != 2 {
+		t.Fatalf("text deltas = %#v, want Hel and lo forwarded separately in order", deltas.text)
+	}
+	if len(deltas.reasoning) != 0 {
+		t.Fatalf("reasoning deltas = %#v, want none for a plain text answer", deltas.reasoning)
 	}
 	if response.Content != "Hello" {
 		t.Fatalf("content = %q, want Hello", response.Content)
 	}
 	if !response.Usage.TokensReported || response.Usage.PromptTokens != 11 || response.Usage.CompletionTokens != 13 {
 		t.Fatalf("usage = %#v, want input 11 / output 13 from the stream usage chunk", response.Usage)
+	}
+}
+
+func TestConverseStreamForwardsReasoningDeltas(t *testing.T) {
+	server := httptest.NewServer(openAIStreamHandler(nil, openAIReasoningDeltaChunks()...))
+	defer server.Close()
+	manager := NewManager(domain.Settings{DefaultProviderID: "compat", Providers: []domain.ProviderConfig{
+		{ID: "compat", Name: "Compatible", Kind: domain.ProviderOpenAICompatible, BaseURL: server.URL, Model: "m", Enabled: true},
+	}}, nil)
+	var deltas collectedDeltas
+	response, err := manager.ConverseStream(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "what is 2+2?"}}}, deltas.onDelta)
+	if err != nil {
+		t.Fatalf("ConverseStream() error = %v", err)
+	}
+	// The reasoning trace arrives first, split across two deltas, and the
+	// answer follows as its own delta.
+	if len(deltas.reasoning) != 2 || strings.Join(deltas.reasoning, "") != "2+2 = 4" {
+		t.Fatalf("reasoning deltas = %#v, want the trace forwarded separately in order", deltas.reasoning)
+	}
+	if len(deltas.text) != 1 || deltas.text[0] != "4" {
+		t.Fatalf("text deltas = %#v, want only the answer delta", deltas.text)
+	}
+	if response.Content != "4" {
+		t.Fatalf("content = %q, want 4", response.Content)
+	}
+	if response.Reasoning != "2+2 = 4" {
+		t.Fatalf("reasoning = %q, want the flattened trace on the response", response.Reasoning)
+	}
+}
+
+func TestConverseCapturesReasoning(t *testing.T) {
+	// The blocking Converse path must capture reasoning too: it rides the same
+	// streaming wire under the hood, and the reasoning_content trace arrives
+	// as reasoning parts on the aggregated result.
+	server := httptest.NewServer(openAIStreamHandler(nil, openAIReasoningDeltaChunks()...))
+	defer server.Close()
+	manager := NewManager(domain.Settings{DefaultProviderID: "compat", Providers: []domain.ProviderConfig{
+		{ID: "compat", Name: "Compatible", Kind: domain.ProviderOpenAICompatible, BaseURL: server.URL, Model: "m", Enabled: true},
+	}}, nil)
+	response, err := manager.Converse(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "what is 2+2?"}}})
+	if err != nil {
+		t.Fatalf("Converse() error = %v", err)
+	}
+	if response.Content != "4" {
+		t.Fatalf("content = %q, want 4", response.Content)
+	}
+	if response.Reasoning != "2+2 = 4" {
+		t.Fatalf("reasoning = %q, want the reasoning captured from the blocking turn", response.Reasoning)
 	}
 }
 
@@ -400,7 +478,7 @@ func TestConverseStreamReturnsUnresolvedToolCalls(t *testing.T) {
 	response, err := manager.ConverseStream(ctx, domain.AssistantChatRequest{
 		Messages: []domain.ChatMessage{{Role: "user", Content: "weather?"}},
 		Tools:    []domain.ChatToolDefinition{{Name: "weather", Description: "Get the forecast", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}, "required": []string{"city"}, "additionalProperties": false}}},
-	}, func(string) {})
+	}, func(domain.AssistantStreamDelta) {})
 	if err != nil {
 		t.Fatalf("ConverseStream() error = %v, want the unresolved tool call returned, not a hang", err)
 	}
@@ -418,21 +496,84 @@ func TestConverseStreamOllamaForwardsDeltas(t *testing.T) {
 	))
 	defer server.Close()
 	manager := NewManager(domain.Settings{DefaultProviderID: "local", Providers: []domain.ProviderConfig{{ID: "local", Name: "Ollama", Kind: domain.ProviderOllama, BaseURL: server.URL, Model: "qwen", Enabled: true}}}, nil)
-	var deltas []string
-	response, err := manager.ConverseStream(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "hello"}}}, func(delta string) { deltas = append(deltas, delta) })
+	var deltas collectedDeltas
+	response, err := manager.ConverseStream(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "hello"}}}, deltas.onDelta)
 	if err != nil {
 		t.Fatalf("ConverseStream() error = %v", err)
 	}
 	if captured["stream"] != true {
 		t.Fatalf("stream = %v, want the streaming native request", captured["stream"])
 	}
-	if strings.Join(deltas, "") != "Hello" || len(deltas) != 2 {
-		t.Fatalf("deltas = %#v, want Hel and lo forwarded separately in order", deltas)
+	if strings.Join(deltas.text, "") != "Hello" || len(deltas.text) != 2 {
+		t.Fatalf("text deltas = %#v, want Hel and lo forwarded separately in order", deltas.text)
 	}
 	if response.Content != "Hello" {
 		t.Fatalf("content = %q, want Hello", response.Content)
 	}
 	if !response.Usage.TokensReported || response.Usage.PromptTokens != 3 || response.Usage.CompletionTokens != 5 {
 		t.Fatalf("usage = %#v, want input 3 / output 5 from the terminal line", response.Usage)
+	}
+}
+
+func TestConverseStreamOllamaForwardsReasoningDeltas(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(ollamaStreamChatHandler(&captured,
+		`{"message":{"thinking":"2+2 "},"done":false}`,
+		`{"message":{"thinking":"= 4"},"done":false}`,
+		`{"message":{"content":"4"},"done":false}`,
+		`{"message":{"content":""},"done":true,"done_reason":"stop","prompt_eval_count":3,"eval_count":5}`,
+	))
+	defer server.Close()
+	manager := NewManager(domain.Settings{DefaultProviderID: "local", Providers: []domain.ProviderConfig{{ID: "local", Name: "Ollama", Kind: domain.ProviderOllama, BaseURL: server.URL, Model: "qwen", Enabled: true}}}, nil)
+	var deltas collectedDeltas
+	response, err := manager.ConverseStream(context.Background(), domain.AssistantChatRequest{Messages: []domain.ChatMessage{{Role: "user", Content: "what is 2+2?"}}}, deltas.onDelta)
+	if err != nil {
+		t.Fatalf("ConverseStream() error = %v", err)
+	}
+	if len(deltas.reasoning) != 2 || strings.Join(deltas.reasoning, "") != "2+2 = 4" {
+		t.Fatalf("reasoning deltas = %#v, want the thinking trace forwarded separately in order", deltas.reasoning)
+	}
+	if len(deltas.text) != 1 || deltas.text[0] != "4" {
+		t.Fatalf("text deltas = %#v, want only the answer delta", deltas.text)
+	}
+	if response.Content != "4" {
+		t.Fatalf("content = %q, want 4", response.Content)
+	}
+	if response.Reasoning != "2+2 = 4" {
+		t.Fatalf("reasoning = %q, want the flattened trace on the response", response.Reasoning)
+	}
+}
+
+func TestOllamaNoneReasoningDisablesThink(t *testing.T) {
+	// "none" must explicitly disable thinking on the native wire; the default
+	// keeps the request free of the think field so servers and models keep
+	// their own defaults.
+	lines := []string{
+		`{"message":{"content":"4"},"done":true,"done_reason":"stop","prompt_eval_count":1,"eval_count":1}`,
+	}
+	for _, test := range []struct {
+		reasoning   string
+		wantValue   any
+		wantPresent bool
+	}{
+		{reasoning: "none", wantValue: false, wantPresent: true},
+		{reasoning: "", wantPresent: false},
+		{reasoning: "medium", wantPresent: false},
+	} {
+		var captured map[string]any
+		server := httptest.NewServer(ollamaStreamChatHandler(&captured, lines...))
+		manager := NewManager(domain.Settings{DefaultProviderID: "local", Providers: []domain.ProviderConfig{{ID: "local", Name: "Ollama", Kind: domain.ProviderOllama, BaseURL: server.URL, Model: "qwen", Enabled: true}}}, nil)
+		_, err := manager.Converse(context.Background(), domain.AssistantChatRequest{
+			Messages:  []domain.ChatMessage{{Role: "user", Content: "hello"}},
+			Reasoning: test.reasoning,
+		})
+		if err != nil {
+			t.Fatalf("Converse() error = %v", err)
+		}
+		server.Close()
+		value, present := captured["think"]
+		if present != test.wantPresent || (present && value != test.wantValue) {
+			t.Fatalf("reasoning %q: think = %v (present=%v), want %v (present=%v)", test.reasoning, value, present, test.wantValue, test.wantPresent)
+		}
 	}
 }

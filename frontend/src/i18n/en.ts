@@ -902,6 +902,8 @@ export const en = {
     reasoning_low: "Reasoning: low",
     reasoning_medium: "Reasoning: medium",
     reasoning_high: "Reasoning: high",
+    reasoningTitle: "Thinking",
+    reasoningToggle: "Show or hide the model's reasoning",
     saveFailed: "Unable to save chat settings",
     loadFailed: "Unable to load chat history.",
     model: "Model",
